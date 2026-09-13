@@ -1759,8 +1759,95 @@ body {
     transform: scale(1.1);
 }
 
+/* 可拖拽/可排序 Tag 样式 */
+.tag-sortable-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    min-height: 38px;
+    padding: 4px;
+    border-radius: 8px;
+    transition: background-color 0.2s ease;
+}
 
+.tag-sortable-item {
+    cursor: grab;
+    touch-action: none;
+}
 
+.tag-sortable-item:active {
+    cursor: grabbing;
+}
+
+.tag-sortable-item .tag-index-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    font-size: 0.72rem;
+    font-weight: 700;
+    margin-right: 2px;
+}
+
+.tag-sortable-item .tag-drag-icon {
+    opacity: 0.7;
+    margin-right: -2px;
+}
+
+.tag-sortable-item.dragging {
+    opacity: 0.45;
+    transform: scale(0.96);
+}
+
+.tag-sortable-item.drag-over {
+    border-color: var(--accent-primary, #3b82f6);
+    box-shadow: 0 0 0 2px var(--accent-primary, #3b82f6);
+}
+
+/* 禁用/未启用状态的 Tag（灰色置底） */
+.tag-sortable-item.disabled {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    color: var(--text-tertiary, #64748b);
+    box-shadow: none;
+    opacity: 0.65;
+}
+
+.tag-sortable-item.disabled:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary, #94a3b8);
+    opacity: 0.9;
+}
+
+.tag-sortable-item.disabled .tag-index-badge {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-tertiary, #64748b);
+}
+
+.tag-sortable-item .tag-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 4px;
+    padding: 2px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.tag-sortable-item .tag-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.15);
+}
+
+.tag-sortable-item.disabled .tag-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
 
 /* =============== 日志查看 =============== */
 .logs-content {

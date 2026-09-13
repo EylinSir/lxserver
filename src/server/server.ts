@@ -14,6 +14,10 @@ import {
   SYNC_CLOSE_CODE,
 } from '@/constants'
 import { getUserSpace, releaseUserSpace, getUserName, getServerId, getUserDirname, getUserConfig, migrateUserData, renameUserSpace, finishRenameUserSpace } from '@/user'
+import { parseDislikeRules, splitSingers } from '@/modules/dislike/match'
+import { encodeAlbumRule } from '@/modules/dislike/utils'
+import { normalizeText } from '@/server/utils/songVersion'
+import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
 import { createMsg2call } from 'message2call'
 import { ElFinderConnector, getSystemRoot } from './elfinderConnector'
 import formidable from 'formidable'
@@ -30,6 +34,65 @@ import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import needle from 'needle'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
+
+/** 当前生效的 dislike 匹配选项，下发给前端保证前后端判定一致 */
+const dislikeMatchOptions = () => ({
+  crossSource: global.lx.config['subsonic.dislikeCrossSource'] === true,
+  duetMode: (global.lx.config['subsonic.dislikeDuetMode'] || 'any') as 'any' | 'all' | 'primary',
+  normalizeName: global.lx.config['subsonic.dislikeNormalizeName'] !== false,
+  requireSinger: global.lx.config['subsonic.dislikeRequireSinger'] !== false,
+})
+
+/** 把 dislike 规则集转成可 JSON 序列化的结构（Set/Map → Array，同时聚合 dislike/library 下的 albums 和 artists） */
+const serializeDislikeRules = (rules: string, username?: string) => {
+  const parsed = parseDislikeRules(rules)
+  if (username) {
+    try {
+      const uDir = getUserDirname(username)
+      const dLibDir = path.join(global.lx.userPath, uDir, 'dislike', 'library')
+      // Merge disliked albums from library/albums.json
+      const albumsFile = path.join(dLibDir, 'albums.json')
+      if (fs.existsSync(albumsFile)) {
+        const albumsArr = JSON.parse(fs.readFileSync(albumsFile, 'utf8'))
+        if (Array.isArray(albumsArr)) {
+          for (const x of albumsArr) {
+            const albumName = normalizeText(String(x.name || ''))
+            if (!albumName) continue
+            let sSet = parsed.albums.get(albumName)
+            if (!sSet) {
+              sSet = new Set<string>()
+              parsed.albums.set(albumName, sSet)
+            }
+            const singers = splitSingers(x.artistName)
+            for (const s of singers) sSet.add(s)
+          }
+        }
+      }
+      // Merge disliked artists from library/artists.json
+      const artistsFile = path.join(dLibDir, 'artists.json')
+      if (fs.existsSync(artistsFile)) {
+        const artistsArr = JSON.parse(fs.readFileSync(artistsFile, 'utf8'))
+        if (Array.isArray(artistsArr)) {
+          for (const x of artistsArr) {
+            const singerName = normalizeText(String(x.name || ''))
+            if (singerName) parsed.singerNames.add(singerName)
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('[Dislike] Error merging dislike library:', e.message)
+    }
+  }
+  return {
+    exact: Array.from(parsed.exact),
+    musicNames: Array.from(parsed.musicNames),
+    singerNames: Array.from(parsed.singerNames),
+    albums: Array.from(parsed.albums.entries()).map(([albumName, singers]) => ({
+      albumName,
+      singers: Array.from(singers),
+    })),
+  }
+}
 
 // ===== Player Session Store =====
 const playerSessions = new Map<string, { createdAt: number }>()
@@ -1316,7 +1379,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           cpus: os.cpus().length,
           cpuModel: os.cpus()[0]?.model || 'Unknown',
           cpuSpeed: os.cpus()[0]?.speed || 0,
-          isWebDAVConfigured: !!(global.lx.config['webdav.url'] && global.lx.config['webdav.url'].trim() !== ''),
+          isWebDAVConfigured: !!(global.lx.config['webdav.url'] && global.lx.config['webdav.url'].trim() !== '' && global.lx.config['webdav.enable']),
           sourcesCount: getLoadedApisCount ? getLoadedApisCount() : 0,
           nodeVersion: process.version,
           platform: `${os.type()} ${os.arch()}`,
@@ -1583,27 +1646,31 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         void userSpace.listManage.getListData().then(async data => {
           let albums = []
           let artists = []
+          let dislikeAlbums = []
+          let dislikeArtists = []
           try {
             const userDirname = getUserDirname(verifiedUser)
             const libraryPath = path.join(global.lx.userPath, userDirname, 'library')
             const albumsPath = path.join(libraryPath, 'albums.json')
             const artistsPath = path.join(libraryPath, 'artists.json')
-            
-            if (await fs.promises.stat(albumsPath).then(()=>true).catch(()=>false)) {
-              albums = JSON.parse(await fs.promises.readFile(albumsPath, 'utf8'))
-            }
-            if (await fs.promises.stat(artistsPath).then(()=>true).catch(()=>false)) {
-              artists = JSON.parse(await fs.promises.readFile(artistsPath, 'utf8'))
-            }
-          } catch(err) {
-             console.error(err)
+
+            const dislikeLibraryPath = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+            const dislikeAlbumsPath = path.join(dislikeLibraryPath, 'albums.json')
+            const dislikeArtistsPath = path.join(dislikeLibraryPath, 'artists.json')
+
+            if (await fs.promises.stat(albumsPath).then(() => true).catch(() => false)) albums = JSON.parse(await fs.promises.readFile(albumsPath, 'utf8'))
+            if (await fs.promises.stat(artistsPath).then(() => true).catch(() => false)) artists = JSON.parse(await fs.promises.readFile(artistsPath, 'utf8'))
+            if (await fs.promises.stat(dislikeAlbumsPath).then(() => true).catch(() => false)) dislikeAlbums = JSON.parse(await fs.promises.readFile(dislikeAlbumsPath, 'utf8'))
+            if (await fs.promises.stat(dislikeArtistsPath).then(() => true).catch(() => false)) dislikeArtists = JSON.parse(await fs.promises.readFile(dislikeArtistsPath, 'utf8'))
+          } catch (err) {
+            console.error(err)
           }
 
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate'
           })
-          res.end(JSON.stringify({ ...data, albums, artists }))
+          res.end(JSON.stringify({ ...data, albums, artists, dislikeAlbums, dislikeArtists }))
         }).catch(err => {
           res.writeHead(500)
           res.end(err.message)
@@ -2242,6 +2309,24 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             const added = parsed.filter((x: any) => !oldKeys.has(keyOf(x)))
             const removed = oldArr.filter((x: any) => !newKeys.has(keyOf(x)))
             fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8')
+
+            // [Mutual Exclusivity] Remove newly liked artists from the dislike list
+            const dislikeLibDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+            const dislikeFilePath = path.join(dislikeLibDir, 'artists.json')
+            if (added.length > 0 && fs.existsSync(dislikeFilePath)) {
+              try {
+                let dislikeArr: any[] = JSON.parse(fs.readFileSync(dislikeFilePath, 'utf8'))
+                if (Array.isArray(dislikeArr)) {
+                  const addedKeys = new Set(added.map(keyOf))
+                  const newDislikeArr = dislikeArr.filter(x => !addedKeys.has(keyOf(x)))
+                  if (newDislikeArr.length !== dislikeArr.length) {
+                    fs.writeFileSync(dislikeFilePath, JSON.stringify(newDislikeArr, null, 2), 'utf-8')
+                  }
+                }
+              } catch { /* ignore */ }
+            }
+
+
             try {
               const { syncNativeLibraryToSubsonic } = require('./subsonic')
               syncNativeLibraryToSubsonic(username, 'artists',
@@ -2311,12 +2396,175 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             const added = parsed.filter((x: any) => !oldKeys.has(keyOf(x)))
             const removed = oldArr.filter((x: any) => !newKeys.has(keyOf(x)))
             fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8')
+
+            // [Mutual Exclusivity] Remove newly liked albums from the dislike list
+            const dislikeLibDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+            const dislikeFilePath = path.join(dislikeLibDir, 'albums.json')
+            if (added.length > 0 && fs.existsSync(dislikeFilePath)) {
+              try {
+                let dislikeArr: any[] = JSON.parse(fs.readFileSync(dislikeFilePath, 'utf8'))
+                if (Array.isArray(dislikeArr)) {
+                  const addedKeys = new Set(added.map(keyOf))
+                  const newDislikeArr = dislikeArr.filter(x => !addedKeys.has(keyOf(x)))
+                  if (newDislikeArr.length !== dislikeArr.length) {
+                    fs.writeFileSync(dislikeFilePath, JSON.stringify(newDislikeArr, null, 2), 'utf-8')
+                  }
+                }
+              } catch { /* ignore */ }
+            }
+
             try {
               const { syncNativeLibraryToSubsonic } = require('./subsonic')
               syncNativeLibraryToSubsonic(username, 'albums',
                 added.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })),
                 removed.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })))
             } catch (e: any) { console.error('[Library] 反向同步 Subsonic 星标失败:', e) }
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true }))
+          } catch (e: any) { res.writeHead(400); res.end(e.message) }
+        })
+        return
+      }
+
+      // --- DISLIKE LIBRARY ENDPOINTS ---
+
+      // GET /api/user/dislike/library/artists
+      if (pathname === '/api/user/dislike/library/artists' && req.method === 'GET') {
+        const username = getLibUsername(req)
+        if (!username) { res.writeHead(401); res.end('Unauthorized'); return }
+        const userDirname = getUserDirname(username)
+        const libDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+        if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true })
+        const filePath = path.join(libDir, 'artists.json')
+        try {
+          if (!fs.existsSync(filePath)) {
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('[]'); return
+          }
+          let arr: any[] = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+          if (!Array.isArray(arr)) arr = []
+          res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(arr))
+        } catch (e: any) { res.writeHead(500); res.end(e.message) }
+        return
+      }
+
+      // POST /api/user/dislike/library/artists
+      if (pathname === '/api/user/dislike/library/artists' && req.method === 'POST') {
+        const username = getLibUsername(req)
+        if (!username) { res.writeHead(401); res.end('Unauthorized'); return }
+        void readBody(req).then(async (body) => {
+          try {
+            const parsed = JSON.parse(body)
+            if (!Array.isArray(parsed)) throw new Error('Expected an array')
+            const userDirname = getUserDirname(username)
+            const libDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+            if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true })
+            const filePath = path.join(libDir, 'artists.json')
+
+            // Add dislikeRule if missing
+            parsed.forEach((x: any) => {
+              if (!x.dislikeRule) x.dislikeRule = `@${String(x.name)}`
+            })
+
+            let oldArr: any[] = []
+            try { if (fs.existsSync(filePath)) oldArr = JSON.parse(fs.readFileSync(filePath, 'utf8')) } catch { /* ignore */ }
+            const keyOf = (x: any) => `${x.source}::${String(x.id)}`
+            const oldKeys = new Set(oldArr.map(keyOf))
+            const newKeys = new Set(parsed.map(keyOf))
+            const added = parsed.filter((x: any) => !oldKeys.has(keyOf(x)))
+            const removed = oldArr.filter((x: any) => !newKeys.has(keyOf(x)))
+
+            fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8')
+
+            // [Mutual Exclusivity] Remove newly disliked artists from the liked list
+            const likeLibDir = path.join(global.lx.userPath, userDirname, 'library')
+            const likeFilePath = path.join(likeLibDir, 'artists.json')
+            if (added.length > 0 && fs.existsSync(likeFilePath)) {
+              try {
+                let likeArr: any[] = JSON.parse(fs.readFileSync(likeFilePath, 'utf8'))
+                if (Array.isArray(likeArr)) {
+                  const addedKeys = new Set(added.map(keyOf))
+                  const newLikeArr = likeArr.filter(x => !addedKeys.has(keyOf(x)))
+                  if (newLikeArr.length !== likeArr.length) {
+                    fs.writeFileSync(likeFilePath, JSON.stringify(newLikeArr, null, 2), 'utf-8')
+                  }
+                }
+              } catch { /* ignore */ }
+            }
+
+            const { invalidateDislikeCache } = require('./utils/dislikeCache')
+            invalidateDislikeCache(username)
+
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true }))
+          } catch (e: any) { res.writeHead(400); res.end(e.message) }
+        })
+        return
+      }
+
+      // GET /api/user/dislike/library/albums
+      if (pathname === '/api/user/dislike/library/albums' && req.method === 'GET') {
+        const username = getLibUsername(req)
+        if (!username) { res.writeHead(401); res.end('Unauthorized'); return }
+        const userDirname = getUserDirname(username)
+        const libDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+        if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true })
+        const filePath = path.join(libDir, 'albums.json')
+        try {
+          if (!fs.existsSync(filePath)) {
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('[]'); return
+          }
+          let arr: any[] = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+          if (!Array.isArray(arr)) arr = []
+          res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(arr))
+        } catch (e: any) { res.writeHead(500); res.end(e.message) }
+        return
+      }
+
+      // POST /api/user/dislike/library/albums
+      if (pathname === '/api/user/dislike/library/albums' && req.method === 'POST') {
+        const username = getLibUsername(req)
+        if (!username) { res.writeHead(401); res.end('Unauthorized'); return }
+        void readBody(req).then(async (body) => {
+          try {
+            const parsed = JSON.parse(body)
+            if (!Array.isArray(parsed)) throw new Error('Expected an array')
+            const userDirname = getUserDirname(username)
+            const libDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+            if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true })
+            const filePath = path.join(libDir, 'albums.json')
+
+            // Add dislikeRule if missing
+            parsed.forEach((x: any) => {
+              if (!x.dislikeRule) x.dislikeRule = `!${String(x.name)}@${String(x.artistName || '')}`
+            })
+
+            let oldArr: any[] = []
+            try { if (fs.existsSync(filePath)) oldArr = JSON.parse(fs.readFileSync(filePath, 'utf8')) } catch { /* ignore */ }
+            const keyOf = (x: any) => `${x.source}::${String(x.id)}`
+            const oldKeys = new Set(oldArr.map(keyOf))
+            const newKeys = new Set(parsed.map(keyOf))
+            const added = parsed.filter((x: any) => !oldKeys.has(keyOf(x)))
+            const removed = oldArr.filter((x: any) => !newKeys.has(keyOf(x)))
+
+            fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8')
+
+            // [Mutual Exclusivity] Remove newly disliked albums from the liked list
+            const likeLibDir = path.join(global.lx.userPath, userDirname, 'library')
+            const likeFilePath = path.join(likeLibDir, 'albums.json')
+            if (added.length > 0 && fs.existsSync(likeFilePath)) {
+              try {
+                let likeArr: any[] = JSON.parse(fs.readFileSync(likeFilePath, 'utf8'))
+                if (Array.isArray(likeArr)) {
+                  const addedKeys = new Set(added.map(keyOf))
+                  const newLikeArr = likeArr.filter(x => !addedKeys.has(keyOf(x)))
+                  if (newLikeArr.length !== likeArr.length) {
+                    fs.writeFileSync(likeFilePath, JSON.stringify(newLikeArr, null, 2), 'utf-8')
+                  }
+                }
+              } catch { /* ignore */ }
+            }
+
+            const { invalidateDislikeCache } = require('./utils/dislikeCache')
+            invalidateDislikeCache(username)
+
             res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true }))
           } catch (e: any) { res.writeHead(400); res.end(e.message) }
         })
@@ -2717,7 +2965,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           try {
             const body = JSON.parse(await readBody(req))
             const explicitIsCustomDir = body?.isCustomDir === undefined ? undefined : Boolean(body?.isCustomDir)
-            
+
             if (explicitIsCustomDir) {
               const userCfg = getUserConfig(username)
               if (!userCfg?.allowOperateCustomMusicDir) {
@@ -4548,7 +4796,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 const rangeHeader = req.headers['range']
                 const isFullRange = rangeHeader === 'bytes=0-'
 
-                  if (isTaggingMode && (!rangeHeader || isFullRange)) {
+                if (isTaggingMode && (!rangeHeader || isFullRange)) {
                   const songName = urlObj.searchParams.get('name') || ''
                   const artist = urlObj.searchParams.get('singer') || ''
                   const album = urlObj.searchParams.get('album') || ''
@@ -5648,6 +5896,139 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // [新增] dislike 规则 API
+      // 与 Subsonic 评分联动共用同一份 lx-music 原生规则，保证各端一致：
+      //   GET  /api/music/dislike        返回已解析的规则集（歌曲 / 歌手 / 专辑）
+      //   POST /api/music/dislike/add     body: { type, name?, singer?, source?, albumId? }
+      //   POST /api/music/dislike/remove  body: 同上
+      if (pathname === '/api/music/dislike' && req.method === 'GET') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void getUserSpace(verified).dislikeManage.getDislikeRules().then(rules => {
+          const dm = getUserSpace(verified).dislikeManage
+          const rulesString = dm.dislikeDataManage.getDislikeRulesString()
+          const data: any = serializeDislikeRules(rulesString, verified)
+          data.dislikeList = dm.dislikeDataManage.dislikeRules.dislikeList || []
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+          res.end(JSON.stringify({ success: true, data, options: dislikeMatchOptions() }))
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      if ((pathname === '/api/music/dislike/add' || pathname === '/api/music/dislike/remove') && req.method === 'POST') {
+        void readBody(req).then(async body => {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          try {
+            const isAdd = pathname === '/api/music/dislike/add'
+            const payload = JSON.parse(body || '{}')
+            const type = String(payload.type || 'song')
+            const name = String(payload.name || '')
+            const singer = String(payload.singer || '')
+            const source = String(payload.source || '')
+            const id = String(payload.id || '')
+            const albumId = String(payload.albumId || '')
+            const pic = String(payload.pic || '')
+            const interval = String(payload.interval || '')
+            const meta = payload.meta || {}
+
+            const dm = getUserSpace(verified).dislikeManage
+
+            let removeKeys: Set<string> = new Set()
+            if (type === 'album') {
+              const albumName = String(payload.albumName || '')
+              if (!albumName) {
+                res.writeHead(400, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Missing albumName' }))
+                return
+              }
+              const singers = splitSingers(singer)
+              if (isAdd) await dm.dislikeDataManage.addDislikeAlbums(singers.map(s => ({ albumName, singer: s })))
+              else for (const s of singers) {
+                removeKeys.add(encodeAlbumRule(normalizeText(albumName), s))
+                removeKeys.add(normalizeText(encodeAlbumRule(albumName, s)))
+              }
+            } else if (type === 'singer') {
+              if (!singer) {
+                res.writeHead(400, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Missing singer' }))
+                return
+              }
+              if (isAdd) await dm.dislikeDataManage.addDislikeInfo([{ name: '', singer, dislikeRule: '' }])
+              else removeKeys.add(`@${normalizeText(singer)}`)
+            } else {
+              if (!name) {
+                res.writeHead(400, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Missing name' }))
+                return
+              }
+              if (isAdd) {
+                const { type, ...songData } = payload
+                songData.dislikeRule = ''
+                await dm.dislikeDataManage.addDislikeInfo([songData])
+              } else {
+                if (singer) {
+                  removeKeys.add(`${name}@${singer}`.toLowerCase())
+                  removeKeys.add(`${normalizeText(name)}@${normalizeText(singer)}`.toLowerCase())
+                }
+                removeKeys.add(name.toLowerCase())
+                removeKeys.add(normalizeText(name).toLowerCase())
+              }
+            }
+
+            const dislikeRatingThreshold = global.lx.config['subsonic.dislikeRating'] ?? 1
+            if (global.lx.config['subsonic.linkDislikeToRating'] && dislikeRatingThreshold > 0 && id && source) {
+              const subId = id.startsWith(`${source}_`) ? id : `${source}_${id}`
+              try {
+                const { syncDislikeToRating } = require('./subsonic')
+                await syncDislikeToRating(verified, subId, isAdd ? 1 : 0)
+              } catch (e) {
+                console.error('[Dislike API] 评分回写失败:', e)
+              }
+            }
+
+            if (!isAdd && removeKeys.size > 0) {
+              const rulesString = dm.dislikeDataManage.getDislikeRulesString()
+              const lines = rulesString.split('\n').filter((l: string) => l.trim())
+              const remain = lines.filter((l: string) => {
+                const trimmed = l.trim().toLowerCase()
+                if (removeKeys.has(trimmed)) return false
+                // Also check without spaces or with alias
+                return true
+              })
+              if (remain.length !== lines.length) {
+                await dm.dislikeDataManage.overwirteDislikeInfo(remain.join('\n'))
+              }
+            }
+
+            await dm.createSnapshot()
+            invalidateDislikeCache(verified)
+            const rules = await dm.getDislikeRules()
+            const finalRulesString = dm.dislikeDataManage.getDislikeRulesString()
+            const data: any = serializeDislikeRules(finalRulesString, verified)
+            data.dislikeList = dm.dislikeDataManage.dislikeRules.dislikeList || []
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+            res.end(JSON.stringify({ success: true, data, options: dislikeMatchOptions() }))
+          } catch (err: any) {
+            console.error('[Dislike API] Error:', err?.message)
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: err.message }))
+          }
+        })
+        return
+      }
+
       // [新增] 封面 API (备用)
 
       // [新增] 自定义源管理 API
@@ -5933,9 +6314,24 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
             'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'] ?? false,
             'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'] ?? 'tx',
+            'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'] ?? 1,
+            'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'] ?? false,
+            'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'] ?? false,
+            'subsonic.hideDisliked': global.lx.config['subsonic.hideDisliked'] ?? true,
+            'subsonic.dislikeCrossSource': global.lx.config['subsonic.dislikeCrossSource'] ?? false,
+            'subsonic.dislikeNoRecommend': global.lx.config['subsonic.dislikeNoRecommend'] ?? true,
+            'subsonic.dislikeDuetMode': global.lx.config['subsonic.dislikeDuetMode'] ?? 'any',
+            'subsonic.dislikeNormalizeName': global.lx.config['subsonic.dislikeNormalizeName'] ?? true,
+            'subsonic.dislikeRequireSinger': global.lx.config['subsonic.dislikeRequireSinger'] ?? true,
             'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'] ?? true,
             'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'] ?? false,
             'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'] ?? true,
+            'subsonic.quality.enabled': global.lx.config['subsonic.quality.enabled'] ?? true,
+            'subsonic.quality.priority': global.lx.config['subsonic.quality.priority'] ?? 'flac,320k,128k',
+            'subsonic.quality.clientCapMode': global.lx.config['subsonic.quality.clientCapMode'] ?? 'soft',
+            'subsonic.source.priority': global.lx.config['subsonic.source.priority'] ?? 'kw,tx,wy,mg,kg',
+            'subsonic.source.crossPlatform': global.lx.config['subsonic.source.crossPlatform'] ?? true,
+            'subsonic.source.autoSwitchCustom': global.lx.config['subsonic.source.autoSwitchCustom'] ?? true,
             'singer.sourcePriority': (global.lx.config['singer.sourcePriority'] || ['tx', 'wy']).join(','),
             'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'] ?? 20,
             'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
@@ -6052,9 +6448,28 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 const s = String(newConfig['subsonic.leaderboardSource']).trim().toLowerCase()
                 if (['tx', 'wy', 'kg', 'kw', 'mg'].includes(s)) global.lx.config['subsonic.leaderboardSource'] = s
               }
+              if (newConfig['subsonic.dislikeRating'] !== undefined) global.lx.config['subsonic.dislikeRating'] = Number(newConfig['subsonic.dislikeRating'])
+              if (newConfig['subsonic.hideDisliked'] !== undefined) global.lx.config['subsonic.hideDisliked'] = !!newConfig['subsonic.hideDisliked']
+              if (newConfig['subsonic.dislikeCrossSource'] !== undefined) global.lx.config['subsonic.dislikeCrossSource'] = !!newConfig['subsonic.dislikeCrossSource']
+              if (newConfig['subsonic.dislikeNoRecommend'] !== undefined) global.lx.config['subsonic.dislikeNoRecommend'] = !!newConfig['subsonic.dislikeNoRecommend']
+              if (newConfig['subsonic.dislikeDuetMode'] !== undefined) {
+                const dm = String(newConfig['subsonic.dislikeDuetMode']).trim().toLowerCase()
+                if (['any', 'all', 'primary'].includes(dm)) global.lx.config['subsonic.dislikeDuetMode'] = dm as any
+              }
+              if (newConfig['subsonic.dislikeNormalizeName'] !== undefined) global.lx.config['subsonic.dislikeNormalizeName'] = !!newConfig['subsonic.dislikeNormalizeName']
+              if (newConfig['subsonic.dislikeRequireSinger'] !== undefined) global.lx.config['subsonic.dislikeRequireSinger'] = !!newConfig['subsonic.dislikeRequireSinger']
+              if (newConfig['subsonic.linkRatingToDislike'] !== undefined) global.lx.config['subsonic.linkRatingToDislike'] = !!newConfig['subsonic.linkRatingToDislike']
+              if (newConfig['subsonic.linkDislikeToRating'] !== undefined) global.lx.config['subsonic.linkDislikeToRating'] = !!newConfig['subsonic.linkDislikeToRating']
+              if (newConfig['subsonic.recommendPoolSize'] !== undefined) global.lx.config['subsonic.recommendPoolSize'] = Number(newConfig['subsonic.recommendPoolSize'])
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
+              if (newConfig['subsonic.quality.enabled'] !== undefined) global.lx.config['subsonic.quality.enabled'] = !!newConfig['subsonic.quality.enabled']
+              if (newConfig['subsonic.quality.priority'] !== undefined) global.lx.config['subsonic.quality.priority'] = String(newConfig['subsonic.quality.priority'])
+              if (newConfig['subsonic.quality.clientCapMode'] !== undefined && ['hard', 'soft'].includes(newConfig['subsonic.quality.clientCapMode'])) global.lx.config['subsonic.quality.clientCapMode'] = newConfig['subsonic.quality.clientCapMode']
+              if (newConfig['subsonic.source.priority'] !== undefined) global.lx.config['subsonic.source.priority'] = String(newConfig['subsonic.source.priority'])
+              if (newConfig['subsonic.source.crossPlatform'] !== undefined) global.lx.config['subsonic.source.crossPlatform'] = !!newConfig['subsonic.source.crossPlatform']
+              if (newConfig['subsonic.source.autoSwitchCustom'] !== undefined) global.lx.config['subsonic.source.autoSwitchCustom'] = !!newConfig['subsonic.source.autoSwitchCustom']
               if (newConfig['singer.sourcePriority'] !== undefined) {
                 const priority = String(newConfig['singer.sourcePriority']).split(',').filter(s => s === 'tx' || s === 'wy') as Array<'tx' | 'wy'>
                 if (priority.length > 0) global.lx.config['singer.sourcePriority'] = priority
@@ -6125,9 +6540,25 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'],
                 'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'],
                 'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'],
+                'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'],
+                'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'],
+                'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'],
+                'subsonic.hideDisliked': global.lx.config['subsonic.hideDisliked'],
+                'subsonic.dislikeCrossSource': global.lx.config['subsonic.dislikeCrossSource'],
+                'subsonic.dislikeNoRecommend': global.lx.config['subsonic.dislikeNoRecommend'],
+                'subsonic.dislikeDuetMode': global.lx.config['subsonic.dislikeDuetMode'],
+                'subsonic.dislikeNormalizeName': global.lx.config['subsonic.dislikeNormalizeName'],
+                'subsonic.dislikeRequireSinger': global.lx.config['subsonic.dislikeRequireSinger'],
+                'subsonic.recommendPoolSize': global.lx.config['subsonic.recommendPoolSize'],
                 'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'],
                 'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'],
                 'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'],
+                'subsonic.quality.enabled': global.lx.config['subsonic.quality.enabled'],
+                'subsonic.quality.priority': global.lx.config['subsonic.quality.priority'],
+                'subsonic.quality.clientCapMode': global.lx.config['subsonic.quality.clientCapMode'],
+                'subsonic.source.priority': global.lx.config['subsonic.source.priority'],
+                'subsonic.source.crossPlatform': global.lx.config['subsonic.source.crossPlatform'],
+                'subsonic.source.autoSwitchCustom': global.lx.config['subsonic.source.autoSwitchCustom'],
                 'singer.sourcePriority': global.lx.config['singer.sourcePriority'],
                 'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'],
                 'cache.namingPattern': global.lx.config['cache.namingPattern'],
@@ -6471,7 +6902,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           let payload: any = {}
           try {
             payload = JSON.parse(body || '{}')
-          } catch (e) {}
+          } catch (e) { }
 
           const mode = payload.mode || 'auto'
           const targetFilename = payload.targetFilename
@@ -7284,11 +7715,13 @@ export const startServer = async (port: number, ip: string) => {
     }
   })
 
-  await handleStartServer(port, ip).then(() => {
+  await handleStartServer(port, ip).then(async () => {
     // console.log('sync server started')
     status.status = true
     status.message = ''
     status.address = ip == '0.0.0.0' ? getAddress() : [ip]
+
+
 
     // void generateCode()
     // codeTools.start()

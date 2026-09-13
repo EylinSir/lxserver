@@ -43,6 +43,7 @@ window.SongListManager = (function () {
 
         renderSortTabs();
         await loadTags();
+        if (window.DislikeManager) window.DislikeManager.load();
         loadList();
 
         // Bind events that might not be in HTML attributes
@@ -456,11 +457,14 @@ window.SongListManager = (function () {
             const isMatched = window.ListSearch.isMatched(index);
             const isCurrentMatch = window.ListSearch.isCurrentMatch(index);
 
+            const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(song));
+
             // Highlight Logic: 
             // - Current Match: Strong border and subtle background
             // - Matched: Subtle background
             // - Selected: Theme background (will be defined in CSS)
             let rowClass = 'grid grid-cols-12 gap-4 p-3 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer ';
+            if (isDisliked) rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
             if (isCurrentMatch) rowClass += 'search-current ';
             else if (isMatched) rowClass += 'search-match ';
             if (isSelected) rowClass += 'row-selected ring-1 ring-emerald-500/30 ';
@@ -528,6 +532,11 @@ window.SongListManager = (function () {
                             title="添加到歌单"
                             onclick="event.stopPropagation(); window.SongListManager.addSongToPlaylist(${index})">
                         <i class="fas fa-plus w-3.5 h-3.5"></i>
+                    </button>
+                    <button class="p-0.5 sm:p-1.5 hover:bg-red-50 rounded-lg ${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? 'text-red-500' : 'text-gray-400'} transition-colors"
+                            title="${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? '取消不喜欢' : '不喜欢'}"
+                            onclick="event.stopPropagation(); window.SongListManager.dislikeSong(${index})">
+                        <i class="fas fa-thumbs-down w-3.5 h-3.5"></i>
                     </button>
                 </div>
             </div>
@@ -618,6 +627,31 @@ window.SongListManager = (function () {
                 ...song,
                 source: song.source || detailState.source
             });
+        },
+        dislikeSong: async function (index) {
+            const song = detailState.list[index];
+            if (!song) return;
+            const songObj = {
+                ...song,
+                source: song.source || detailState.source
+            };
+            if (typeof toggleDislikeSong === 'function') {
+                await toggleDislikeSong(songObj);
+                renderDetail();
+            } else if (window.DislikeManager) {
+                try {
+                    const nowDisliked = await window.DislikeManager.toggleSong(songObj);
+                    renderDetail();
+                    if (typeof window.showToast === 'function') {
+                        window.showToast('success', nowDisliked ? '已加入不喜欢' : '已移出不喜欢');
+                    }
+                } catch (e) {
+                    console.error('[SongList] dislike failed:', e);
+                    if (typeof window.showToast === 'function') {
+                        window.showToast('error', e.message || '操作失败');
+                    }
+                }
+            }
         },
         playAll: function () {
             if (detailState.list.length === 0) return;

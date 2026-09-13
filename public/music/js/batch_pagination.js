@@ -157,33 +157,76 @@ function updateBatchToolbar() {
             deleteBtn.classList.add('hidden');
         } else {
             deleteBtn.classList.remove('hidden');
+            const isDislike = typeof getCurrentActiveListId === 'function' && getCurrentActiveListId() === 'dislike_songs';
+            deleteBtn.innerHTML = isDislike ? '<i class="fas fa-trash md:mr-1"></i><span class="hidden md:inline">批量取消</span>' : '<i class="fas fa-trash md:mr-1"></i><span class="hidden md:inline">批量删除</span>';
+            deleteBtn.title = isDislike ? '批量取消' : '批量删除';
         }
     }
 }
 
 async function batchDeleteFromList() {
+    const activeListId = typeof getCurrentActiveListId === 'function' ? getCurrentActiveListId() : null;
+    const isDislike = activeListId === 'dislike_songs';
+
     if (window.selectedItems.size === 0) {
-        showError('请先选择要删除的歌曲');
+        showError(isDislike ? '请先选择要取消不喜欢的歌曲' : '请先选择要删除的歌曲');
         return;
     }
 
-    if (!(await showSelect('批量删除', `确定要删除选中的 ${window.selectedItems.size} 首歌曲吗?`, { danger: true }))) {
+    if (!(await showSelect(isDislike ? '批量取消' : '批量删除', `确定要${isDislike ? '取消不喜欢' : '删除'}选中的 ${window.selectedItems.size} 首歌曲吗?`, { danger: true }))) {
         return;
     }
 
     // 公开列表删除需要管理员权限
     if (typeof requireAdminForOpenWrite === 'function') {
-        if (!(await requireAdminForOpenWrite('删除公开列表中的歌曲'))) return;
+        if (!(await requireAdminForOpenWrite(isDislike ? '删除公开不喜欢列表中的歌曲' : '删除公开列表中的歌曲'))) return;
     }
 
-    // Get current list context
-    const activeListId = getCurrentActiveListId();
     if (!activeListId || !currentListData) {
         showError('无法确定当前列表');
         return;
     }
 
     const idsToDelete = Array.from(window.selectedItems);
+
+    if (activeListId === 'dislike_songs') {
+        if (window.DislikeManager) {
+            // [Fix] 先把要删除的歌曲对象收集好，避免循环中列表变动导致索引错乱
+            const songsToRemove = Array.from(window.selectedSongObjects.values())
+                .filter(s => idsToDelete.includes(String(s.id)));
+            // 如果 selectedSongObjects 里没找到，兜底从 viewingPlaylist 中按 ID 查找
+            if (songsToRemove.length === 0 && window.viewingPlaylist) {
+                const idSet = new Set(idsToDelete);
+                window.viewingPlaylist.forEach(s => {
+                    if (idSet.has(String(s.id))) songsToRemove.push(s);
+                });
+            }
+            let successCount = 0;
+            for (const song of songsToRemove) {
+                try {
+                    await window.DislikeManager.removeSong(song);
+                    successCount++;
+                } catch (e) {
+                    console.error('[Batch Dislike Remove] Failed for:', song.name, e);
+                }
+            }
+            // [Fix] 一次性刷新 UI，而不是每首歌都触发重新渲染
+            window.viewingPlaylist = window.DislikeManager.state.dislikeList || [];
+            if (typeof renderResults === 'function') {
+                renderResults(window.viewingPlaylist);
+            }
+            if (typeof refreshDislikeSidebarCount === 'function') {
+                refreshDislikeSidebarCount();
+            }
+            if (typeof window.showToast === 'function' && successCount > 0) {
+                window.showToast('success', `已批量取消 ${successCount} 首歌曲的不喜欢`);
+            }
+            if (typeof exitBatchMode === 'function') {
+                exitBatchMode();
+            }
+        }
+        return;
+    }
 
     if (window.SyncManager.mode === 'local') {
         // Token authentication is sufficient; a saved plaintext password is not required.
