@@ -837,47 +837,53 @@
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>
-                                <div class="config-divider"></div>
-                                <div class="config-field">
-                                    <label class="config-label">WebDAV 服务器地址</label>
-                                    <input type="text" name="webdav.url" class="form-input config-input"
-                                        placeholder="https://your-webdav-server.com/remote.php/webdav" />
-                                </div>
-                                <div class="config-field-row">
+                                <div id="webdav-options" style="display: none;">
+                                    <div class="config-divider"></div>
                                     <div class="config-field">
-                                        <label class="config-label">用户名</label>
-                                        <input type="text" name="webdav.username" class="form-input config-input" />
+                                        <label class="config-label">WebDAV 服务器地址</label>
+                                        <input type="text" name="webdav.url" class="form-input config-input"
+                                            placeholder="https://your-webdav-server.com/remote.php/webdav" />
+                                    </div>
+                                    <div class="config-field-row">
+                                        <div class="config-field">
+                                            <label class="config-label">用户名</label>
+                                            <input type="text" name="webdav.username" class="form-input config-input" />
+                                        </div>
+                                        <div class="config-field">
+                                            <label class="config-label">密码</label>
+                                            <input type="password" name="webdav.password" class="form-input config-input" />
+                                        </div>
+                                    </div>
+                                    <div class="config-field-row">
+                                        <div class="config-field">
+                                            <label class="config-label">增量同步远端路径</label>
+                                            <input type="text" name="webdav.syncPath" class="form-input config-input"
+                                                placeholder="/lx-sync" />
+                                            <small class="config-hint">默认 /lx-sync</small>
+                                        </div>
+                                        <div class="config-field">
+                                            <label class="config-label">全量备份远端路径</label>
+                                            <input type="text" name="webdav.backupPath" class="form-input config-input"
+                                                placeholder="/lx-sync-backups" />
+                                            <small class="config-hint">默认 /lx-sync-backups</small>
+                                        </div>
                                     </div>
                                     <div class="config-field">
-                                        <label class="config-label">密码</label>
-                                        <input type="password" name="webdav.password" class="form-input config-input" />
-                                    </div>
-                                </div>
-                                <div class="config-field-row">
-                                    <div class="config-field">
-                                        <label class="config-label">增量同步远端路径</label>
-                                        <input type="text" name="webdav.syncPath" class="form-input config-input"
-                                            placeholder="/lx-sync" />
-                                        <small class="config-hint">默认 /lx-sync</small>
+                                        <label class="config-label">增量同步间隔（分钟）</label>
+                                        <input type="number" name="sync.interval" class="form-input config-input" value="60"
+                                            min="1" />
+                                        <small class="config-hint">用于定时检测并同步增量变更文件</small>
                                     </div>
                                     <div class="config-field">
-                                        <label class="config-label">全量备份远端路径</label>
-                                        <input type="text" name="webdav.backupPath" class="form-input config-input"
-                                            placeholder="/lx-sync-backups" />
-                                        <small class="config-hint">默认 /lx-sync-backups</small>
+                                        <label class="config-label">全量备份间隔（小时）</label>
+                                        <input type="number" name="sync.backupInterval" class="form-input config-input"
+                                            value="24" min="1" />
+                                        <small class="config-hint">用于定时自动创建 ZIP 全量备份包并上传至云端</small>
                                     </div>
                                 </div>
-                                <div class="config-field">
-                                    <label class="config-label">增量同步间隔（分钟）</label>
-                                    <input type="number" name="sync.interval" class="form-input config-input" value="60"
-                                        min="1" />
-                                    <small class="config-hint">用于定时检测并同步增量变更文件</small>
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label">全量备份间隔（小时）</label>
-                                    <input type="number" name="sync.backupInterval" class="form-input config-input"
-                                        value="24" min="1" />
-                                    <small class="config-hint">用于定时自动创建 ZIP 全量备份包并上传至云端</small>
+                                <div id="webdav-disabled-hint" style="display: none;">
+                                    <div class="config-divider"></div>
+                                    <p style="color: var(--text-secondary); text-align: center; padding: 1rem 0;">请先开启 WebDAV 同步服务以配置详细参数</p>
                                 </div>
                             </div>
                         </div>
@@ -1412,8 +1418,9 @@
                                 </div>
                                 <div class="config-field">
                                     <label class="config-label">音质优先级（高→低）</label>
-                                    <input type="text" name="subsonic.quality.priority" class="form-input config-input" placeholder="flac,320k,128k" />
-                                    <small class="config-hint">逗号分隔，按此顺序主动优选</small>
+                                    <input type="hidden" name="subsonic.quality.priority" value="flac,320k,128k" />
+                                    <div class="tag-sortable-group" id="tag-group-quality-priority"></div>
+                                    <small class="config-hint">拖拽可调整优先顺序；点击 ✕ 可停用/置底变灰（再次点击即可重新启用）</small>
                                 </div>
                                 <div class="config-field">
                                     <label class="config-label">客户端 maxBitrate 上界模式</label>
@@ -1425,8 +1432,9 @@
                                 </div>
                                 <div class="config-field">
                                     <label class="config-label">跨平台源优选顺序</label>
-                                    <input type="text" name="subsonic.source.priority" class="form-input config-input" placeholder="kw,tx,wy,mg,kg" />
-                                    <small class="config-hint">逗号分隔，客户端所选源始终优先</small>
+                                    <input type="hidden" name="subsonic.source.priority" value="kw,tx,wy,mg,kg" />
+                                    <div class="tag-sortable-group" id="tag-group-source-priority"></div>
+                                    <small class="config-hint">拖拽可调整优先顺序；点击 ✕ 可停用/置底变灰（客户端所选源始终最优先）</small>
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
@@ -1558,12 +1566,14 @@
                                     <line x1="9" y1="14" x2="15" y2="14" />
                                 </svg>
                             </div>
-                            <h3>云端同步未开启</h3>
+                            <h3>请先开启 WebDAV 服务</h3>
                             <p>配置 WebDAV 后，即可随时在手机、电脑等多端同步歌单配置，并支持定时自动全量备份，数据安全无忧。</p>
-                            <button class="btn-primary glow-btn" onclick="app.jumpToWebDAVConfig()"
-                                style="margin-top: 1.25rem; padding: 0.75rem 2.25rem;">
-                                立即配置 WebDAV
-                            </button>
+                            <div style="display: flex; justify-content: center; width: 100%;">
+                                <button class="btn-primary glow-btn" onclick="app.jumpToWebDAVConfig()"
+                                    style="margin: 1.25rem auto 0; padding: 0.75rem 2.25rem;">
+                                    立即配置 WebDAV
+                                </button>
+                            </div>
                         </div>
 
                         <!-- 云端操作区 -->

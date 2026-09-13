@@ -32,7 +32,22 @@ declare namespace LX {
       singer: string
     }
 
-    type DislikeRules = string
+    interface DislikeSongInfo {
+      id?: string
+      name: string
+      singer: string
+      source?: string
+      pic?: string
+      interval?: string
+      meta?: any
+      dislikeRule?: string
+    }
+
+    interface DislikeListData {
+      dislikeList: DislikeSongInfo[]
+    }
+
+    type DislikeRules = DislikeListData
 
     interface DislikeInfo {
       // musicIds: Set<string>
@@ -41,7 +56,7 @@ declare namespace LX {
       singerNames: Set<string>
       // albumKeys: Set<string>
       // list: LX.Dislike.ListItem[]
-      rules: DislikeRules
+      rules: string // The raw string representation for matching
     }
   }
 }

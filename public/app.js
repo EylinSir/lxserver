@@ -162,6 +162,9 @@ class App {
         document.querySelector('input[name="subsonic.publicLeaderboards"]')?.addEventListener('change', () => {
             this.toggleSubsonicLeaderboardVisibility();
         });
+        document.querySelector('input[name="webdav.enable"]')?.addEventListener('change', () => {
+            this.toggleWebdavVisibility();
+        });
         this.initTagSelectors();
 
         // 日志查看
@@ -2412,6 +2415,7 @@ class App {
             if (form.elements['webdav.enable']) {
                 form.elements['webdav.enable'].checked = config['webdav.enable'] === true;
             }
+            this.toggleWebdavVisibility();
             if (form.elements['webdav.url']) {
                 form.elements['webdav.url'].value = config['webdav.url'] || '';
             }
@@ -2521,13 +2525,17 @@ class App {
                 form.elements['subsonic.quality.enabled'].checked = config['subsonic.quality.enabled'] !== false;
             }
             if (form.elements['subsonic.quality.priority']) {
-                form.elements['subsonic.quality.priority'].value = config['subsonic.quality.priority'] || 'flac,320k,128k';
+                const qVal = config['subsonic.quality.priority'] || 'flac,320k,128k';
+                form.elements['subsonic.quality.priority'].value = qVal;
+                this.updateQualityPriorityTagUI(qVal);
             }
             if (form.elements['subsonic.quality.clientCapMode']) {
                 form.elements['subsonic.quality.clientCapMode'].value = config['subsonic.quality.clientCapMode'] || 'soft';
             }
             if (form.elements['subsonic.source.priority']) {
-                form.elements['subsonic.source.priority'].value = config['subsonic.source.priority'] || 'kw,tx,wy,mg,kg';
+                const sVal = config['subsonic.source.priority'] || 'kw,tx,wy,mg,kg';
+                form.elements['subsonic.source.priority'].value = sVal;
+                this.updateSourcePriorityTagUI(sVal);
             }
             if (form.elements['subsonic.source.crossPlatform']) {
                 form.elements['subsonic.source.crossPlatform'].checked = config['subsonic.source.crossPlatform'] !== false;
@@ -2546,6 +2554,21 @@ class App {
             }
         } catch (err) {
             console.error('Failed to load config:', err);
+        }
+    }
+
+    toggleWebdavVisibility() {
+        const webdavCb = document.querySelector('input[name="webdav.enable"]');
+        const childWrapper = document.getElementById('webdav-options');
+        const hintWrapper = document.getElementById('webdav-disabled-hint');
+        if (webdavCb && childWrapper && hintWrapper) {
+            if (webdavCb.checked) {
+                childWrapper.style.display = 'block';
+                hintWrapper.style.display = 'none';
+            } else {
+                childWrapper.style.display = 'none';
+                hintWrapper.style.display = 'block';
+            }
         }
     }
 
@@ -2595,6 +2618,10 @@ class App {
                 });
             });
         }
+
+        // 初始化音质及源优选拖拽排序标签
+        this.updateQualityPriorityTagUI('flac,320k,128k');
+        this.updateSourcePriorityTagUI('kw,tx,wy,mg,kg');
     }
 
     updateLeaderboardSourceTagUI(val) {
@@ -2621,6 +2648,207 @@ class App {
                 item.classList.remove('active');
             }
         });
+    }
+
+    renderSortableTagGroup(containerId, hiddenInputName, orderList, labelMap, allItems) {
+        const container = document.getElementById(containerId);
+        const hiddenInput = document.querySelector(`input[name="${hiddenInputName}"]`);
+        if (!container) return;
+
+        // 当前启用的项列表 (按照 orderList 顺序)
+        const enabledOrder = [];
+        const seen = new Set();
+        (orderList || []).forEach(val => {
+            val = String(val).trim();
+            if (allItems.includes(val) && !seen.has(val)) {
+                enabledOrder.push(val);
+                seen.add(val);
+            }
+        });
+
+        // 未在 orderList 中的项为禁用项，排在最后
+        const disabledOrder = [];
+        allItems.forEach(val => {
+            if (!seen.has(val)) {
+                disabledOrder.push(val);
+            }
+        });
+
+        // 同步隐藏输入框值（仅启用的项参与配置与优选，逗号分隔）
+        const syncHiddenInput = () => {
+            const activeVals = [];
+            container.querySelectorAll('.tag-sortable-item:not(.disabled)').forEach(el => {
+                activeVals.push(el.getAttribute('data-value'));
+            });
+            if (hiddenInput) {
+                hiddenInput.value = activeVals.join(',');
+            }
+        };
+
+        const refreshBadgesAndOrder = () => {
+            let activeIdx = 1;
+            container.querySelectorAll('.tag-sortable-item').forEach(el => {
+                const badge = el.querySelector('.tag-index-badge');
+                if (el.classList.contains('disabled')) {
+                    if (badge) badge.textContent = '-';
+                    el.draggable = false;
+                } else {
+                    if (badge) badge.textContent = activeIdx++;
+                    el.draggable = true;
+                }
+            });
+            syncHiddenInput();
+        };
+
+        container.innerHTML = '';
+
+        const createTagElement = (val, isDisabled) => {
+            const tag = document.createElement('div');
+            tag.className = `tag-select-item tag-sortable-item ${isDisabled ? 'disabled' : 'active'}`;
+            tag.draggable = !isDisabled;
+            tag.setAttribute('data-value', val);
+            tag.innerHTML = `
+                <span class="tag-index-badge">-</span>
+                <svg class="tag-drag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="8" y1="6" x2="16" y2="6"></line>
+                    <line x1="8" y1="12" x2="16" y2="12"></line>
+                    <line x1="8" y1="18" x2="16" y2="18"></line>
+                </svg>
+                <span class="tag-text">${labelMap[val] || val}</span>
+                <span class="tag-toggle-btn" title="${isDisabled ? '点击启用并加入优选' : '点击禁用并移至末尾'}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;">
+                        ${isDisabled ? '<line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>' : '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'}
+                    </svg>
+                </span>
+            `;
+
+            // 点击整块或点击按钮切换启用/禁用
+            tag.addEventListener('click', (e) => {
+                // 如果是拖拽动作触发的 click，不处理
+                if (tag.dataset.wasDragged === 'true') {
+                    delete tag.dataset.wasDragged;
+                    return;
+                }
+
+                if (tag.classList.contains('disabled')) {
+                    // 从禁用 -> 启用：插入到所有启用项的后面（即第一个 disabled 项前面）
+                    tag.classList.remove('disabled');
+                    tag.classList.add('active');
+                    const toggleBtn = tag.querySelector('.tag-toggle-btn');
+                    if (toggleBtn) {
+                        toggleBtn.title = '点击禁用并移至末尾';
+                        toggleBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+                    }
+                    const firstDisabled = container.querySelector('.tag-sortable-item.disabled');
+                    if (firstDisabled && firstDisabled !== tag) {
+                        container.insertBefore(tag, firstDisabled);
+                    } else {
+                        container.appendChild(tag);
+                    }
+                } else {
+                    // 从启用 -> 禁用：直接移到最后变灰
+                    // 至少保留一项可用
+                    const remainingActive = container.querySelectorAll('.tag-sortable-item:not(.disabled)');
+                    if (remainingActive.length <= 1) {
+                        if (typeof this?.showToast === 'function') {
+                            this.showToast('至少需要保留一个可用项', 'warning');
+                        }
+                        return;
+                    }
+
+                    tag.classList.remove('active');
+                    tag.classList.add('disabled');
+                    const toggleBtn = tag.querySelector('.tag-toggle-btn');
+                    if (toggleBtn) {
+                        toggleBtn.title = '点击启用并加入优选';
+                        toggleBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+                    }
+                    // 移到末尾
+                    container.appendChild(tag);
+                }
+                refreshBadgesAndOrder();
+            });
+
+            // 拖拽处理
+            tag.addEventListener('dragstart', (e) => {
+                if (tag.classList.contains('disabled')) {
+                    e.preventDefault();
+                    return;
+                }
+                tag.dataset.wasDragged = 'true';
+                tag.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', val);
+            });
+
+            tag.addEventListener('dragend', () => {
+                tag.classList.remove('dragging');
+                container.querySelectorAll('.tag-sortable-item').forEach(el => el.classList.remove('drag-over'));
+                refreshBadgesAndOrder();
+                setTimeout(() => { delete tag.dataset.wasDragged; }, 100);
+            });
+
+            tag.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                const dragging = container.querySelector('.dragging');
+                if (!dragging || dragging === tag) return;
+                // 拖拽只能在启用项之间排序，不能插到禁用项后面
+                if (tag.classList.contains('disabled')) {
+                    const firstDisabled = container.querySelector('.tag-sortable-item.disabled');
+                    if (firstDisabled) {
+                        container.insertBefore(dragging, firstDisabled);
+                    }
+                    return;
+                }
+                e.dataTransfer.dropEffect = 'move';
+                const rect = tag.getBoundingClientRect();
+                const next = (e.clientX - rect.left) > (rect.width / 2);
+                container.insertBefore(dragging, next ? tag.nextSibling : tag);
+            });
+
+            tag.addEventListener('dragenter', (e) => {
+                e.preventDefault();
+                if (!tag.classList.contains('dragging') && !tag.classList.contains('disabled')) {
+                    tag.classList.add('drag-over');
+                }
+            });
+
+            tag.addEventListener('dragleave', () => {
+                tag.classList.remove('drag-over');
+            });
+
+            return tag;
+        };
+
+        // 先渲染启用项，再渲染禁用项
+        enabledOrder.forEach(val => container.appendChild(createTagElement(val, false)));
+        disabledOrder.forEach(val => container.appendChild(createTagElement(val, true)));
+
+        refreshBadgesAndOrder();
+    }
+
+    updateQualityPriorityTagUI(valStr) {
+        const list = (valStr || '').split(',').map(s => s.trim()).filter(Boolean);
+        const labelMap = {
+            'flac': '无损 (flac)',
+            '320k': '高品 (320k)',
+            '128k': '标准 (128k)'
+        };
+        const allItems = ['flac', '320k', '128k'];
+        this.renderSortableTagGroup('tag-group-quality-priority', 'subsonic.quality.priority', list, labelMap, allItems);
+    }
+
+    updateSourcePriorityTagUI(valStr) {
+        const list = (valStr || '').split(',').map(s => s.trim()).filter(Boolean);
+        const labelMap = {
+            'kw': '酷我音乐 (kw)',
+            'tx': 'QQ 音乐 (tx)',
+            'wy': '网易云 (wy)',
+            'mg': '咪咕音乐 (mg)',
+            'kg': '酷狗音乐 (kg)'
+        };
+        const allItems = ['kw', 'tx', 'wy', 'mg', 'kg'];
+        this.renderSortableTagGroup('tag-group-source-priority', 'subsonic.source.priority', list, labelMap, allItems);
     }
 
     togglePublicNonAdminAccessVisibility() {

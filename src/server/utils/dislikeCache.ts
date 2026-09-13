@@ -37,7 +37,47 @@ export async function getCachedDislikeRuleSet(
   let set: DislikeRuleSet | null = null
   try {
     const rules = await readRules()
-    if (rules && String(rules).trim()) set = parseDislikeRules(String(rules))
+    set = parseDislikeRules(String(rules || ''))
+
+    // Merge disliked albums and artists from disk library files
+    try {
+      const { getUserDirname } = require('@/user')
+      const path = require('node:path')
+      const fs = require('node:fs')
+      const uDir = getUserDirname(username)
+      const dLibDir = path.join(global.lx.userPath, uDir, 'dislike', 'library')
+      const albumsFile = path.join(dLibDir, 'albums.json')
+      if (fs.existsSync(albumsFile)) {
+        const albumsArr = JSON.parse(fs.readFileSync(albumsFile, 'utf8'))
+        if (Array.isArray(albumsArr)) {
+          const { normalizeText, splitSingers } = require('@/modules/dislike/match')
+          for (const x of albumsArr) {
+            const albumName = normalizeText(String(x.name || ''))
+            if (!albumName) continue
+            let sSet = set.albums.get(albumName)
+            if (!sSet) {
+              sSet = new Set<string>()
+              set.albums.set(albumName, sSet)
+            }
+            const singers = splitSingers(x.artistName)
+            for (const s of singers) sSet.add(s)
+          }
+        }
+      }
+      const artistsFile = path.join(dLibDir, 'artists.json')
+      if (fs.existsSync(artistsFile)) {
+        const artistsArr = JSON.parse(fs.readFileSync(artistsFile, 'utf8'))
+        if (Array.isArray(artistsArr)) {
+          const { normalizeText } = require('@/modules/dislike/match')
+          for (const x of artistsArr) {
+            const singerName = normalizeText(String(x.name || ''))
+            if (singerName) set.singerNames.add(singerName)
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[DislikeCache] Merge library failed:', err.message)
+    }
   } catch (e) {
     console.error('[Subsonic] 读取 dislike 规则失败:', e)
     return cached?.set ?? null

@@ -26,6 +26,7 @@ window.DislikeManager = (function () {
         duetMode: 'any', // any | all | primary
         normalizeName: true,
         requireSinger: true,
+        dislikeList: [], // Added to hold the JSON objects for the UI list
     };
 
     /** 归一化：与服务端一致（@ → #、去空格、小写） */
@@ -50,13 +51,34 @@ window.DislikeManager = (function () {
     const getAlbumName = (song) => song?.albumName ?? song?.meta?.albumName ?? song?.album ?? '';
 
     async function request(url, payload) {
+        if (typeof ensureUserAuthToken === 'function') {
+            await ensureUserAuthToken();
+        }
         const headers = { ...(typeof getUserAuthHeaders === 'function' ? getUserAuthHeaders() : {}) };
         if (payload) headers['Content-Type'] = 'application/json';
-        const res = await fetch(url, {
+        let res = await fetch(url, {
             method: payload ? 'POST' : 'GET',
             headers,
             body: payload ? JSON.stringify(payload) : undefined,
         });
+        if (res.status === 401 && typeof ensureUserAuthToken === 'function') {
+            const refreshed = await ensureUserAuthToken({ force: true });
+            if (refreshed) {
+                const newHeaders = { ...(typeof getUserAuthHeaders === 'function' ? getUserAuthHeaders() : {}) };
+                if (payload) newHeaders['Content-Type'] = 'application/json';
+                res = await fetch(url, {
+                    method: payload ? 'POST' : 'GET',
+                    headers: newHeaders,
+                    body: payload ? JSON.stringify(payload) : undefined,
+                });
+            }
+        }
+        if (res.status === 401) {
+            const err = new Error('请先登录本地账号');
+            err.status = 401;
+            err.isAuthError = true;
+            throw err;
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.json();
     }
@@ -66,6 +88,7 @@ window.DislikeManager = (function () {
         state.musicNames = new Set(data?.musicNames || []);
         state.singerNames = new Set(data?.singerNames || []);
         state.albums = data?.albums || [];
+        state.dislikeList = data?.dislikeList || [];
         if (options) {
             state.crossSource = !!options.crossSource;
             state.duetMode = options.duetMode || 'any';
@@ -165,8 +188,8 @@ window.DislikeManager = (function () {
         return !!(r && r.success);
     }
 
-    const addSong = (song) => mutate('add', { type: 'song', name: song?.name || '', singer: song?.singer || '', source: song?.source || '', id: song?.id || '' });
-    const removeSong = (song) => mutate('remove', { type: 'song', name: song?.name || '', singer: song?.singer || '', source: song?.source || '', id: song?.id || '' });
+    const addSong = (song) => mutate('add', { ...song, type: 'song' });
+    const removeSong = (song) => mutate('remove', { ...song, type: 'song' });
     const addSinger = (singer) => mutate('add', { type: 'singer', singer: singer || '' });
     const removeSinger = (singer) => mutate('remove', { type: 'singer', singer: singer || '' });
     const addAlbum = (song) =>
@@ -174,10 +197,13 @@ window.DislikeManager = (function () {
     const removeAlbum = (song) =>
         mutate('remove', { type: 'album', albumName: getAlbumName(song), singer: song?.singer || '' });
 
-    /** 切换某首歌的不喜欢状态 */
+    /** 切换某首歌的不喜欢状态，返回切换后的最终不喜欢状态布尔值 */
     async function toggleSong(song) {
         await load();
-        return isDisliked(song) ? removeSong(song) : addSong(song);
+        const willDislike = !isDisliked(song);
+        const success = willDislike ? await addSong(song) : await removeSong(song);
+        if (!success) throw new Error('操作未成功完成');
+        return willDislike;
     }
 
     return {

@@ -116,6 +116,62 @@
                                     <i class="fas fa-plus"></i> 新建歌单
                                 </button>
                             </li>
+                            <li class="my-1">
+                                <div class="mx-6 border-t t-border-main opacity-50"></div>
+                            </li>
+                            <li>
+                                <div onclick="handleDislikeFolderClick()" id="tab-dislike"
+                                    class="flex items-center justify-between px-6 py-2 text-sm t-text-muted hover:t-bg-main transition-colors duration-200 cursor-pointer select-none rounded group">
+                                    <div class="flex items-center">
+                                        <i
+                                            class="fas fa-ban w-5 text-center group-hover:text-emerald-500 transition-colors"></i>
+                                        <span class="ml-2">不喜欢</span>
+                                    </div>
+                                    <i id="dislike-arrow"
+                                        class="fas fa-chevron-right text-[10px] transition-transform duration-200 mr-2"></i>
+                                </div>
+                                <ul id="dislike-children"
+                                    class="t-bg-main/50 overflow-hidden transition-all duration-300 hidden rounded mt-1"
+                                    style="height: 0;">
+                                    <li>
+                                        <div id="dislike-lists-container" class="space-y-1 pb-1 pt-1">
+                                            <!-- 不喜欢歌曲 -->
+                                            <div class="px-4 py-1.5 text-[13px] t-text-muted hover:t-bg-main cursor-pointer flex items-center group transition-colors overflow-hidden rounded"
+                                                data-sidebar-list-id="dislike_songs"
+                                                onclick="handleDislikeSongsClick(); event.stopPropagation();">
+                                                <i
+                                                    class="fas fa-music w-4 t-text-muted group-hover:text-emerald-500 transition-colors flex-shrink-0 text-center"></i>
+                                                <span class="ml-2 flex-1 truncate">不喜欢歌曲</span>
+                                                <span id="dislike-song-count"
+                                                    class="text-[11px] text-gray-300 group-hover:t-text-muted mr-1 flex-shrink-0">0</span>
+                                            </div>
+                                            <!-- 不喜欢歌手 -->
+                                            <div class="px-4 py-1.5 text-[13px] t-text-muted hover:t-bg-main cursor-pointer flex items-center group transition-colors overflow-hidden rounded"
+                                                data-sidebar-list-id="dislike_artists"
+                                                onclick="handleDislikeArtistsClick(); event.stopPropagation();">
+                                                <i
+                                                    class="fas fa-user w-4 t-text-muted group-hover:text-emerald-500 transition-colors flex-shrink-0 text-center"></i>
+                                                <span class="ml-2 flex-1 truncate">不喜欢歌手</span>
+                                                <span id="dislike-artist-count"
+                                                    class="text-[11px] text-gray-300 group-hover:t-text-muted mr-1 flex-shrink-0">0</span>
+                                            </div>
+                                            <!-- 不喜欢专辑 -->
+                                            <div class="px-4 py-1.5 text-[13px] t-text-muted hover:t-bg-main cursor-pointer flex items-center group transition-colors overflow-hidden rounded"
+                                                data-sidebar-list-id="dislike_albums"
+                                                onclick="handleDislikeAlbumsClick(); event.stopPropagation();">
+                                                <i
+                                                    class="fas fa-compact-disc w-4 t-text-muted group-hover:text-emerald-500 transition-colors flex-shrink-0 text-center"></i>
+                                                <span class="ml-2 flex-1 truncate">不喜欢专辑</span>
+                                                <span id="dislike-album-count"
+                                                    class="text-[11px] text-gray-300 group-hover:t-text-muted mr-1 flex-shrink-0">0</span>
+                                            </div>
+                                        </div>
+                                    </li>
+                                </ul>
+                            </li>
+                            <li class="my-1">
+                                <div class="mx-6 border-t t-border-main opacity-50"></div>
+                            </li>
                         </ul>
                     </li>
                     <li>
@@ -2118,7 +2174,8 @@
                                             <option value="standard">标准 (Name_-_Singer_-_Source_-_ID_-_Quality)
                                             </option>
                                             <option value="simple">简洁 (Name - Singer - Quality - Album)</option>
-                                            <option value="singer_name_quality_album">歌手-歌名-音质-专辑 (Singer - Name - Quality - Album)</option>
+                                            <option value="singer_name_quality_album">歌手-歌名-音质-专辑 (Singer - Name -
+                                                Quality - Album)</option>
                                             <option value="singer_name">歌手-歌名 (Singer - Name)</option>
                                             <option value="name_singer">歌名-歌手 (Name - Singer)</option>
                                         </select>
@@ -2832,6 +2889,31 @@
                                                         <input type="checkbox" id="setting-switch-playlist-songlist"
                                                             class="sr-only peer"
                                                             onchange="updateSetting('switchPlaylistOnSongListPlay', this.checked)">
+                                                        <div
+                                                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div
+                                                class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
+                                                <div class="flex items-center justify-between">
+                                                    <div>
+                                                        <h4 class="text-sm font-bold t-text-main flex items-center">
+                                                            播放时自动剔除不喜欢歌曲
+                                                            <span class="setting-tooltip-trigger">
+                                                                <i class="fas fa-question-circle"></i>
+                                                                <span class="setting-tooltip-content">
+                                                                    开启：在播放搜索列表、歌单、排行榜并替换播放队列时，自动从列表中剔除被标记为“不喜欢”的歌曲（主动点击播放的和主动播放不喜欢的除外）。<br>
+                                                                    关闭：不剔除不喜欢歌曲。
+                                                                </span>
+                                                            </span>
+                                                        </h4>
+                                                    </div>
+                                                    <label class="relative inline-flex items-center cursor-pointer">
+                                                        <input type="checkbox" id="setting-auto-filter-disliked"
+                                                            class="sr-only peer"
+                                                            onchange="updateSetting('autoFilterDislikedSongs', this.checked)">
                                                         <div
                                                             class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
                                                         </div>

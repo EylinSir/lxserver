@@ -2902,7 +2902,9 @@ class SubsonicHandler {
                     return null
             }
             if (!music) {
-                subsonicLog.debug(`[Subsonic][trace] resolveMusicById ${id}: 回源未取到音乐信息(source=${source})`)
+                if (global.lx.config['subsonic.enableDebug']) {
+                    subsonicLog.debug(`[Subsonic][trace] resolveMusicById ${id}: 回源未取到音乐信息(source=${source})`)
+                }
                 return null
             }
             if (!music.source) music.source = source
@@ -2912,7 +2914,9 @@ class SubsonicHandler {
                 subsonicLog.warn(`[Subsonic] resolveMusicById ${id} 取回结果缺少歌名，已放弃（不写入收藏）`)
                 return null
             }
-            subsonicLog.debug(`[Subsonic][trace] resolveMusicById ${id}: 成功取到 name=${music.name}, singer=${music.singer || '(空)'}`)
+            if (global.lx.config['subsonic.enableDebug']) {
+                subsonicLog.debug(`[Subsonic][trace] resolveMusicById ${id}: 成功取到 name=${music.name}, singer=${music.singer || '(空)'}`)
+            }
             return music as LX.Music.MusicInfo
         } catch (e) {
             this.logSourceError('resolveMusicById', `回源 ${id}`, e)
@@ -3168,13 +3172,12 @@ class SubsonicHandler {
     private async getDislikeRuleSet(username: string): Promise<DislikeRuleSet | null> {
         const userSpace = getUserSpace(username) as any
         return getCachedDislikeRuleSet(username, async () => {
-            const rules = await userSpace.dislikeManage?.getDislikeRules()
-            return rules ? String(rules) : ''
+            return userSpace.dislikeManage?.dislikeDataManage?.getDislikeRulesString() || ''
         })
     }
 
-    /** 批量写入 dislike 规则 */
-    private async addDislikeRules(username: string, infos: Array<{ name: string, singer: string }>): Promise<number> {
+    /** 批量写入 dislike 规则（infos 可携带完整 MusicInfo 字段，原样落盘到 snapshot） */
+    private async addDislikeRules(username: string, infos: LX.Dislike.DislikeSongInfo[]): Promise<number> {
         const valid = infos.filter(i => this.dislikeRuleKey(i.name, i.singer))
         if (valid.length === 0) return 0
         try {
@@ -3212,7 +3215,7 @@ class SubsonicHandler {
             // 规则串已被 filterRules 统一小写，比较时一并小写
             const lowerKeys = new Set(Array.from(keys).map(k => k.trim().toLowerCase()).filter(Boolean))
             const userSpace = getUserSpace(username) as any
-            const rules = await userSpace.dislikeManage.getDislikeRules()
+            const rules = userSpace.dislikeManage.dislikeDataManage.getDislikeRulesString()
             const lines = String(rules || '').split('\n').filter(l => l.trim())
             const remain = lines.filter(l => !lowerKeys.has(l.trim().toLowerCase()))
             const removed = lines.length - remain.length
@@ -3329,7 +3332,16 @@ class SubsonicHandler {
 
         // 歌曲维度
         const hit = await this.resolveSongMeta(username, id)
-        const infos = hit?.music ? [{ name: hit.music.name || '', singer: hit.music.singer || '' }] : []
+        // 构造完整的 DislikeSongInfo，保留 MusicInfo 所有原始字段（img/types/_types/songmid 等），
+        // 使 snapshot 条目与 lx-music 客户端写入的格式一致，方便客户端侧展示/管理。
+        const infos: LX.Dislike.DislikeSongInfo[] = hit?.music ? [{
+            ...(hit.music as any),       // 展开所有 MusicInfo 字段（songmid/img/types/_types/meta 等）
+            name: hit.music.name || '',
+            singer: hit.music.singer || '',
+            source: hit.music.source,
+            interval: hit.music.interval,
+            pic: (hit.music as any).img || (hit.music as any).meta?.picUrl || undefined,
+        }] : []
         let singerIdentity: { name: string, source: string, singerId: string } | undefined
         if (hit?.music) {
             const rawSingerId = (hit.music as any).singerId
@@ -3404,13 +3416,15 @@ class SubsonicHandler {
             try {
                 const target = await this.resolveDislikeTarget(username, id)
                 // [调试] 打印解析到的维度与身份信息，便于确认各入口能拿到什么
-                subsonicLog.debug(`[Subsonic] dislike 解析 id=${id}`, JSON.stringify({
-                    dimension: target.album ? 'album' : (id.startsWith('art_') || id.startsWith('artist_') ? 'singer' : 'song'),
-                    song: target.infos,
-                    singer: target.singer || null,
-                    album: target.album || null,
-                    keys: Array.from(target.keys),
-                }))
+                if (global.lx.config['subsonic.enableDebug']) {
+                    subsonicLog.debug(`[Subsonic] dislike 解析 id=${id}`, JSON.stringify({
+                        dimension: target.album ? 'album' : (id.startsWith('art_') || id.startsWith('artist_') ? 'singer' : 'song'),
+                        song: target.infos,
+                        singer: target.singer || null,
+                        album: target.album || null,
+                        keys: Array.from(target.keys),
+                    }))
+                }
                 if (rating > 0 && rating <= threshold) {
                     let added = await this.addDislikeRules(username, target.infos)
                     if (target.album) added += await this.addDislikeAlbum(username, target.album)
@@ -4020,7 +4034,9 @@ class SubsonicHandler {
 
             if (result && result.url) {
                 // [诊断] 打印缓存触发决策，便于排查 Subsonic 播放不缓存问题
-                subsonicLog.debug(`[Subsonic] stream cacheOnPlay: enabled=${global.lx.config['subsonic.cacheOnPlay']} user=${username} url=${String(result.url).slice(0, 90)}${result.selected ? ' selected=' + result.selected : ''}`)
+                if (global.lx.config['subsonic.enableDebug']) {
+                    subsonicLog.debug(`[Subsonic] stream cacheOnPlay: enabled=${global.lx.config['subsonic.cacheOnPlay']} user=${username} url=${String(result.url).slice(0, 90)}${result.selected ? ' selected=' + result.selected : ''}`)
+                }
                 // [新增] 播放时触发服务器缓存保存：受 subsonic.cacheOnPlay 开关控制
                 // 后台落盘到该用户缓存目录；已在播放的上一首若未下载完成，在切换新歌曲时自动 abort 中断，避免连切刷歌堆积带宽
                 if (global.lx.config['subsonic.cacheOnPlay'] && username) {

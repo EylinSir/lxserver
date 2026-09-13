@@ -68,6 +68,15 @@ export function parseDislikeRules(rules: string): DislikeRuleSet {
       set.exact.add(`${n}${SPLIT_CHAR.DISLIKE_NAME}${s}`)
       const nn = normalizeSongName(n)
       if (nn && nn !== n) set.exact.add(`${nn}${SPLIT_CHAR.DISLIKE_NAME}${s}`)
+      // 多歌手场景：规则整串存储为「歌名@A、B」，但匹配端 splitSingers 后
+      // 逐个歌手检查 exact.has('歌名@A')，所以这里也要拆分登记单歌手条目。
+      const parts = splitSingers(singer)
+      if (parts.length > 1) {
+        for (const ps of parts) {
+          set.exact.add(`${n}${SPLIT_CHAR.DISLIKE_NAME}${ps}`)
+          if (nn && nn !== n) set.exact.add(`${nn}${SPLIT_CHAR.DISLIKE_NAME}${ps}`)
+        }
+      }
     } else if (n) {
       set.musicNames.add(n)
       const nn = normalizeSongName(n)

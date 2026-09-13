@@ -195,7 +195,10 @@ window.LeaderboardManager = (function () {
             const isMatched = window.ListSearch && window.ListSearch.isMatched(index);
             const isCurrentMatch = window.ListSearch && window.ListSearch.isCurrentMatch(index);
 
+            const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(song));
+
             let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 p-3 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer ';
+            if (isDisliked) rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
             if (isCurrentMatch) rowClass += 'search-current ';
             else if (isMatched) rowClass += 'search-match ';
             if (isSelected) rowClass += 'row-selected ring-1 ring-emerald-500/30 ';
@@ -497,15 +500,27 @@ window.LeaderboardManager = (function () {
          */
         dislikeSong: async function (index) {
             const song = state.songs[index];
-            if (!song || !window.DislikeManager) return;
-            try {
-                const nowDisliked = await window.DislikeManager.toggleSong(song);
+            if (!song) return;
+            const songObj = {
+                ...song,
+                source: song.source || state.source
+            };
+            if (typeof toggleDislikeSong === 'function') {
+                await toggleDislikeSong(songObj);
                 this.renderSongs();
-                if (typeof window.showToast === 'function') {
-                    window.showToast('success', nowDisliked ? '已加入不喜欢' : '已移出不喜欢');
+            } else if (window.DislikeManager) {
+                try {
+                    const nowDisliked = await window.DislikeManager.toggleSong(songObj);
+                    this.renderSongs();
+                    if (typeof window.showToast === 'function') {
+                        window.showToast('success', nowDisliked ? '已加入不喜欢' : '已移出不喜欢');
+                    }
+                } catch (e) {
+                    console.error('[Leaderboard] dislike failed:', e);
+                    if (typeof window.showToast === 'function') {
+                        window.showToast('error', e.message || '操作失败');
+                    }
                 }
-            } catch (e) {
-                console.error('[Leaderboard] dislike failed:', e);
             }
         },
 

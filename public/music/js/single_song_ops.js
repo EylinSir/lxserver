@@ -197,6 +197,16 @@ async function deleteSingleSong(songId) {
         return;
     }
 
+    if (activeListId === 'dislike_songs') {
+        const songToToggle = window.viewingPlaylist ? window.viewingPlaylist.find(s => String(s.id) === String(songId)) : null;
+        if (songToToggle && typeof window.toggleDislikeSong === 'function') {
+            await window.toggleDislikeSong(songToToggle);
+        } else {
+            showError('无法找到此不喜欢歌曲');
+        }
+        return;
+    }
+
     if (window.SyncManager.mode === 'local') {
         // Token authentication is sufficient; a saved plaintext password is not required.
         const authHeaders = getUserAuthHeaders();
