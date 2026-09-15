@@ -9258,7 +9258,9 @@ function toggleLibArtistBatchSelect(id) {
     updateLibArtistBatchCount();
 }
 function libSelectAllArtists() {
-    window.libraryData.artists.forEach(a => window.libraryBatchSelected.add(String(a.id)));
+    const isDislike = typeof getCurrentActiveListId === 'function' && getCurrentActiveListId() === 'dislike_artists';
+    const list = isDislike ? window.dislikeLibraryData.artists : window.libraryData.artists;
+    list.forEach(a => window.libraryBatchSelected.add(String(a.id)));
     document.querySelectorAll('#lib-artist-grid .lib-batch-check').forEach(el => { el.classList.remove('hidden'); el.classList.add('flex'); });
     updateLibArtistBatchCount();
 }
@@ -9282,6 +9284,8 @@ async function libDeleteSelectedArtists() {
     
     if (isDislike) {
         window.dislikeLibraryData.artists = window.dislikeLibraryData.artists.filter(a => !window.libraryBatchSelected.has(String(a.id)));
+        // 立即刷新侧边栏数量，不等 loadLibraryData 的 500ms 回调
+        if (typeof refreshDislikeSidebarCount === 'function') refreshDislikeSidebarCount();
         await saveDislikeLibraryArtists();
         exitLibraryArtistBatch();
         renderLibraryArtists(window.dislikeLibraryData.artists, true);
@@ -9351,7 +9355,9 @@ function toggleLibAlbumBatchSelect(id) {
     updateLibAlbumBatchCount();
 }
 function libSelectAllAlbums() {
-    window.libraryData.albums.forEach(a => window.libraryBatchSelected.add(String(a.id)));
+    const isDislike = typeof getCurrentActiveListId === 'function' && getCurrentActiveListId() === 'dislike_albums';
+    const list = isDislike ? window.dislikeLibraryData.albums : window.libraryData.albums;
+    list.forEach(a => window.libraryBatchSelected.add(String(a.id)));
     document.querySelectorAll('#lib-album-grid .lib-batch-check').forEach(el => { el.classList.remove('hidden'); el.classList.add('flex'); });
     updateLibAlbumBatchCount();
 }
@@ -9375,6 +9381,8 @@ async function libDeleteSelectedAlbums() {
     
     if (isDislike) {
         window.dislikeLibraryData.albums = window.dislikeLibraryData.albums.filter(a => !window.libraryBatchSelected.has(String(a.id)));
+        // 立即刷新侧边栏数量，不等 loadLibraryData 的 500ms 回调
+        if (typeof refreshDislikeSidebarCount === 'function') refreshDislikeSidebarCount();
         await saveDislikeLibraryAlbums();
         exitLibraryAlbumBatch();
         renderLibraryAlbums(window.dislikeLibraryData.albums, true);
