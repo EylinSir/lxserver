@@ -661,7 +661,11 @@ const saveUsers = () => {
       enableCustomMusicDir: u.enableCustomMusicDir,
       customMusicDir: u.customMusicDir,
       allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
+      allowWriteCustomMusicDir: u.allowWriteCustomMusicDir,
     })), null, 2))
+    if (typeof global.lx.saveConfig === 'function') {
+      global.lx.saveConfig()
+    }
     return true
   } catch (err) {
     console.error('Failed to save users.json', err)
