@@ -10300,6 +10300,57 @@ function initFavoriteSidebarSortable(container) {
     });
 }
 
+// 侧边栏歌单名称跑马灯：悬浮 或 被选中（active-sub-item）且文字溢出时，从右到左匀速滚动
+if (!window._sidebarMarqueeBound) {
+    window._sidebarMarqueeBound = true;
+
+    // 为一个 item 建立/启动跑马灯结构（幂等，全局暴露供选中时直接调用）
+    window._applySidebarMarquee = function(item) {
+        if (!item || item.classList.contains('is-marquee-active')) return;
+        const wrap = item.querySelector('.playlist-name-wrapper');
+        const text = item.querySelector('.playlist-name-text');
+        if (!wrap || !text) return;
+        if (text.scrollWidth <= wrap.clientWidth) return; // 未溢出则跳过
+
+        let track = wrap.querySelector('.playlist-name-track');
+        let copy  = wrap.querySelector('.playlist-name-copy');
+        if (!track) {
+            track = document.createElement('div');
+            track.className = 'playlist-name-track flex items-center min-w-0 w-full';
+            copy = document.createElement('span');
+            copy.className = 'playlist-name-copy select-none flex-shrink-0';
+            copy.textContent = text.textContent;
+            wrap.replaceChildren(track);
+            track.appendChild(text);
+            track.appendChild(copy);
+        } else if (copy && copy.textContent !== text.textContent) {
+            copy.textContent = text.textContent;
+        }
+        const duration = Math.max(4, Math.min(18, (text.scrollWidth + 32) / 28));
+        item.style.setProperty('--sidebar-marquee-duration', `${duration.toFixed(1)}s`);
+        item.classList.add('is-marquee-active');
+    };
+
+    // 悬浮进入
+    document.addEventListener('mouseover', (e) => {
+        const item = e.target.closest?.('.playlist-sidebar-item');
+        if (!item || (e.relatedTarget && item.contains(e.relatedTarget))) return;
+        requestAnimationFrame(() => {
+            if (!item.matches(':hover')) return;
+            window._applySidebarMarquee(item);
+        });
+    });
+
+    // 悬浮离开：若仍被选中则保持滚动，否则停止
+    document.addEventListener('mouseout', (e) => {
+        const item = e.target.closest?.('.playlist-sidebar-item');
+        if (!item || (e.relatedTarget && item.contains(e.relatedTarget))) return;
+        if (!item.classList.contains('active-sub-item')) {
+            item.classList.remove('is-marquee-active');
+        }
+    });
+}
+
 function renderMyLists(data) {
     const container = document.getElementById('my-lists-container');
     container.innerHTML = '';
@@ -10314,46 +10365,60 @@ function renderMyLists(data) {
     const createItem = (listObj, name, icon, count) => {
         const id = typeof listObj === 'string' ? listObj : listObj.id;
         const displayName = String(name || '未命名歌单');
+        const safeName = escapeHtmlText(displayName);
         const div = document.createElement('div');
-        div.className = "px-6 py-2 text-sm t-text-muted hover:t-bg-main cursor-pointer flex items-center group transition-colors overflow-hidden";
+        div.className = "playlist-sidebar-item text-sm t-text-muted hover:t-bg-main cursor-pointer flex items-center group select-none";
         div.setAttribute('data-sidebar-list-id', id);
         div.setAttribute('data-sidebar-sort-id', id);
         div.onclick = () => handleListClick(id);
 
-        // Use createMarqueeHtml for list name
-        const nameHtml = displayName.length > 8
-            ? createMarqueeHtml(displayName, 'flex-1')
-            : `<span class="ml-2 flex-1 truncate">${escapeHtmlText(displayName)}</span>`;
-
         // Buttons logic (for collected external playlists)
         const showExternalOps = listObj && listObj.sourceListId && listObj.source;
-        let opsHtml = '';
+        let extOpsHtml = '';
         if (showExternalOps) {
             const updateBadge = window.networkListUpdateMap && window.networkListUpdateMap.has(id)
-                ? `<span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-bold mr-2" title="歌单有更新">!</span>`
+                ? `<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex-shrink-0 mr-0.5" title="歌单有更新">!</span>`
                 : '';
-            opsHtml = `
-                <i class="fas fa-sync-alt refresh-btn text-gray-400 hover:text-emerald-500 hidden group-hover:block flex-shrink-0 text-[10px] mr-2 transition-all active:rotate-180" 
-                   title="更新歌单内容" 
-                   onclick="event.stopPropagation(); handleRefreshList('${id}', event)"></i>
-                <i class="fas fa-external-link-alt jump-btn text-gray-400 hover:text-emerald-500 hidden group-hover:block flex-shrink-0 text-[10px] mr-2 transition-all" 
-                   title="打开原始歌单" 
-                   onclick="event.stopPropagation(); handleJumpToOriginalList('${id}', event)"></i>
+            extOpsHtml = `
                 ${updateBadge}
+                <button type="button" class="action-btn refresh-btn flex-shrink-0" 
+                   title="更新歌单内容" 
+                   onclick="event.stopPropagation(); handleRefreshList('${id}', event)">
+                    <i class="fas fa-sync-alt text-[10px]"></i>
+                </button>
+                <button type="button" class="action-btn jump-btn flex-shrink-0" 
+                   title="打开原始歌单" 
+                   onclick="event.stopPropagation(); handleJumpToOriginalList('${id}', event)">
+                    <i class="fas fa-external-link-alt text-[10px]"></i>
+                </button>
             `;
         }
 
         div.innerHTML = `
-            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/60 hover:text-emerald-500 mr-2 flex-shrink-0 touch-none" title="拖拽排序">
+            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/50 hover:text-emerald-500 mr-1.5 flex-shrink-0 touch-none flex items-center" title="拖拽排序">
                 <i class="fas fa-grip-vertical text-xs"></i>
             </span>
-            ${opsHtml}
-            <i class="fas ${icon} w-5 t-text-muted group-hover:text-emerald-500 transition-colors flex-shrink-0"></i>
-            ${displayName.length > 8 ? `<div class="ml-2 flex-1 overflow-hidden">${nameHtml}</div>` : nameHtml}
-            <span class="text-xs text-gray-300 group-hover:t-text-muted mr-2 flex-shrink-0">${count}</span>
-            <button type="button" class="text-gray-300 hover:text-emerald-500 flex-shrink-0 mr-2 transition-colors" title="导出歌单到本地" aria-label="导出歌单到本地" onclick="exportPlaylistToLocal('${id}', event)"><i class="fas fa-download text-[10px]"></i></button>
-            ${typeof listObj !== 'string' ? `<button type="button" class="text-gray-300 hover:text-emerald-500 flex-shrink-0 mr-2 transition-colors" title="重命名歌单" aria-label="重命名歌单" onclick="handleRenameList('${id}', event)"><i class="fas fa-pen text-[10px]"></i></button>` : ''}
-            ${id !== 'default' && id !== 'love' ? `<i class="fas fa-trash text-gray-300 hover:text-red-500 hidden group-hover:block flex-shrink-0" onclick="handleRemoveList('${id}', event)"></i>` : ''}
+            <i class="fas ${icon} w-5 text-center t-text-muted sidebar-item-icon flex-shrink-0"></i>
+            <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden" title="${safeName}">
+                <span class="playlist-name-text truncate block w-full select-none">${safeName}</span>
+            </div>
+            <div class="flex items-center flex-shrink-0 ml-1">
+                <span class="text-xs text-gray-400 group-hover:t-text-muted transition-colors mr-1 sidebar-item-count">${count}</span>
+                <div class="sidebar-item-actions items-center gap-[1px]">
+                    ${extOpsHtml}
+                    <button type="button" class="action-btn flex-shrink-0" title="导出歌单到本地" aria-label="导出歌单到本地" onclick="exportPlaylistToLocal('${id}', event)">
+                        <i class="fas fa-download text-[10px]"></i>
+                    </button>
+                    ${typeof listObj !== 'string' ? `
+                    <button type="button" class="action-btn flex-shrink-0" title="重命名歌单" aria-label="重命名歌单" onclick="handleRenameList('${id}', event)">
+                        <i class="fas fa-pen text-[10px]"></i>
+                    </button>` : ''}
+                    ${id !== 'default' && id !== 'love' ? `
+                    <button type="button" class="action-btn delete-btn flex-shrink-0" title="删除歌单" aria-label="删除歌单" onclick="handleRemoveList('${id}', event)">
+                        <i class="fas fa-trash text-[10px]"></i>
+                    </button>` : ''}
+                </div>
+            </div>
         `;
         return div;
     };
@@ -10361,17 +10426,19 @@ function renderMyLists(data) {
     // ---- 常驻：收藏歌手 / 收藏专辑 ----
     const createLibItem = (id, name, icon, countId, clickFn) => {
         const div = document.createElement('div');
-        div.className = "px-6 py-2 text-sm t-text-muted hover:t-bg-main cursor-pointer flex items-center group transition-colors overflow-hidden";
+        div.className = "playlist-sidebar-item text-sm t-text-muted hover:t-bg-main cursor-pointer flex items-center group select-none";
         div.setAttribute('data-sidebar-list-id', id);
         div.setAttribute('data-sidebar-sort-id', id);
         div.onclick = clickFn;
         div.innerHTML = `
-            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/60 hover:text-emerald-500 mr-2 flex-shrink-0 touch-none" title="拖拽排序">
+            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/50 hover:text-emerald-500 mr-1.5 flex-shrink-0 touch-none flex items-center" title="拖拽排序">
                 <i class="fas fa-grip-vertical text-xs"></i>
             </span>
-            <i class="fas ${icon} w-5 t-text-muted group-hover:text-emerald-500 transition-colors flex-shrink-0"></i>
-            <span class="ml-2 flex-1 truncate">${name}</span>
-            <span id="${countId}" class="text-xs text-gray-300 group-hover:t-text-muted mr-2 flex-shrink-0">0</span>
+            <i class="fas ${icon} w-5 text-center t-text-muted sidebar-item-icon flex-shrink-0"></i>
+            <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden" title="${name}">
+                <span class="playlist-name-text truncate block w-full select-none">${name}</span>
+            </div>
+            <span id="${countId}" class="text-xs text-gray-400 group-hover:t-text-muted mr-1 flex-shrink-0 transition-colors">0</span>
         `;
         return div;
     };
@@ -10384,17 +10451,19 @@ function renderMyLists(data) {
     if (enablePublicFavorites && isUserLoggedIn) {
         const isPublicActive = window.isViewingPublicFavorites === true;
         const publicFavItem = document.createElement('div');
-        publicFavItem.className = `px-6 py-2 text-sm cursor-pointer flex items-center group transition-colors overflow-hidden ${isPublicActive ? 'text-emerald-500 font-bold bg-emerald-500/10' : 't-text-muted hover:t-bg-main'}`;
+        publicFavItem.className = `playlist-sidebar-item text-sm cursor-pointer flex items-center group select-none ${isPublicActive ? 'text-emerald-500 font-bold bg-emerald-500/10' : 't-text-muted hover:t-bg-main'}`;
         publicFavItem.setAttribute('data-sidebar-list-id', '__public_favorites__');
         publicFavItem.setAttribute('data-sidebar-sort-id', '__public_favorites__');
         publicFavItem.onclick = () => handleTogglePublicFavorites();
         publicFavItem.innerHTML = `
-            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/60 hover:text-emerald-500 mr-2 flex-shrink-0 touch-none" title="拖拽排序">
+            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/50 hover:text-emerald-500 mr-1.5 flex-shrink-0 touch-none flex items-center" title="拖拽排序">
                 <i class="fas fa-grip-vertical text-xs"></i>
             </span>
-            <i class="fas fa-globe w-5 ${isPublicActive ? 'text-emerald-500' : 't-text-muted group-hover:text-emerald-500'} transition-colors flex-shrink-0"></i>
-            <span class="ml-2 flex-1 truncate">公开收藏</span>
-            <span class="text-[10px] px-1.5 py-0.5 rounded-full ${isPublicActive ? 'bg-emerald-500 text-white font-bold' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}">${isPublicActive ? '已开启' : '切换'}</span>
+            <i class="fas fa-globe w-5 text-center ${isPublicActive ? 'text-emerald-500' : 't-text-muted'} sidebar-item-icon flex-shrink-0"></i>
+            <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden" title="公开收藏">
+                <span class="playlist-name-text truncate block w-full select-none">公开收藏</span>
+            </div>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full ${isPublicActive ? 'bg-emerald-500 text-white font-bold' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'} flex-shrink-0">${isPublicActive ? '已开启' : '切换'}</span>
         `;
         sidebarItems.push({ id: '__public_favorites__', type: 'system', el: publicFavItem });
     }
@@ -10527,13 +10596,15 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
 
     // Highlight Child List
     document.querySelectorAll('[data-sidebar-list-id]').forEach(el => {
-        el.classList.remove('active-sub-item');
+        el.classList.remove('active-sub-item', 'is-marquee-active');
         el.classList.add('t-text-muted');
     });
     const subItem = document.querySelector(`[data-sidebar-list-id="${listId}"]`);
     if (subItem) {
         subItem.classList.add('active-sub-item');
         subItem.classList.remove('t-text-muted');
+        // 选中后等一帧让布局稳定，再检测是否溢出并启动跑马灯
+        requestAnimationFrame(() => window._applySidebarMarquee?.(subItem));
     }
 
     // Render
@@ -10627,13 +10698,14 @@ function handleDislikeArtistsClick() {
     }
 
     document.querySelectorAll('[data-sidebar-list-id]').forEach(el => {
-        el.classList.remove('active-sub-item');
+        el.classList.remove('active-sub-item', 'is-marquee-active');
         el.classList.add('t-text-muted');
     });
     const item = document.querySelector(`[data-sidebar-list-id="dislike_artists"]`);
     if (item) {
         item.classList.add('active-sub-item');
         item.classList.remove('t-text-muted');
+        requestAnimationFrame(() => window._applySidebarMarquee?.(item));
     }
 
     if (window.innerWidth < 1025) {
@@ -10665,13 +10737,14 @@ function handleDislikeAlbumsClick() {
     }
 
     document.querySelectorAll('[data-sidebar-list-id]').forEach(el => {
-        el.classList.remove('active-sub-item');
+        el.classList.remove('active-sub-item', 'is-marquee-active');
         el.classList.add('t-text-muted');
     });
     const item = document.querySelector(`[data-sidebar-list-id="dislike_albums"]`);
     if (item) {
         item.classList.add('active-sub-item');
         item.classList.remove('t-text-muted');
+        requestAnimationFrame(() => window._applySidebarMarquee?.(item));
     }
 
     if (window.innerWidth < 1025) {
