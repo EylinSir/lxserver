@@ -64,8 +64,31 @@ const setRemotelList = async(socket: LX.Socket, listData: LX.Dislike.DislikeRule
 }
 
 
+const getRulesLength = (listData: LX.Dislike.DislikeRules): number => {
+  if (typeof listData === 'string') return (listData as string).length
+  return listData?.dislikeList?.length ?? 0
+}
+
+const toRulesString = (listData: LX.Dislike.DislikeRules): string => {
+  if (typeof listData === 'string') return listData
+  if (!listData?.dislikeList) return ''
+  return listData.dislikeList.map(s => s.dislikeRule ?? '').filter(Boolean).join('\n')
+}
+
+const toDislikeRules = (rulesString: string): LX.Dislike.DislikeRules => {
+  const rules = filterRules(rulesString)
+  return {
+    dislikeList: Array.from(rules).map(rule => ({
+      name: '',
+      singer: '',
+      dislikeRule: rule,
+    })),
+  }
+}
+
 const mergeList = (socket: LX.Socket, sourceListData: LX.Dislike.DislikeRules, targetListData: LX.Dislike.DislikeRules): LX.Dislike.DislikeRules => {
-  return Array.from(filterRules(sourceListData + '\n' + targetListData)).join('\n')
+  const combined = toRulesString(sourceListData) + '\n' + toRulesString(targetListData)
+  return toDislikeRules(Array.from(filterRules(combined)).join('\n'))
 }
 
 const handleMergeListData = async(socket: LX.Socket): Promise<[LX.Dislike.DislikeRules, boolean, boolean]> => {
@@ -101,13 +124,15 @@ const handleMergeListData = async(socket: LX.Socket): Promise<[LX.Dislike.Dislik
 
 const handleSyncList = async(socket: LX.Socket) => {
   const [remoteListData, localListData] = await Promise.all([getRemoteListData(socket), getLocalListData(socket)])
+  const localLen = getRulesLength(localListData)
+  const remoteLen = getRulesLength(remoteListData)
   console.log('handleSyncList', 'remoteListData, localListData')
-  console.log('localListData', localListData.length)
-  console.log('remoteListData', remoteListData.length)
+  console.log('localListData', localLen)
+  console.log('remoteListData', remoteLen)
   const userSpace = getUserSpace(socket.userInfo.name)
   const clientId = socket.keyInfo.clientId
-  if (localListData.length) {
-    if (remoteListData.length) {
+  if (localLen) {
+    if (remoteLen) {
       const [mergedList, requiredUpdateLocalListData, requiredUpdateRemoteListData] = await handleMergeListData(socket)
       console.log('handleMergeListData', 'mergedList', requiredUpdateLocalListData, requiredUpdateRemoteListData)
       let key
@@ -125,7 +150,7 @@ const handleSyncList = async(socket: LX.Socket) => {
     }
   } else {
     let key: string
-    if (remoteListData.length) {
+    if (remoteLen) {
       key = await setLocalList(socket, remoteListData)
       await overwriteRemoteListData(socket, remoteListData, key, [clientId])
     }
@@ -140,18 +165,19 @@ const mergeDataFromSnapshot = (
   snapshotList: LX.Dislike.DislikeRules,
 ): LX.Dislike.DislikeRules => {
   const removedRules = new Set<string>()
-  const sourceRules = filterRules(sourceList)
-  const targetRules = filterRules(targetList)
+  const sourceRules = filterRules(toRulesString(sourceList))
+  const targetRules = filterRules(toRulesString(targetList))
 
   if (snapshotList) {
-    const snapshotRules = filterRules(snapshotList)
+    const snapshotRules = filterRules(toRulesString(snapshotList))
     for (const m of snapshotRules.values()) {
       if (!sourceRules.has(m) || !targetRules.has(m)) removedRules.add(m)
     }
   }
-  return Array.from(new Set(Array.from([...sourceRules, ...targetRules]).filter((rule) => {
+  const mergedStr = Array.from(new Set(Array.from([...sourceRules, ...targetRules]).filter((rule) => {
     return !removedRules.has(rule)
   }))).join('\n')
+  return toDislikeRules(mergedStr)
 }
 const checkListLatest = async(socket: LX.Socket) => {
   const remoteListMD5 = await getRemoteDataMD5(socket)

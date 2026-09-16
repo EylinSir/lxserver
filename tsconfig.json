@@ -25,13 +25,12 @@
     "rootDir": "./src",
     "outDir": "./server",
     "noImplicitReturns": false,
-    "baseUrl": "./src",
     "paths": {
       "@/*": [
-        "./*"
+        "./src/*"
       ],
       "@renderer/*": [
-        "./modules/*"
+        "./src/modules/*"
       ]
     },
   },
