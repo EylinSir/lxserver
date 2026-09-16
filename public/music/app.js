@@ -206,22 +206,245 @@ function parseNetworkListAutoCheckInterval(value) {
     if (value === undefined || value === null) return 0;
     const raw = String(value).trim().toLowerCase();
     if (raw === '' || raw === '0' || raw === 'off' || raw === 'none' || raw === 'disable') return 0;
-    const matched = raw.match(/^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/);
-    if (!matched) return null;
-    const count = parseFloat(matched[1]);
-    const unit = matched[2] || 'h';
-    if (!Number.isFinite(count) || count < 0) return null;
-    let intervalMs = null;
-    switch (unit) {
-        case 'ms': intervalMs = count; break;
-        case 's': intervalMs = count * 1000; break;
-        case 'm': intervalMs = count * 60 * 1000; break;
-        case 'h': intervalMs = count * 60 * 60 * 1000; break;
-        case 'd': intervalMs = count * 24 * 60 * 60 * 1000; break;
-        default: return null;
+
+    // 支持复合时间字符串，如 1d6h30m, 2h30m, 1d12h, 45m, 6h 等
+    const regex = /(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)/g;
+    let match;
+    let totalMs = 0;
+    let matchCount = 0;
+
+    while ((match = regex.exec(raw)) !== null) {
+        matchCount++;
+        const count = parseFloat(match[1]);
+        const unit = match[2];
+        if (!Number.isFinite(count) || count < 0) return null;
+        switch (unit) {
+            case 'ms': totalMs += count; break;
+            case 's': totalMs += count * 1000; break;
+            case 'm': totalMs += count * 60 * 1000; break;
+            case 'h': totalMs += count * 60 * 60 * 1000; break;
+            case 'd': totalMs += count * 24 * 60 * 60 * 1000; break;
+        }
     }
-    return Math.max(intervalMs, minIntervalMs);
+
+    // 如果匹配不到任何单位但纯是正数字，默认按小时算
+    if (matchCount === 0) {
+        if (/^\d+(\.\d+)?$/.test(raw)) {
+            totalMs = parseFloat(raw) * 60 * 60 * 1000;
+        } else {
+            return null;
+        }
+    }
+
+    return Math.max(totalMs, minIntervalMs);
 }
+
+function parseCompoundParts(value) {
+    const raw = String(value || '6h').trim().toLowerCase();
+    let days = 0;
+    let hours = 0;
+    let minutes = 0;
+
+    const regex = /(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)/g;
+    let match;
+    let matchedAny = false;
+    while ((match = regex.exec(raw)) !== null) {
+        matchedAny = true;
+        const count = parseFloat(match[1]);
+        const unit = match[2];
+        if (unit === 'd') days += Math.floor(count);
+        else if (unit === 'h') hours += Math.floor(count);
+        else if (unit === 'm') minutes += Math.floor(count);
+    }
+
+    if (!matchedAny && /^\d+$/.test(raw)) {
+        hours = parseInt(raw, 10);
+    }
+
+    return { days, hours, minutes };
+}
+
+function formatIntervalHumanReadable(value) {
+    const raw = String(value || '6h').trim().toLowerCase();
+    const { days, hours, minutes } = parseCompoundParts(raw);
+    const parts = [];
+    if (days > 0) parts.push(`${days}天`);
+    if (hours > 0) parts.push(`${hours}小时`);
+    if (minutes > 0) parts.push(`${minutes}分钟`);
+
+    if (parts.length === 0) {
+        // 尝试兜底单单位匹配 (例如 30s)
+        const single = raw.match(/^(\d+)(ms|s)$/);
+        if (single) {
+            const unitMap = { ms: '毫秒', s: '秒' };
+            return `${single[1]}${unitMap[single[2]] || single[2]}`;
+        }
+        return '6小时';
+    }
+    return parts.join(' ');
+}
+
+function updateIntervalPickerDisplay(val) {
+    const raw = String(val || settings.networkListAutoCheckInterval || '6h').trim();
+    const human = formatIntervalHumanReadable(raw);
+
+    const triggerLabel = document.getElementById('interval-trigger-label');
+    if (triggerLabel) triggerLabel.textContent = human;
+
+    const badgeDisplay = document.getElementById('interval-badge-display');
+    if (badgeDisplay) badgeDisplay.textContent = human;
+
+    const preview = document.getElementById('interval-preview-text');
+    if (preview) preview.textContent = human;
+
+    // 同步天/时/分三个输入框
+    const { days, hours, minutes } = parseCompoundParts(raw);
+    const inputD = document.getElementById('compound-interval-days');
+    const inputH = document.getElementById('compound-interval-hours');
+    const inputM = document.getElementById('compound-interval-minutes');
+    if (inputD) inputD.value = days;
+    if (inputH) inputH.value = hours;
+    if (inputM) inputM.value = minutes;
+
+    // 高亮匹配的预设按钮
+    document.querySelectorAll('.interval-preset-btn').forEach(btn => {
+        const match = btn.getAttribute('onclick')?.includes(`'${raw}'`);
+        if (match) {
+            btn.classList.add('bg-emerald-500', 'text-white', 'border-emerald-500');
+            btn.classList.remove('t-border-main');
+        } else {
+            btn.classList.remove('bg-emerald-500', 'text-white', 'border-emerald-500');
+            btn.classList.add('t-border-main');
+        }
+    });
+}
+
+function toggleIntervalPopover(e) {
+    if (e) e.stopPropagation();
+    const panel = document.getElementById('interval-popover-panel');
+    const chevron = document.getElementById('interval-chevron-icon');
+    if (!panel) return;
+    const isHidden = panel.classList.contains('hidden');
+    if (isHidden) {
+        panel.classList.remove('hidden');
+        if (chevron) chevron.classList.add('rotate-180');
+        updateIntervalPickerDisplay(settings.networkListAutoCheckInterval || '6h');
+    } else {
+        closeIntervalPopover();
+    }
+}
+
+function closeIntervalPopover() {
+    const panel = document.getElementById('interval-popover-panel');
+    const chevron = document.getElementById('interval-chevron-icon');
+    if (panel) panel.classList.add('hidden');
+    if (chevron) chevron.classList.remove('rotate-180');
+}
+
+function selectIntervalPreset(val) {
+    updateIntervalPickerDisplay(val);
+    applyIntervalValue(val);
+}
+
+function getCompoundValueFromInputs() {
+    const inputD = document.getElementById('compound-interval-days');
+    const inputH = document.getElementById('compound-interval-hours');
+    const inputM = document.getElementById('compound-interval-minutes');
+
+    const d = Math.max(0, parseInt(inputD?.value || '0', 10) || 0);
+    const h = Math.max(0, parseInt(inputH?.value || '0', 10) || 0);
+    const m = Math.max(0, parseInt(inputM?.value || '0', 10) || 0);
+
+    let parts = '';
+    if (d > 0) parts += `${d}d`;
+    if (h > 0) parts += `${h}h`;
+    if (m > 0) parts += `${m}m`;
+
+    if (!parts) parts = '30m'; // 至少保底30分钟
+    return parts;
+}
+
+function clampCompoundInputValue(unit, rawVal, allowEmpty = false) {
+    if (allowEmpty && (rawVal === '' || rawVal === null || rawVal === undefined)) {
+        return '';
+    }
+    const maxMap = { d: 365, h: 23, m: 59 };
+    const max = maxMap[unit] ?? 999;
+    let num = parseInt(rawVal, 10);
+    if (isNaN(num) || num < 0) {
+        return 0;
+    }
+    if (num > max) {
+        return max;
+    }
+    return num;
+}
+
+function onCompoundIntervalInput(unit) {
+    if (unit) {
+        const idMap = { d: 'compound-interval-days', h: 'compound-interval-hours', m: 'compound-interval-minutes' };
+        const inputEl = document.getElementById(idMap[unit]);
+        if (inputEl && inputEl.value !== '') {
+            const clamped = clampCompoundInputValue(unit, inputEl.value, false);
+            if (String(clamped) !== inputEl.value && parseInt(inputEl.value, 10) > (unit === 'h' ? 23 : unit === 'm' ? 59 : 365)) {
+                inputEl.value = clamped;
+            }
+        }
+    }
+    const val = getCompoundValueFromInputs();
+    const preview = document.getElementById('interval-preview-text');
+    if (preview) preview.textContent = formatIntervalHumanReadable(val);
+}
+
+function onCompoundIntervalChange(unit) {
+    const idMap = { d: 'compound-interval-days', h: 'compound-interval-hours', m: 'compound-interval-minutes' };
+    const inputEl = document.getElementById(idMap[unit]);
+    if (inputEl) {
+        inputEl.value = clampCompoundInputValue(unit, inputEl.value, false);
+    }
+    onCompoundIntervalInput();
+}
+
+function stepCompoundInterval(unit, delta) {
+    const idMap = { d: 'compound-interval-days', h: 'compound-interval-hours', m: 'compound-interval-minutes' };
+    const inputEl = document.getElementById(idMap[unit]);
+    if (!inputEl) return;
+
+    let cur = clampCompoundInputValue(unit, inputEl.value, false);
+    const maxMap = { d: 365, h: 23, m: 59 };
+    const max = maxMap[unit] ?? 999;
+    cur = Math.max(0, Math.min(max, cur + delta));
+    inputEl.value = cur;
+    onCompoundIntervalInput();
+}
+
+function applyIntervalPicker() {
+    const val = getCompoundValueFromInputs();
+    applyIntervalValue(val);
+}
+
+function applyIntervalValue(val) {
+    const hiddenInput = document.getElementById('setting-network-list-auto-check-interval');
+    if (hiddenInput) {
+        hiddenInput.value = val;
+    }
+    updateSetting('networkListAutoCheckInterval', val);
+    updateIntervalPickerDisplay(val);
+    closeIntervalPopover();
+    if (window.showToast) {
+        window.showToast('success', `网络歌单检测间隔已设为: ${formatIntervalHumanReadable(val)}`, 2000);
+    }
+}
+
+// 点击面板外部自动关闭 Popover
+document.addEventListener('click', (e) => {
+    const panel = document.getElementById('interval-popover-panel');
+    const btn = document.getElementById('btn-open-interval-popover');
+    if (!panel || panel.classList.contains('hidden')) return;
+    if (!panel.contains(e.target) && !btn?.contains(e.target)) {
+        closeIntervalPopover();
+    }
+});
 
 function setupNetworkListAutoCheck() {
     if (networkListAutoCheckTimer) {
@@ -6772,7 +6995,15 @@ const SETTINGS_UI_MAP = {
 
     // 系统 & 网络 (System & Network)
     autoUpdateNetworkList: { id: 'setting-auto-update-list', type: 'checkbox' },
-    networkListAutoCheckInterval: { id: 'setting-network-list-auto-check-interval', type: 'value' },
+    networkListAutoCheckInterval: {
+        id: 'setting-network-list-auto-check-interval',
+        type: 'value',
+        action: (v) => {
+            if (typeof updateIntervalPickerDisplay === 'function') {
+                updateIntervalPickerDisplay(v);
+            }
+        }
+    },
     saveAccountSettingsToFile: { id: 'setting-save-settings-to-file', type: 'checkbox' },
     enableLyricCache: { id: 'setting-enable-lyric-cache', type: 'checkbox' },
     enableSongUrlCache: { id: 'setting-enable-url-cache', type: 'checkbox' },

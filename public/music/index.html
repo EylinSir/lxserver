@@ -1908,9 +1908,132 @@
                                             <div class="text-xs t-text-muted mt-1">输入值示例：30m / 6h / 1d，开启后自动检测并标记已更新歌单。
                                             </div>
                                         </div>
-                                        <input id="setting-network-list-auto-check-interval" type="text"
-                                            class="w-full md:w-40 rounded-xl border t-border-main px-3 py-2 text-sm bg-transparent focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                                            onchange="updateSetting('networkListAutoCheckInterval', this.value)">
+                                        <div class="relative flex items-center gap-2">
+                                            <input id="setting-network-list-auto-check-interval" type="hidden"
+                                                value="6h" onchange="updateSetting('networkListAutoCheckInterval', this.value)">
+                                            <button type="button" id="btn-open-interval-popover" onclick="toggleIntervalPopover(event)"
+                                                class="flex items-center gap-2 px-3.5 py-2 rounded-xl border t-border-main bg-white/60 dark:bg-gray-800/60 hover:border-emerald-500/50 hover:bg-emerald-50/30 dark:hover:bg-emerald-950/20 text-sm font-medium transition-all shadow-sm">
+                                                <i class="far fa-clock text-emerald-500 text-sm"></i>
+                                                <span id="interval-trigger-label" class="t-text-main font-semibold tracking-wide">6小时</span>
+                                                <i class="fas fa-chevron-down text-xs t-text-muted ml-1 transition-transform duration-200" id="interval-chevron-icon"></i>
+                                            </button>
+
+                                            <div id="interval-popover-panel"
+                                                class="hidden absolute right-0 top-full mt-2 w-72 p-4 rounded-2xl shadow-2xl border t-border-main bg-white dark:bg-gray-900 z-50 animate-fade-in backdrop-blur-md">
+                                                <div class="flex items-center justify-between pb-2.5 mb-3 border-b t-border-main">
+                                                    <div class="text-xs font-bold t-text-main flex items-center gap-1.5">
+                                                        <i class="far fa-hourglass-half text-emerald-500"></i> 检测间隔设置
+                                                    </div>
+                                                    <span class="text-[11px] text-gray-400">最小 30秒</span>
+                                                </div>
+
+                                                <div class="mb-3">
+                                                    <div class="text-[11px] font-semibold text-gray-400 mb-1.5">快捷预设</div>
+                                                    <div class="grid grid-cols-4 gap-1.5" id="interval-presets-container">
+                                                        <button type="button" onclick="selectIntervalPreset('30m')"
+                                                            class="interval-preset-btn px-2 py-1.5 text-xs rounded-lg border t-border-main hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-all font-medium text-center">30分</button>
+                                                        <button type="button" onclick="selectIntervalPreset('1h')"
+                                                            class="interval-preset-btn px-2 py-1.5 text-xs rounded-lg border t-border-main hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-all font-medium text-center">1小时</button>
+                                                        <button type="button" onclick="selectIntervalPreset('2h')"
+                                                            class="interval-preset-btn px-2 py-1.5 text-xs rounded-lg border t-border-main hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-all font-medium text-center">2小时</button>
+                                                        <button type="button" onclick="selectIntervalPreset('6h')"
+                                                            class="interval-preset-btn px-2 py-1.5 text-xs rounded-lg border t-border-main hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-all font-medium text-center">6小时</button>
+                                                        <button type="button" onclick="selectIntervalPreset('12h')"
+                                                            class="interval-preset-btn px-2 py-1.5 text-xs rounded-lg border t-border-main hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-all font-medium text-center">12小时</button>
+                                                        <button type="button" onclick="selectIntervalPreset('1d')"
+                                                            class="interval-preset-btn px-2 py-1.5 text-xs rounded-lg border t-border-main hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-all font-medium text-center">1天</button>
+                                                        <button type="button" onclick="selectIntervalPreset('3d')"
+                                                            class="interval-preset-btn px-2 py-1.5 text-xs rounded-lg border t-border-main hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-all font-medium text-center">3天</button>
+                                                        <button type="button" onclick="selectIntervalPreset('7d')"
+                                                            class="interval-preset-btn px-2 py-1.5 text-xs rounded-lg border t-border-main hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-all font-medium text-center">7天</button>
+                                                    </div>
+                                                </div>
+
+                                                <div class="mb-3 pt-2.5 border-t t-border-main">
+                                                    <div class="flex items-center justify-between text-[11px] font-semibold text-gray-400 mb-2">
+                                                        <span>自定义复合时长</span>
+                                                        <span class="text-[10px] text-gray-400 font-normal">支持组合天/时/分</span>
+                                                    </div>
+                                                    <div class="grid grid-cols-3 gap-2">
+                                                        <!-- 天 -->
+                                                        <div class="flex flex-col items-center">
+                                                            <div class="text-[10px] text-gray-400 mb-1 font-medium">天</div>
+                                                            <div class="flex items-center w-full border t-border-main rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800/50">
+                                                                <button type="button" onclick="stepCompoundInterval('d', -1)"
+                                                                    class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
+                                                                    <i class="fas fa-minus"></i>
+                                                                </button>
+                                                                <input type="number" id="compound-interval-days" min="0" max="365" value="0"
+                                                                    oninput="onCompoundIntervalInput('d')"
+                                                                    onchange="onCompoundIntervalChange('d')"
+                                                                    onblur="onCompoundIntervalChange('d')"
+                                                                    class="w-full text-center bg-transparent text-xs font-bold t-text-main focus:outline-none py-1">
+                                                                <button type="button" onclick="stepCompoundInterval('d', 1)"
+                                                                    class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
+                                                                    <i class="fas fa-plus"></i>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        <!-- 小时 -->
+                                                        <div class="flex flex-col items-center">
+                                                            <div class="text-[10px] text-gray-400 mb-1 font-medium">小时</div>
+                                                            <div class="flex items-center w-full border t-border-main rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800/50">
+                                                                <button type="button" onclick="stepCompoundInterval('h', -1)"
+                                                                    class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
+                                                                    <i class="fas fa-minus"></i>
+                                                                </button>
+                                                                <input type="number" id="compound-interval-hours" min="0" max="23" value="6"
+                                                                    oninput="onCompoundIntervalInput('h')"
+                                                                    onchange="onCompoundIntervalChange('h')"
+                                                                    onblur="onCompoundIntervalChange('h')"
+                                                                    class="w-full text-center bg-transparent text-xs font-bold t-text-main focus:outline-none py-1">
+                                                                <button type="button" onclick="stepCompoundInterval('h', 1)"
+                                                                    class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
+                                                                    <i class="fas fa-plus"></i>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        <!-- 分钟 -->
+                                                        <div class="flex flex-col items-center">
+                                                            <div class="text-[10px] text-gray-400 mb-1 font-medium">分钟</div>
+                                                            <div class="flex items-center w-full border t-border-main rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800/50">
+                                                                <button type="button" onclick="stepCompoundInterval('m', -1)"
+                                                                    class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
+                                                                    <i class="fas fa-minus"></i>
+                                                                </button>
+                                                                <input type="number" id="compound-interval-minutes" min="0" max="59" value="0"
+                                                                    oninput="onCompoundIntervalInput('m')"
+                                                                    onchange="onCompoundIntervalChange('m')"
+                                                                    onblur="onCompoundIntervalChange('m')"
+                                                                    class="w-full text-center bg-transparent text-xs font-bold t-text-main focus:outline-none py-1">
+                                                                <button type="button" onclick="stepCompoundInterval('m', 1)"
+                                                                    class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
+                                                                    <i class="fas fa-plus"></i>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="flex items-center justify-between gap-2 pt-2.5 border-t t-border-main">
+                                                    <div class="text-[11px] text-gray-400">
+                                                        预览: <span id="interval-preview-text" class="font-semibold text-emerald-500">6 小时</span>
+                                                    </div>
+                                                    <div class="flex gap-1.5">
+                                                        <button type="button" onclick="closeIntervalPopover()"
+                                                            class="px-3 py-1 text-xs rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all">
+                                                            取消
+                                                        </button>
+                                                        <button type="button" onclick="applyIntervalPicker()"
+                                                            class="px-3.5 py-1 text-xs font-semibold rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm transition-all active:scale-95">
+                                                            确定
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div class="flex items-center justify-between">
                                         <div>
