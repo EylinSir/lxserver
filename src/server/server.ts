@@ -30,6 +30,8 @@ import * as fileCache from './fileCache'
 import * as customMusicManager from './customMusicManager'
 import * as serverDownloadQueue from './serverDownloadQueue'
 import * as remasterQueue from './remasterQueue'
+import * as scheduler from './scheduler'
+import { getUpdatedListIds, removeUpdatedListId } from './task/networkListTask'
 import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import needle from 'needle'
@@ -2651,6 +2653,20 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             }
 
             fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
+
+            // 如果更新了网络歌单自动检测设置，同步更新后台任务调度器
+            if (settings.networkListAutoCheckInterval !== undefined || settings.autoUpdateNetworkList !== undefined) {
+              const taskConfig: { intervalMs?: number; enabled?: boolean } = {}
+              if (settings.networkListAutoCheckInterval !== undefined) {
+                const ms = scheduler.parseIntervalMs(settings.networkListAutoCheckInterval)
+                if (ms) taskConfig.intervalMs = ms
+              }
+              if (settings.autoUpdateNetworkList !== undefined) {
+                taskConfig.enabled = !!settings.autoUpdateNetworkList
+              }
+              scheduler.updateTaskConfig('network_list_autocheck', taskConfig)
+            }
+
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true }))
           } catch (err: any) {
@@ -2926,6 +2942,107 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end('{}')
         }
+        return
+      }
+
+      // [后台任务] 获取所有后台定时任务状态
+      if ((pathname === '/api/tasks/status' || pathname === '/api/music/tasks/status') && req.method === 'GET') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default'
+        
+        if (!isPublic && !verifyUserAuth(req)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+
+        const tasks = scheduler.getSchedulerStatus()
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, tasks }))
+        return
+      }
+
+      // [后台任务] 手动触发后台定时任务执行
+      if ((pathname === '/api/tasks/trigger' || pathname === '/api/music/tasks/trigger') && req.method === 'POST') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default'
+        
+        if (isPublic) {
+          if (global.lx.config['user.enablePublicRestriction']) {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['frontend.password']) {
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '权限不足：受限模式下需要管理员权限' }))
+              return
+            }
+          }
+        } else {
+          if (!verifyUserAuth(req)) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+        }
+
+        const taskId = urlObj.searchParams.get('id') || 'network_list_autocheck'
+        void scheduler.executeTask(taskId).then(result => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        }).catch(err => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [后台任务] 通用任务用户数据接口（内存临时，重启后自动清除）
+      // GET  /api/tasks/user-data?task=<taskId>  → 返回当前用户该任务的状态数据
+      // POST /api/tasks/user-data?task=<taskId>  → 更新（如清除红点）
+      if ((pathname === '/api/tasks/user-data' || pathname === '/api/music/tasks/user-data') &&
+          (req.method === 'GET' || req.method === 'POST')) {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default'
+        let targetUser = '_open'
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (verified) targetUser = verified
+        }
+
+        const taskId = urlObj.searchParams.get('task') || ''
+
+        // 目前支持的任务类型：network_list_autocheck
+        if (taskId === 'network_list_autocheck') {
+          if (req.method === 'GET') {
+            const updatedListIds = getUpdatedListIds(targetUser)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, updatedListIds }))
+            return
+          }
+
+          if (req.method === 'POST') {
+            void readBody(req).then(body => {
+              try {
+                let clearId = ''
+                if (typeof body === 'string') {
+                  try { clearId = JSON.parse(body).listId || JSON.parse(body).id || '' } catch { clearId = body.trim() }
+                } else if (body && typeof body === 'object') {
+                  clearId = (body as any).listId || (body as any).id || ''
+                }
+                if (clearId) removeUpdatedListId(targetUser, clearId)
+                const updatedListIds = getUpdatedListIds(targetUser)
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: true, updatedListIds }))
+              } catch (err: any) {
+                res.writeHead(500, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: err.message }))
+              }
+            })
+            return
+          }
+        }
+
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, message: '未知任务或不支持的操作' }))
         return
       }
 
@@ -7723,6 +7840,7 @@ export const startServer = async (port: number, ip: string) => {
     // console.log('sync server started')
     status.status = true
     status.message = ''
+    scheduler.startScheduler()
     status.address = ip == '0.0.0.0' ? getAddress() : [ip]
 
 

@@ -259,13 +259,18 @@ class SubsonicHandler {
     private userRatingsCache = new Map<string, Record<string, number>>()
     private currentUsername = ''
 
-    private getOnlineSongCachePath(): string {
-        return path.join(global.lx.dataPath, 'subsonic-online-cache.json')
+    private getRuntimeDir(): string {
+        const dir = path.join(global.lx.dataPath, 'runtime')
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+        return dir
     }
 
-    // [日志] 音源(在线回源)类错误统一写独立文件，控制台只打精简一行
+    private getOnlineSongCachePath(): string {
+        return path.join(this.getRuntimeDir(), 'subsonic-online-cache.json')
+    }
+
     private getSourceErrorLogPath(): string {
-        return path.join(global.lx.dataPath, 'subsonic-source-errors.log')
+        return path.join(this.getRuntimeDir(), 'subsonic-source-errors.log')
     }
 
     private logSourceError(tag: string, detail: string, err?: any) {

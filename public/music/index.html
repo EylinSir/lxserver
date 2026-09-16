@@ -1888,10 +1888,15 @@
                                                 自动更新网络歌单
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
-                                                    <span
-                                                        class="setting-tooltip-content">开启后，点击进入网络歌单时将自动尝试同步远端内容。注意：此操作可能会覆盖本地对该歌单的修改。</span>
+                                                    <span class="setting-tooltip-content">
+                                                        <b>总开关：同时控制以下两种自动更新行为</b><br><br>
+                                                        ① <b>服务端后台定时同步</b>：按下方设置的检测间隔，服务器自动拉取所有账号的网络歌单，发现变化时覆盖更新并在侧栏显示红点提示。<br><br>
+                                                        ② <b>点击歌单时自动同步</b>：进入网络歌单时，自动尝试从原始地址拉取最新内容。<br><br>
+                                                        注意：自动更新会覆盖本地对该歌单的修改。
+                                                    </span>
                                                 </span>
                                             </div>
+                                            <div class="text-xs t-text-muted mt-0.5">控制服务端后台定时同步 & 点击歌单时自动拉取</div>
                                         </div>
                                         <label class="relative inline-flex items-center cursor-pointer">
                                             <input type="checkbox" id="setting-auto-update-list" class="sr-only peer"
@@ -1904,19 +1909,34 @@
 
                                     <div class="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto] md:items-center">
                                         <div>
-                                            <div class="text-sm font-bold t-text-main">网络歌单自动检测间隔</div>
-                                            <div class="text-xs t-text-muted mt-1">输入值示例：30m / 6h / 1d，开启后自动检测并标记已更新歌单。
+                                            <div class="text-sm font-bold t-text-main">
+                                                网络歌单自动检测间隔
+                                            </div>
+                                            <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+                                                <span id="task-last-run-badge" class="text-[11px] px-2 py-0.5 rounded-lg border t-border-main text-gray-500 dark:text-gray-400 font-normal bg-gray-50/50 dark:bg-gray-800/50 flex items-center gap-1">
+                                                    <i class="fas fa-history text-[9px] text-emerald-500"></i>
+                                                    <span id="task-last-run-text">上次执行: 加载中...</span>
+                                                </span>
+                                                <span id="task-next-run-badge" class="text-[11px] px-2 py-0.5 rounded-lg border t-border-main text-gray-500 dark:text-gray-400 font-normal bg-gray-50/50 dark:bg-gray-800/50 flex items-center gap-1">
+                                                    <i class="far fa-clock text-[9px] text-emerald-500"></i>
+                                                    <span id="task-next-run-text">下次执行: 加载中...</span>
+                                                </span>
+                                            </div>
+                                            <div class="text-xs t-text-muted mt-1.5">
+                                                服务端后台任务：定时轮询所有账号的网络歌单，发现变化时自动更新并标红。
                                             </div>
                                         </div>
-                                        <div class="relative flex items-center gap-2">
-                                            <input id="setting-network-list-auto-check-interval" type="hidden"
-                                                value="6h" onchange="updateSetting('networkListAutoCheckInterval', this.value)">
-                                            <button type="button" id="btn-open-interval-popover" onclick="toggleIntervalPopover(event)"
-                                                class="flex items-center gap-2 px-3.5 py-2 rounded-xl border t-border-main bg-white/60 dark:bg-gray-800/60 hover:border-emerald-500/50 hover:bg-emerald-50/30 dark:hover:bg-emerald-950/20 text-sm font-medium transition-all shadow-sm">
-                                                <i class="far fa-clock text-emerald-500 text-sm"></i>
-                                                <span id="interval-trigger-label" class="t-text-main font-semibold tracking-wide">6小时</span>
-                                                <i class="fas fa-chevron-down text-xs t-text-muted ml-1 transition-transform duration-200" id="interval-chevron-icon"></i>
-                                            </button>
+                                        <div class="relative flex flex-col items-end gap-1.5">
+                                            <div class="flex items-center gap-2">
+                                                <input id="setting-network-list-auto-check-interval" type="hidden"
+                                                    value="6h" onchange="updateSetting('networkListAutoCheckInterval', this.value)">
+                                                <button type="button" id="btn-open-interval-popover" onclick="toggleIntervalPopover(event)"
+                                                    class="flex items-center gap-2 px-3.5 py-2 rounded-xl border t-border-main bg-white/60 dark:bg-gray-800/60 hover:border-emerald-500/50 hover:bg-emerald-50/30 dark:hover:bg-emerald-950/20 text-sm font-medium transition-all shadow-sm">
+                                                    <i class="far fa-clock text-emerald-500 text-sm"></i>
+                                                    <span id="interval-trigger-label" class="t-text-main font-semibold tracking-wide">6小时</span>
+                                                    <i class="fas fa-chevron-down text-xs t-text-muted ml-1 transition-transform duration-200" id="interval-chevron-icon"></i>
+                                                </button>
+                                            </div>
 
                                             <div id="interval-popover-panel"
                                                 class="hidden absolute right-0 top-full mt-2 w-72 p-4 rounded-2xl shadow-2xl border t-border-main bg-white dark:bg-gray-900 z-50 animate-fade-in backdrop-blur-md">

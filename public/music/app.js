@@ -465,6 +465,127 @@ function setupNetworkListAutoCheck() {
 }
 
 async function checkNetworkListUpdates(manual = false) {
+    if (manual) {
+        if (window.showToast) showToast('info', '已向服务端提交网络歌单检测任务...', 3000);
+    }
+
+    try {
+        // 1. 触发服务端后台定时任务执行
+        const res = await fetch(`${API_BASE}/tasks/trigger?id=network_list_autocheck`, {
+            method: 'POST',
+            headers: getUserAuthHeaders()
+        });
+        const result = await res.json();
+        console.log('[Scheduler] 手动触发后台任务结果:', result);
+
+        // 2. 从服务端拉取更新标记状态
+        await syncServerNetworkListUpdates();
+
+        if (manual) {
+            if (result.success) {
+                showSuccess(result.message || '网络歌单后台检测完成');
+            } else {
+                showError(result.message || '网络歌单检测失败');
+            }
+        }
+    } catch (err) {
+        console.warn('[CheckNetworkListUpdates] 服务端任务调用异常，降级到本地网页检测:', err);
+        await checkNetworkListUpdatesFallback(manual);
+    }
+}
+
+async function syncServerNetworkListUpdates() {
+    try {
+        const res = await fetch(`${API_BASE}/tasks/user-data?task=network_list_autocheck`, {
+            headers: getUserAuthHeaders()
+        });
+        const data = await res.json();
+        if (data && Array.isArray(data.updatedListIds)) {
+            window.networkListUpdateMap.clear();
+            for (const id of data.updatedListIds) {
+                window.networkListUpdateMap.add(id);
+            }
+            if (typeof renderMyLists === 'function' && currentListData) {
+                renderMyLists(currentListData);
+            }
+        }
+    } catch (e) {
+        console.warn('[Scheduler] 获取网络歌单更新状态失败:', e);
+    }
+    // 同步拉取后台任务执行状态并刷新北京时间展示
+    await refreshTaskScheduleStatus();
+}
+
+/**
+ * 格式化为北京时间 (UTC+8) 字符串
+ */
+function formatToBeijingTime(timestamp) {
+    if (!timestamp || typeof timestamp !== 'number') return '--';
+    try {
+        const date = new Date(timestamp);
+        return date.toLocaleString('zh-CN', {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+    } catch (err) {
+        const d = new Date(timestamp);
+        return d.toLocaleTimeString();
+    }
+}
+
+/**
+ * 从服务端拉取后台任务状态并在前端展示北京时间
+ */
+async function refreshTaskScheduleStatus() {
+    try {
+        const res = await fetch(`${API_BASE}/tasks/status`, {
+            headers: getUserAuthHeaders()
+        });
+        const data = await res.json();
+        if (!data || !Array.isArray(data.tasks)) return;
+
+        const task = data.tasks.find(t => t.id === 'network_list_autocheck');
+        if (!task) return;
+
+        const lastRunTextEl = document.getElementById('task-last-run-text');
+        const nextRunTextEl = document.getElementById('task-next-run-text');
+
+        if (lastRunTextEl) {
+            if (task.isRunning) {
+                lastRunTextEl.innerHTML = '<span class="text-emerald-500 animate-pulse font-medium"><i class="fas fa-spinner fa-spin mr-1"></i>正在执行后台检测...</span>';
+            } else if (task.lastRunTime) {
+                const bjTime = formatToBeijingTime(task.lastRunTime);
+                lastRunTextEl.innerHTML = `上次执行: <span class="text-emerald-600 dark:text-emerald-400 font-semibold">${bjTime}</span>`;
+            } else {
+                lastRunTextEl.innerHTML = '上次执行: <span class="text-gray-400">尚未执行</span>';
+            }
+        }
+
+        if (nextRunTextEl) {
+            if (!task.enabled) {
+                nextRunTextEl.innerHTML = '下次执行: <span class="text-gray-400">自动检测已关闭</span>';
+            } else if (task.nextRunTime) {
+                const bjTime = formatToBeijingTime(task.nextRunTime);
+                nextRunTextEl.innerHTML = `下次执行: <span class="text-emerald-600 dark:text-emerald-400 font-semibold">${bjTime}</span>`;
+            } else {
+                nextRunTextEl.innerHTML = '下次执行: <span class="text-gray-400">等待调度</span>';
+            }
+        }
+    } catch (e) {
+        console.warn('[Scheduler] 拉取任务执行时间失败:', e);
+    }
+}
+
+window.refreshTaskScheduleStatus = refreshTaskScheduleStatus;
+
+// 兜底本地浏览器检测机制
+async function checkNetworkListUpdatesFallback(manual = false) {
     if (!currentListData || !Array.isArray(currentListData.userList) || currentListData.userList.length === 0) {
         if (manual && window.showToast) showToast('info', '当前没有可检查的网络歌单', 3000);
         return;
@@ -495,17 +616,30 @@ async function checkNetworkListUpdates(manual = false) {
             });
 
             const localList = Array.isArray(list.list) ? list.list : [];
-            const sameLength = localList.length === remoteList.length;
-            const sameIds = sameLength && localList.every((item, index) => item && remoteList[index] && String(item.id || '') === String(remoteList[index].id || '') && String(item.source || '') === String(remoteList[index].source || ''));
+            // 用 Set 比较（顺序无关）
+            const normalizeIds = (arr) => arr.map(s => String(s.id || s.songmid || '').trim()).sort().join('|');
+            const sameIds = normalizeIds(localList) === normalizeIds(remoteList);
             if (!sameIds) {
+                // 直接就地更新歌单歌曲及信息
+                list.list = remoteList;
+                if (data.info) {
+                    if (data.info.name) list.name = data.info.name;
+                    if (data.info.img || data.info.pic) list.Album = data.info.img || data.info.pic;
+                }
                 window.networkListUpdateMap.add(list.id);
                 changedLists.push(list.name || list.id || list.sourceListId);
-            } else {
-                window.networkListUpdateMap.delete(list.id);
             }
         } catch (err) {
             console.error('[CheckNetworkListUpdates] 检查失败:', list.name || list.id || list.sourceListId, err);
             failedLists.push(list.name || list.id || list.sourceListId);
+        }
+    }
+
+    if (changedLists.length > 0) {
+        try {
+            await pushDataChange();
+        } catch (err) {
+            console.error('[CheckNetworkListUpdates] 持久化更新歌单失败:', err);
         }
     }
 
@@ -524,12 +658,11 @@ async function checkNetworkListUpdates(manual = false) {
         if (failedLists.length > 0) {
             showError(`部分歌单检测失败：${failedListNames.join('、')}`);
         }
-    } else if (changedLists.length > 0 && window.showToast) {
-        showToast('info', `检测到 ${changedLists.length} 个网络歌单有更新`, 5000);
     }
 }
 
 window.checkNetworkListUpdates = checkNetworkListUpdates;
+window.syncServerNetworkListUpdates = syncServerNetworkListUpdates;
 
 
 
@@ -540,6 +673,15 @@ setTimeout(() => {
         window.updateServerCacheConfig(settings.serverCacheLocation, settings.serverCacheNamingPattern);
     }
 }, 2000);
+
+// 页面加载后立即拉取服务端后台任务状态与歌单更新状态，并每隔 30 秒自动刷新
+setTimeout(() => {
+    syncServerNetworkListUpdates();
+}, 500);
+setInterval(() => {
+    refreshTaskScheduleStatus();
+    syncServerNetworkListUpdates();
+}, 30 * 1000);
 
 window.batchMode = false;
 window.selectedItems = new Set();
@@ -6631,6 +6773,11 @@ function loadSettings() {
     // 同步 UI 状态
     syncSettingsUI();
     setupNetworkListAutoCheck();
+
+    // 从服务端拉取后台任务检测到的网络歌单更新状态
+    if (typeof syncServerNetworkListUpdates === 'function') {
+        syncServerNetworkListUpdates();
+    }
 }
 
 // ========== 键盘快捷键逻辑 ==========
@@ -6823,6 +6970,9 @@ async function updateSetting(key, value) {
     syncSettingsUI(key, value);
     if (key === 'networkListAutoCheckInterval' || key === 'autoUpdateNetworkList') {
         setupNetworkListAutoCheck();
+        if (typeof refreshTaskScheduleStatus === 'function') {
+            setTimeout(refreshTaskScheduleStatus, 300);
+        }
     }
 
     // [New] Push to server if enabled
@@ -10853,15 +11003,129 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
     }
     renderResults(list);
 
+    // 用户已查看该歌单：清除该歌单的红点提示（本地 + 服务端记录）
+    const hadServerUpdate = window.networkListUpdateMap && window.networkListUpdateMap.has(listId);
+    if (hadServerUpdate) {
+        window.networkListUpdateMap.delete(listId);
+        // 通知服务端移除红点
+        fetch(`${API_BASE}/tasks/user-data?task=network_list_autocheck`, {
+            method: 'POST',
+            headers: getUserAuthHeaders(),
+            body: JSON.stringify({ listId })
+        }).catch(e => console.warn('[Scheduler] 清除红点标记失败:', e));
+
+        // 刷新左侧栏红点显示
+        const targetBadge = subItem?.querySelector('span.bg-rose-500');
+        if (targetBadge) {
+            targetBadge.remove();
+        }
+    }
+
     // [New] Auto Update Logic: If it's a network playlist (has sourceListId) and setting is ON, refresh background
+    // 注意：如果服务端已自动更新过（hadServerUpdate），数据已是最新，不再触发客户端拉取
+    // 客户端 handleRefreshList 只拉第 1 页，若本地是多页全量则会覆盖为截断数据，导致下次误判"有更新"
     const uList = currentListData.userList ? currentListData.userList.find(l => l.id === listId) : null;
-    if (!skipAutoUpdate && settings.autoUpdateNetworkList && uList && uList.sourceListId && uList.source) {
+    if (!skipAutoUpdate && settings.autoUpdateNetworkList && !hadServerUpdate && uList && uList.sourceListId && uList.source) {
         console.log('[AutoUpdate] Triggering background refresh for list:', listId);
         handleRefreshList(listId, null, true); // true means silent/no-confirm
+    }
+
+
+}
+
+/**
+ * handleRefreshList: 刷新网络歌单
+ * - 手动模式 (silent=false): 拉取全部页，有变化才覆盖，显示 toast
+ * - 静默自动模式 (silent=true): 拉取全部页，先与本地比较，有变化才覆盖（避免无意义 snapshot）
+ */
+async function handleRefreshList(listId, event, silent = false) {
+    if (event) event.stopPropagation();
+    if (!currentListData) return;
+
+    const list = currentListData.userList.find(l => l.id === listId);
+    if (!list || !list.sourceListId || !list.source) {
+        if (!silent && window.showToast) window.showToast('info', '该歌单不支持在线刷新');
+        return;
+    }
+
+    if (!silent) {
+        const safeListName = escapeHtmlText(list.name || list.id || list.sourceListId || '');
+        const confirmed = await showSelect('更新歌单', `是否更新当前歌单 "${safeListName}"？\n(确认后将重新从服务器拉取歌单并覆盖当前内容)`, {
+            confirmText: '确定更新',
+            confirmColor: 'bg-emerald-500'
+        });
+        if (!confirmed) return;
+        if (window.showToast) window.showToast('info', '正在同步最新歌单内容...');
+    }
+
+    try {
+        const formatItem = (s) => {
+            const item = formatSongToLxMusicStandard(s);
+            if (!item.source) item.source = list.source;
+            return item;
+        };
+
+        // 拉取第 1 页
+        const res = await fetch(`${API_BASE}/songList/detail?source=${encodeURIComponent(list.source)}&id=${encodeURIComponent(list.sourceListId)}&page=1`);
+        const data = await res.json();
+        if (!data || !data.list) throw new Error('数据拉取失败');
+
+        let newList = data.list.map(formatItem);
+
+        // 拉取全部剩余页（修复原来只拉第 1 页导致覆盖截断的问题）
+        const total = data.total ?? data.list.length;
+        const pageSize = data.list.length || 1;
+        const totalPages = Math.ceil(total / pageSize);
+        for (let page = 2; page <= totalPages; page++) {
+            try {
+                const pageRes = await fetch(`${API_BASE}/songList/detail?source=${encodeURIComponent(list.source)}&id=${encodeURIComponent(list.sourceListId)}&page=${page}`);
+                const pageData = await pageRes.json();
+                if (pageData && Array.isArray(pageData.list) && pageData.list.length > 0) {
+                    newList = newList.concat(pageData.list.map(formatItem));
+                } else {
+                    break;
+                }
+            } catch { break; }
+        }
+
+        // 比较本地与远端是否一致（顺序无关）
+        const normalizeIds = (arr) => arr.map(s => String(s.id || s.songmid || '').trim()).sort().join('|');
+        const localList = Array.isArray(list.list) ? list.list : [];
+        const hasChanges = normalizeIds(localList) !== normalizeIds(newList);
+
+        if (!hasChanges) {
+            if (!silent && window.showToast) window.showToast('info', '歌单内容已是最新，无需同步');
+            return;
+        }
+
+        // 有变化：更新列表模型
+        list.list = newList;
+        if (data.info) {
+            if (data.info.name) list.name = data.info.name;
+            if (data.info.img || data.info.pic) list.Album = data.info.img || data.info.pic;
+        }
+
+        // 手动刷新等同于已查看，清除红点
+        if (window.networkListUpdateMap) {
+            window.networkListUpdateMap.delete(listId);
+        }
+
+        await pushDataChange();
+        renderMyLists(currentListData);
+
+        if (window.currentViewingListId === listId) {
+            handleListClick(listId, true); // skipAutoUpdate=true 避免递归
+        }
+
+        if (!silent && window.showToast) window.showToast('success', '歌单内容已同步至最新状态');
+    } catch (e) {
+        console.error('[Refresh] Failed:', e);
+        if (!silent && window.showToast) window.showToast('error', '歌单同步失败: ' + e.message);
     }
 }
 
 function handleFavoritesClick() {
+
     exitListSecondaryModes();
 
     // Highlight Header
@@ -11261,69 +11525,6 @@ async function toggleLove() {
     await pushDataChange(activeListData);
 }
 
-async function handleRefreshList(listId, event, silent = false) {
-    if (event) event.stopPropagation();
-    if (!currentListData) return;
-
-    const list = currentListData.userList.find(l => l.id === listId);
-    if (!list || !list.sourceListId || !list.source) {
-        if (!silent && window.showToast) window.showToast('info', '该歌单不支持在线刷新');
-        return;
-    }
-
-    if (!silent) {
-        const safeListName = escapeHtmlText(list.name || list.id || list.sourceListId || '');
-        const confirmed = await showSelect('更新歌单', `是否更新当前歌单 "${safeListName}"？\n(确认后将重新从服务器拉取歌单并覆盖当前内容)`, {
-            confirmText: '确定更新',
-            confirmColor: 'bg-emerald-500'
-        });
-
-        if (!confirmed) return;
-    }
-
-    if (window.showToast) window.showToast('info', '正在同步最新歌单内容...');
-
-    try {
-        const url = `${API_BASE}/songList/detail?source=${encodeURIComponent(list.source)}&id=${encodeURIComponent(list.sourceListId)}&page=1`;
-        const res = await fetch(url);
-        const data = await res.json();
-
-        if (!data || !data.list) throw new Error('数据拉取失败');
-
-        // 格式化新歌曲列表
-        const newList = data.list.map(s => {
-            const item = formatSongToLxMusicStandard(s);
-            if (!item.source) item.source = list.source;
-            return item;
-        });
-
-        // 更新列表模型
-        list.list = newList;
-        if (data.info) {
-            if (data.info.name) list.name = data.info.name;
-            if (data.info.img || data.info.pic) list.Album = data.info.img || data.info.pic;
-        }
-
-        // 清除该列表的更新标记
-        if (window.networkListUpdateMap) {
-            window.networkListUpdateMap.delete(listId);
-        }
-
-        // 推送同步并重绘 UI
-        await pushDataChange();
-        renderMyLists(currentListData);
-
-        // 如果当前正处于该列表视图，刷新结果列表显示
-        if (window.currentViewingListId === listId) {
-            handleListClick(listId, true); // Skip auto-update to avoid loop
-        }
-
-        if (window.showToast) window.showToast('success', '歌单内容已同步至最新状态');
-    } catch (e) {
-        console.error('[Refresh] Failed:', e);
-        if (window.showToast) window.showToast('error', '歌单同步失败: ' + e.message);
-    }
-}
 
 async function handleJumpToOriginalList(listId, event) {
     if (event) event.stopPropagation();
