@@ -163,14 +163,21 @@
 
 /* 侧边栏操作按钮组：仅悬浮或选中时展示，紧凑精致 */
 .playlist-sidebar-item .sidebar-item-actions {
-    display: none;
+    display: flex;
     align-items: center;
     gap: 1.5px;
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: max-width 0.15s ease, opacity 0.12s ease;
 }
 
 .playlist-sidebar-item:hover .sidebar-item-actions,
 .playlist-sidebar-item.active-sub-item .sidebar-item-actions {
-    display: flex !important;
+    max-width: 200px;
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .playlist-sidebar-item .action-btn {
@@ -260,6 +267,14 @@
     /* 右侧操作按钮间距极大缩小、彼此紧密靠近 */
     .playlist-sidebar-item .sidebar-item-actions {
         gap: 1px !important;
+        max-width: 0;
+        opacity: 0;
+    }
+
+    .playlist-sidebar-item:hover .sidebar-item-actions,
+    .playlist-sidebar-item.active-sub-item .sidebar-item-actions {
+        max-width: 150px !important;
+        opacity: 1 !important;
     }
 
     .playlist-sidebar-item .action-btn {

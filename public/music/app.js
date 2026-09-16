@@ -10720,6 +10720,21 @@ if (!window._sidebarMarqueeBound) {
         item.classList.add('is-marquee-active');
     };
 
+    // 停止 marquee 并还原 DOM 结构（移除 copy span，把 text 移回 wrapper）
+    window._resetSidebarMarquee = (item) => {
+        item.classList.remove('is-marquee-active');
+        const wrap = item.querySelector('.playlist-name-wrapper');
+        const track = wrap?.querySelector('.playlist-name-track');
+        if (!track) return;
+        const text = track.querySelector('.playlist-name-text');
+        if (text) {
+            // 恢复 text span 原始样式（被 marquee 改写过的 !important 通过 class 控制，移除 is-marquee-active 即可）
+            wrap.replaceChildren(text);
+        } else {
+            wrap.innerHTML = '';
+        }
+    };
+
     // 悬浮进入
     document.addEventListener('mouseover', (e) => {
         const item = e.target.closest?.('.playlist-sidebar-item');
@@ -10730,14 +10745,41 @@ if (!window._sidebarMarqueeBound) {
         });
     });
 
-    // 悬浮离开：若仍被选中则保持滚动，否则停止
+    // 悬浮离开：若仍被选中则保持滚动，否则停止并还原 DOM
     document.addEventListener('mouseout', (e) => {
         const item = e.target.closest?.('.playlist-sidebar-item');
         if (!item || (e.relatedTarget && item.contains(e.relatedTarget))) return;
         if (!item.classList.contains('active-sub-item')) {
-            item.classList.remove('is-marquee-active');
+            window._resetSidebarMarquee(item);
         }
     });
+
+    // 滚动时浏览器不触发 mouseout，is-marquee-active 会粘住 → 强制清理
+    let _sidebarScrollTimer = null;
+    const _clearStaleMarquee = () => {
+        document.querySelectorAll('.playlist-sidebar-item.is-marquee-active:not(.active-sub-item)').forEach(el => {
+            if (!el.matches(':hover')) window._resetSidebarMarquee(el);
+        });
+    };
+    // 暴露为全局方法，供外部（active-sub-item 切换等）调用
+    window._clearSidebarStaleMarquee = _clearStaleMarquee;
+
+    // 侧边栏点击任意项时清理：点击切换歌单不触发 mouseout，旧 marquee 的 copy DOM 会残留
+    document.addEventListener('click', (e) => {
+        if (e.target.closest?.('[data-sidebar-list-id]')) {
+            setTimeout(_clearStaleMarquee, 0);
+        }
+    }, { capture: true });
+
+    const _sidebarScrollTarget = document.getElementById('my-lists-container')?.closest('[class*="overflow"]') ||
+                                  document.getElementById('my-lists-container')?.parentElement;
+    if (_sidebarScrollTarget) {
+        _sidebarScrollTarget.addEventListener('scroll', () => {
+            clearTimeout(_sidebarScrollTimer);
+            _clearStaleMarquee();
+            _sidebarScrollTimer = setTimeout(_clearStaleMarquee, 150);
+        }, { passive: true });
+    }
 }
 
 function renderMyLists(data) {
@@ -10764,12 +10806,11 @@ function renderMyLists(data) {
         // Buttons logic (for collected external playlists)
         const showExternalOps = listObj && listObj.sourceListId && listObj.source;
         let extOpsHtml = '';
+        const updateBadge = showExternalOps && window.networkListUpdateMap && window.networkListUpdateMap.has(id)
+            ? `<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex-shrink-0" title="歌单有更新">!</span>`
+            : '';
         if (showExternalOps) {
-            const updateBadge = window.networkListUpdateMap && window.networkListUpdateMap.has(id)
-                ? `<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex-shrink-0 mr-0.5" title="歌单有更新">!</span>`
-                : '';
             extOpsHtml = `
-                ${updateBadge}
                 <button type="button" class="action-btn refresh-btn flex-shrink-0" 
                    title="更新歌单内容" 
                    onclick="event.stopPropagation(); handleRefreshList('${id}', event)">
@@ -10792,6 +10833,7 @@ function renderMyLists(data) {
                 <span class="playlist-name-text truncate block w-full select-none">${safeName}</span>
             </div>
             <div class="flex items-center flex-shrink-0 ml-1">
+                ${updateBadge}
                 <span class="text-xs text-gray-400 group-hover:t-text-muted transition-colors mr-1 sidebar-item-count">${count}</span>
                 <div class="sidebar-item-actions items-center gap-[1px]">
                     ${extOpsHtml}
@@ -10985,9 +11027,12 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
 
     // Highlight Child List
     document.querySelectorAll('[data-sidebar-list-id]').forEach(el => {
-        el.classList.remove('active-sub-item', 'is-marquee-active');
+        el.classList.remove('active-sub-item');
         el.classList.add('t-text-muted');
+        // 还原 marquee DOM（移除 copy span 和 track 包裹层）
+        window._resetSidebarMarquee?.(el);
     });
+
     const subItem = document.querySelector(`[data-sidebar-list-id="${listId}"]`);
     if (subItem) {
         subItem.classList.add('active-sub-item');
