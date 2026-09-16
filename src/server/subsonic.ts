@@ -15,6 +15,10 @@ import { proxyCoverImage } from '@/server/coverProxy'
 import { subsonicLog } from '@/utils/log4js'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
 import { listRadioStations, getRadioStation, addRadioStation, updateRadioStation, removeRadioStation } from '@/server/radioStations'
+
+// 音乐源歌单 → 电台 列表缓存（避免每次 getInternetRadioStations 都枚举全部音源实拉）
+let playlistRadioCache: { ts: number; stations: any[] } | null = null
+const PLAYLIST_RADIO_TTL = 10 * 60 * 1000
 import fs from 'fs'
 import path from 'path'
 // @ts-ignore
@@ -2436,10 +2440,53 @@ class SubsonicHandler {
             : { internetRadioStation: { attrs: station } }
     }
 
+    /**
+     * 音乐源歌单 → 电台站点：枚举各音源 songList.getList 的公开热门歌单，
+     * 每个歌单包装成一个 Internet Radio Station（id=radio_pl_<source>_<plId>），
+     * 播放时由 stream 处理随机取歌单内一首歌（见 handleStream 的 radio_pl_ 分支）。
+     * 结果缓存 10 分钟，避免每次打开电台页都实拉全部音源。
+     */
+    private async getPlaylistRadioStations(): Promise<any[]> {
+        const now = Date.now()
+        if (playlistRadioCache && now - playlistRadioCache.ts < PLAYLIST_RADIO_TTL) {
+            return playlistRadioCache.stations
+        }
+        const stations: any[] = []
+        const perSourceCap = 12
+        const totalCap = 90
+        const sources = Object.keys((musicSdk as any) || {}).filter(
+            (s) => (musicSdk as any)[s]?.songList?.getList && (musicSdk as any)[s]?.songList?.getListDetail,
+        )
+        for (const source of sources) {
+            if (stations.length >= totalCap) break
+            try {
+                const res: any = await (musicSdk as any)[source].songList.getList('hot', '', 1)
+                const list: any[] = res?.list || []
+                for (const item of list.slice(0, perSourceCap)) {
+                    const plId = String(item.id ?? item.dissid ?? item.tid ?? item.listId)
+                    if (!plId) continue
+                    const stationId = `radio_pl_${source}_${plId}`
+                    stations.push({
+                        id: stationId,
+                        name: item.name || `歌单(${source})`,
+                        streamUrl: `/rest/stream?id=${stationId}`,
+                        homepageUrl: '',
+                    })
+                    if (stations.length >= totalCap) break
+                }
+            } catch (err) {
+                subsonicLog.warn(`[Subsonic] getPlaylistRadioStations source ${source} failed: ${(err as any)?.message || err}`)
+            }
+        }
+        playlistRadioCache = { ts: now, stations }
+        return stations
+    }
+
     private async handleGetInternetRadioStations(res: http.ServerResponse, format: string) {
         try {
             const official = await fetchRadios()           // QQ 官方电台：streamUrl 指向本服 /rest/stream?id=radio_tx_*
             const userStations = listRadioStations()        // 用户自建电台：落盘持久化
+            const playlistStations = await this.getPlaylistRadioStations() // 音乐源歌单：本服随机取歌
             const stations = [
                 ...official.map((r: any) => ({
                     id: r.id,
@@ -2452,6 +2499,12 @@ class SubsonicHandler {
                     name: s.name,
                     streamUrl: s.streamUrl,
                     homepageUrl: s.homepageUrl || '',
+                })),
+                ...playlistStations.map((r) => ({
+                    id: r.id,
+                    name: r.name,
+                    streamUrl: r.streamUrl,
+                    homepageUrl: r.homepageUrl || '',
                 })),
             ]
             if (format === 'json') {
@@ -4038,6 +4091,38 @@ class SubsonicHandler {
                     return res.end()
                 }
                 return this.sendError(res, 70, 'Radio station not found', format)
+            }
+
+            // [新增] 音乐源歌单 → 电台(radio_pl_<source>_<plId>)：随机取歌单内一首歌播放
+            if (id.startsWith('radio_pl_')) {
+                const rest = id.slice('radio_pl_'.length)
+                const us = rest.indexOf('_')
+                if (us <= 0) return this.sendError(res, 70, 'Invalid playlist radio id', format)
+                const plSource = rest.slice(0, us)
+                const plId = rest.slice(us + 1)
+                try {
+                    const detail: any = await (musicSdk as any)[plSource]?.songList?.getListDetail?.(plId, 1)
+                    const songs: any[] = detail?.list || []
+                    if (songs.length > 0) {
+                        const s = songs[Math.floor(Math.random() * songs.length)]
+                        const songmid = String(s.songmid || s.mid || s.id || s.hash || '')
+                        if (!songmid) return this.sendError(res, 0, 'Playlist radio song missing songmid', format)
+                        const musicInfo: any = {
+                            ...s,
+                            source: s.source || plSource,
+                            songmid,
+                            meta: { ...(s.meta || {}), songId: songmid },
+                        }
+                        const result = await callUserApiGetMusicUrl(plSource as any, musicInfo, quality, username)
+                        if (result && result.url) {
+                            res.writeHead(302, { Location: result.url })
+                            return res.end()
+                        }
+                    }
+                } catch (err) {
+                    subsonicLog.error(`[Subsonic] radio_pl_ ${id} error: ${(err as any)?.message || err}`)
+                }
+                return this.sendError(res, 0, 'Could not resolve playlist radio track', format)
             }
 
             // [新增] 本地缓存优先播放：受 subsonic.playCacheFirst 开关控制(默认开启)。
