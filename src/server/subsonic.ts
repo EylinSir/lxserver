@@ -14,6 +14,7 @@ import { getCachedDislikeRuleSet, invalidateDislikeCache } from '@/server/utils/
 import { proxyCoverImage } from '@/server/coverProxy'
 import { subsonicLog } from '@/utils/log4js'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
+import { listRadioStations, getRadioStation, addRadioStation, updateRadioStation, removeRadioStation } from '@/server/radioStations'
 import fs from 'fs'
 import path from 'path'
 // @ts-ignore
@@ -598,6 +599,15 @@ class SubsonicHandler {
 
                 case 'getInternetRadioStations':
                     return this.handleGetInternetRadioStations(res, format)
+
+                case 'createInternetRadioStation':
+                    return this.handleCreateInternetRadioStation(res, params, format)
+
+                case 'updateInternetRadioStation':
+                    return this.handleUpdateInternetRadioStation(res, params, format)
+
+                case 'deleteInternetRadioStations':
+                    return this.handleDeleteInternetRadioStations(res, params, format)
 
                 case 'getAlbumList':
                     return this.handleGetAlbumList(res, username, params, format, false)
@@ -2420,19 +2430,88 @@ class SubsonicHandler {
         }, format)
     }
 
+    private buildRadioStationAttrs(station: any, format: string) {
+        return format === 'json'
+            ? { internetRadioStation: station }
+            : { internetRadioStation: { attrs: station } }
+    }
+
     private async handleGetInternetRadioStations(res: http.ServerResponse, format: string) {
-        // const radios = await fetchRadios()
-        const radios: any[] = []
-        if (format === 'json') {
-            return this.sendResponse(res, { internetRadioStations: { internetRadioStation: radios } }, format)
-        }
-        return this.sendResponse(res, {
-            internetRadioStations: {
-                children: {
-                    internetRadioStation: radios.map(r => ({ attrs: r }))
-                }
+        try {
+            const official = await fetchRadios()           // QQ 官方电台：streamUrl 指向本服 /rest/stream?id=radio_tx_*
+            const userStations = listRadioStations()        // 用户自建电台：落盘持久化
+            const stations = [
+                ...official.map((r: any) => ({
+                    id: r.id,
+                    name: r.name,
+                    streamUrl: r.streamUrl,
+                    homepageUrl: '',
+                })),
+                ...userStations.map((s) => ({
+                    id: s.id,
+                    name: s.name,
+                    streamUrl: s.streamUrl,
+                    homepageUrl: s.homepageUrl || '',
+                })),
+            ]
+            if (format === 'json') {
+                return this.sendResponse(res, { internetRadioStations: { internetRadioStation: stations } }, format)
             }
-        }, format)
+            return this.sendResponse(res, {
+                internetRadioStations: {
+                    children: {
+                        internetRadioStation: stations.map((r) => ({ attrs: r })),
+                    },
+                },
+            }, format)
+        } catch (err) {
+            subsonicLog.error('[Subsonic] getInternetRadioStations error:', err)
+            return this.sendResponse(res, { internetRadioStations: { internetRadioStation: [] } }, format)
+        }
+    }
+
+    private async handleCreateInternetRadioStation(res: http.ServerResponse, params: URLSearchParams, format: string) {
+        const name = params.get('name')
+        const streamUrl = params.get('streamUrl')
+        const homepageUrl = params.get('homepageUrl') || ''
+        if (!name || !streamUrl) {
+            return this.sendError(res, 10, 'Required parameter missing: name, streamUrl', format)
+        }
+        try {
+            const station = addRadioStation(name, streamUrl, homepageUrl)
+            return this.sendResponse(res, this.buildRadioStationAttrs(station, format), format)
+        } catch (err) {
+            subsonicLog.error('[Subsonic] createInternetRadioStation error:', err)
+            return this.sendError(res, 0, 'Failed to create internet radio station', format)
+        }
+    }
+
+    private async handleUpdateInternetRadioStation(res: http.ServerResponse, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        const name = params.get('name')
+        const streamUrl = params.get('streamUrl')
+        const homepageUrl = params.get('homepageUrl')
+        if (!id) return this.sendError(res, 10, 'Required parameter missing: id', format)
+        try {
+            const station = updateRadioStation(id, name ?? undefined, streamUrl ?? undefined, homepageUrl ?? undefined)
+            if (!station) return this.sendError(res, 70, 'Internet radio station not found', format)
+            return this.sendResponse(res, this.buildRadioStationAttrs(station, format), format)
+        } catch (err) {
+            subsonicLog.error('[Subsonic] updateInternetRadioStation error:', err)
+            return this.sendError(res, 0, 'Failed to update internet radio station', format)
+        }
+    }
+
+    private async handleDeleteInternetRadioStations(res: http.ServerResponse, params: URLSearchParams, format: string) {
+        const ids = params.getAll('id')
+        if (!ids.length) return this.sendError(res, 10, 'Required parameter missing: id', format)
+        try {
+            for (const id of ids) removeRadioStation(id)
+            return this.sendResponse(res, {}, format)
+        } catch (err) {
+            subsonicLog.error('[Subsonic] deleteInternetRadioStations error:', err)
+            return this.sendError(res, 0, 'Failed to delete internet radio station', format)
+        }
     }
 
     private async fetchOnlineSearchSongs(cleanQuery: string, sources: string[], limit: number = 30): Promise<{ music: LX.Music.MusicInfo, listId: string }[]> {
@@ -3948,6 +4027,17 @@ class SubsonicHandler {
                     subsonicLog.warn(`[Subsonic] Radio ${id} returned empty song list`)
                 }
                 return this.sendError(res, 0, 'Could not resolve radio track', format)
+            }
+
+            // [新增] 用户自建电台(radio_usr_*)：直接 302 重定向到用户配置的 streamUrl
+            if (id.startsWith('radio_usr_')) {
+                const station = getRadioStation(id)
+                if (station && station.streamUrl) {
+                    subsonicLog.debug(`[Subsonic] Redirecting user radio ${id} -> ${station.streamUrl}`)
+                    res.writeHead(302, { Location: station.streamUrl })
+                    return res.end()
+                }
+                return this.sendError(res, 70, 'Radio station not found', format)
             }
 
             // [新增] 本地缓存优先播放：受 subsonic.playCacheFirst 开关控制(默认开启)。
