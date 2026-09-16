@@ -59,7 +59,7 @@ export const initialize = (downloadResolver: RemasterResolver) => {
 const qualityRank = (quality: string) => QUALITY_ORDER.indexOf(quality as typeof QUALITY_ORDER[number])
 
 const buildSongInfo = (item: RemasterableItem) => {
-  if (!item.source || item.source === 'unknown') return null
+  if (!item.source || item.source === 'unknown' || item.source === 'local') return null
   const prefix = `${item.source}_`
   const indexedId = String(item.songmid || item.id || '')
   const rawId = indexedId.startsWith(prefix) ? indexedId.slice(prefix.length) : indexedId

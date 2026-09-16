@@ -4291,6 +4291,45 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // H-GET. 读取自定义目录音频文件内嵌歌词（供播放时使用）
+      if (pathname === '/api/music/custom/embedLyric' && req.method === 'GET') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const filename = urlObj.searchParams.get('filename') || ''
+        if (!filename) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Missing filename' }))
+          return
+        }
+        try {
+          const customDir = customMusicManager.getCustomMusicDir(verified)
+          if (!customDir) throw new Error('未配置自定义目录')
+          const filePath = path.resolve(customDir, filename)
+          // 安全检查：防止路径穿越
+          if (!filePath.startsWith(path.resolve(customDir))) throw new Error('非法路径')
+          if (!fs.existsSync(filePath)) {
+            res.writeHead(404, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '文件不存在' }))
+            return
+          }
+          const { MusicTagger: MT } = require('music-tag-native')
+          const tagger = new MT()
+          tagger.loadPath(filePath)
+          const lrc = tagger.lyrics || ''
+          tagger.dispose()
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, lrc }))
+        } catch (e: any) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message || '读取内嵌歌词失败' }))
+        }
+        return
+      }
+
       // H. 批量将歌词嵌入自定义目录音频标签 (USLT)
       if (pathname === '/api/music/custom/embedLyric' && req.method === 'POST') {
         const verified = verifyUserAuth(req)
@@ -4426,6 +4465,49 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // [新增-GET] 读取本地缓存音频文件内嵌歌词（供播放时使用）
+      if (pathname === '/api/music/cache/embedLyric' && req.method === 'GET') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === 'default'
+        let username = '_open'
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+        const filename = urlObj.searchParams.get('filename') || ''
+        const folder = (urlObj.searchParams.get('folder') || 'cache') as 'cache' | 'music'
+        if (!filename) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Missing filename' }))
+          return
+        }
+        try {
+          const dir = fileCache.getCacheDir(username, folder === 'music')
+          const filePath = path.join(dir, filename)
+          if (!fs.existsSync(filePath)) {
+            res.writeHead(404, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '文件不存在' }))
+            return
+          }
+          const { MusicTagger: MT } = require('music-tag-native')
+          const tagger = new MT()
+          tagger.loadPath(filePath)
+          const lrc = tagger.lyrics || ''
+          tagger.dispose()
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, lrc }))
+        } catch (e: any) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message || '读取内嵌歌词失败' }))
+        }
+        return
+      }
+
       // [新增] Embed Lyric into Audio File Tags (USLT)
       if (pathname === '/api/music/cache/embedLyric' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
@@ -4525,7 +4607,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 if (fs.existsSync(lrcPath)) {
                   lyricText = fs.readFileSync(lrcPath, 'utf8')
                   console.log(`[EmbedLyric] Using local .lrc for: ${filename}`)
-                } else if (songInfo && songInfo.source && songInfo.source !== 'unknown') {
+                } else if (songInfo && songInfo.source && songInfo.source !== 'unknown' && songInfo.source !== 'local') {
                   // 没有 .lrc 文件，尝试通过 SDK 获取
                   const lyricFetcherFn = fileCache.getLyricFetcher()
                   if (lyricFetcherFn) {

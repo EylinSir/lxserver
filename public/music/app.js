@@ -8045,6 +8045,71 @@ function updateDetailInfo(song) {
     setImg('detail-bg-cover', imgUrl);
 }
 
+
+/**
+ * 读取本地未关联歌曲的内嵌歌词（或作为网络获取失败时的兜底）
+ * @param {object} song 歌曲对象
+ * @param {boolean} [silent=false] 是否静默模式（为 true 时若无内嵌歌词不覆盖 UI 为暂无歌词）
+ * @returns {Promise<boolean>} 是否成功获取并应用了内嵌歌词
+ */
+async function fetchEmbedLyricForLocalSong(song, silent = false) {
+    const filename = song._localFilename;
+    const username = song._localUsername || '';
+    const isCustomDir = !!song._isCustomDir;
+
+    // 显示加载状态（若非静默模式）
+    if (!silent) {
+        const lyricContent = document.getElementById('lyric-content');
+        if (lyricContent) lyricContent.innerHTML = '<p class="t-text-muted text-lg animate-pulse">正在加载内嵌歌词...</p>';
+        currentLyricLines = [];
+    }
+
+    try {
+        const headers = {};
+        Object.assign(headers, getUserAuthHeaders());
+
+        let apiUrl;
+        if (isCustomDir) {
+            apiUrl = `/api/music/custom/embedLyric?filename=${encodeURIComponent(filename)}&user=${encodeURIComponent(username)}`;
+        } else {
+            const folder = song._localFolder || song.folder || 'cache';
+            apiUrl = `/api/music/cache/embedLyric?filename=${encodeURIComponent(filename)}&folder=${encodeURIComponent(folder)}`;
+        }
+
+        const res = await fetch(apiUrl, { headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const lrc = data.lrc || '';
+        if (!data.success || !lrc || lrc.trim().length < 5) {
+            console.log('[Lyric] 内嵌歌词为空，无歌词展示');
+            if (!silent) {
+                renderLyric([], '暂无内嵌歌词');
+            }
+            return false;
+        }
+
+        console.log(`[Lyric] 成功读取内嵌歌词: ${filename} (长度: ${lrc.length})`);
+        currentRawLrc = lrc;
+        currentRawTlrc = '';
+        currentRawRlrc = '';
+        currentRawKlrc = '';
+
+        // 更新歌词 key 防止重复加载
+        lastLyricSongId = `_local_embed_${filename}`;
+
+        initLyricPlayer();
+        applyLyricUpdate();
+        return true;
+    } catch (e) {
+        console.warn('[Lyric] 读取内嵌歌词失败:', e);
+        if (!silent) {
+            renderLyric([], '暂无歌词');
+        }
+        return false;
+    }
+}
+
 async function fetchLyric(song, quality = null) {
     if (!song) {
         return;
@@ -8065,9 +8130,15 @@ async function fetchLyric(song, quality = null) {
         source = song.meta.source;
     }
 
-    // 如果还是没有必要的数据,退出
+    // 如果还是没有必要的数据，检查是否为本地文件（可尝试读取内嵌歌词）
     if (!songmid || !source) {
-        console.warn('[Lyric] 歌曲缺少必要的字段 songmid/songId 或 source:', song);
+        // [新增] 本地未关联歌曲：优先尝试读取音频文件内嵌歌词
+        if (song.isLocal && song._localFilename) {
+            console.log('[Lyric] 本地未关联歌曲，尝试读取内嵌歌词:', song._localFilename);
+            await fetchEmbedLyricForLocalSong(song);
+        } else {
+            console.warn('[Lyric] 歌曲缺少必要的字段 songmid/songId 或 source:', song);
+        }
         return;
     }
 
@@ -8220,6 +8291,12 @@ async function fetchLyric(song, quality = null) {
         }
 
         if (!currentRawLrc) {
+            // [兜底] 若获取到的歌词为空，且该歌曲是本地文件，尝试读取其内嵌歌词兜底
+            if (song.isLocal && song._localFilename) {
+                console.log('[Lyric] 网络/缓存歌词为空，尝试使用本地内嵌歌词兜底:', song._localFilename);
+                const embedSuccess = await fetchEmbedLyricForLocalSong(song, true);
+                if (embedSuccess) return;
+            }
             renderLyric([]);
             return;
         }
@@ -8230,6 +8307,14 @@ async function fetchLyric(song, quality = null) {
 
     } catch (e) {
         console.error(`[Lyric] Failed (${source}_${songmid}):`, e);
+
+        // [兜底] 若网络获取歌词抛错，且该歌曲是本地文件，尝试读取其内嵌歌词兜底
+        if (song.isLocal && song._localFilename) {
+            console.log('[Lyric] 网络获取歌词异常，尝试使用本地内嵌歌词兜底:', song._localFilename);
+            const embedSuccess = await fetchEmbedLyricForLocalSong(song, true);
+            if (embedSuccess) return;
+        }
+
         renderLyric([], `暂无歌词 (${source}: ${songmid})`);
     }
 }

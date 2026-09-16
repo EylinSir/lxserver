@@ -717,7 +717,7 @@ export const batchEmbedLyric = async (filenames: string[], username: string) => 
 
             if (fs.existsSync(lrcPath)) {
                 lyricText = fs.readFileSync(lrcPath, 'utf8')
-            } else if (item && item.source && item.source !== 'unknown' && item.source !== 'custom') {
+            } else if (item && item.source && item.source !== 'unknown' && item.source !== 'local' && item.source !== 'custom') {
                 const lyricFetcherFn = getLyricFetcher()
                 if (lyricFetcherFn) {
                     lyricText = await lyricFetcherFn(item)

@@ -750,7 +750,7 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                     } else {
                         // Fallback for completely unknown filenames (e.g. download_4.mp3)
                         songId = nameWithoutExt
-                        source = 'unknown'
+                        source = 'local'
                         quality = 'unknown'
                     }
                 }
@@ -758,7 +758,7 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
 
             if (!songId) continue
             // Normalize ID
-            const normalizedId = songId.includes('_') ? songId : `${source || 'unknown'}_${songId}`
+            const normalizedId = songId.includes('_') ? songId : `${source || 'local'}_${songId}`
 
             // Always check for companion lyric file
             const lrcFile = file.substring(0, file.length - ext.length) + '.lrc'
@@ -856,9 +856,9 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                     try {
                         const tagger = new MusicTagger()
                         tagger.loadPath(filePath)
-                        if (tagger.title && !songName) songName = tagger.title
-                        if (tagger.artist && !singer) singer = tagger.artist
-                        if (tagger.album && !album) album = tagger.album
+                        if (tagger.title && (source === 'local' || !songName)) songName = tagger.title
+                        if (tagger.artist && (source === 'local' || !singer)) singer = tagger.artist
+                        if (tagger.album && (source === 'local' || !album)) album = tagger.album
                         if (hasValidEmbeddedCover(tagger.pictures)) hasCover = true
 
                         const dur = tagger.duration
@@ -896,7 +896,7 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                         albumId: '',
                         img: '',
                         interval: interval,
-                        source: source || 'unknown',
+                        source: source || 'local',
                         quality: finalQuality as any,
                         filename: file,
                         folder: folder as any,
