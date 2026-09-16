@@ -35,7 +35,7 @@ function load(): RadioStation[] {
   } catch {
     cache = []
   }
-  return cache
+  return cache ?? []
 }
 
 function persist(): void {
