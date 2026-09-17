@@ -1042,14 +1042,25 @@ class SubsonicHandler {
             ))
         }
 
-        // [新增] 排行榜(榜单)作为只读虚拟播放列表暴露
+        // [新增] 共享歌单(只读虚拟播放列表)：排行榜 / 歌单 / 都要，由 sharedListMode 决定
         // 仅在配置开启 subsonic.publicLeaderboards 时生效
         if (global.lx.config['subsonic.publicLeaderboards']) {
-            try {
-                const lbPlaylists = await this.getLeaderboardPlaylists()
-                playlists.push(...lbPlaylists)
-            } catch (err) {
-                subsonicLog.error('[Subsonic] Append leaderboard playlists failed:', err)
+            const mode = global.lx.config['subsonic.sharedListMode'] || 'leaderboard'
+            if (mode === 'leaderboard' || mode === 'both') {
+                try {
+                    const lbPlaylists = await this.getLeaderboardPlaylists()
+                    playlists.push(...lbPlaylists)
+                } catch (err) {
+                    subsonicLog.error('[Subsonic] Append leaderboard playlists failed:', err)
+                }
+            }
+            if (mode === 'playlist' || mode === 'both') {
+                try {
+                    const plPlaylists = await this.getSharedPlaylists()
+                    playlists.push(...plPlaylists)
+                } catch (err) {
+                    subsonicLog.error('[Subsonic] Append shared playlists failed:', err)
+                }
             }
         }
 
@@ -1068,6 +1079,10 @@ class SubsonicHandler {
         // [新增] 排行榜(榜单)虚拟只读播放列表
         if (id.startsWith('lb_')) {
             return this.handleGetLeaderboardPlaylist(res, username, id, format)
+        }
+        // [新增] 共享歌单(歌单)虚拟只读播放列表
+        if (id.startsWith('pl_')) {
+            return this.handleGetSharedPlaylist(res, username, id, format)
         }
 
         const userSpace = getUserSpace(username)
@@ -1135,6 +1150,7 @@ class SubsonicHandler {
         const playlistId = params.get('playlistId')
         if (!playlistId) return this.sendError(res, 10, 'Required parameter is missing: playlistId', format)
         if (playlistId.startsWith('lb_')) return this.sendError(res, 0, '排行榜为只读播放列表，不支持修改', format)
+        if (playlistId.startsWith('pl_')) return this.sendError(res, 0, '共享歌单为只读播放列表，不支持修改', format)
 
         try {
             const userSpace = getUserSpace(username)
@@ -1240,6 +1256,7 @@ class SubsonicHandler {
         const id = params.get('id')
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
         if (id.startsWith('lb_')) return this.sendError(res, 0, '排行榜为只读播放列表，不支持删除', format)
+        if (id.startsWith('pl_')) return this.sendError(res, 0, '共享歌单为只读播放列表，不支持删除', format)
         if (id === 'default' || id === 'love') {
             return this.sendError(res, 0, 'Built-in playlists cannot be deleted', format)
         }
@@ -1370,6 +1387,93 @@ class SubsonicHandler {
         if (!song.meta) song.meta = {}
         if (!song.meta.picUrl && song.img) song.meta.picUrl = song.img
         return song
+    }
+
+    /** 将指定平台的热门/最新歌单暴露为 Subsonic 只读虚拟播放列表（共享歌单「歌单」模式）。 */
+    private async getSharedPlaylists(): Promise<any[]> {
+        const source = this.getLeaderboardSource() // 复用共享歌单平台选择
+        const sort = global.lx.config['subsonic.sharedListSort'] === 'new' ? 'new' : 'hot'
+        const owner = 'lxserver'
+        try {
+            const sl = (musicSdk as any)[source]?.songList
+            if (!sl || typeof sl.getList !== 'function') return []
+            const res: any = await sl.getList(sort, '', 1)
+            const list: any[] = res?.list || []
+            return list.map((item: any) => {
+                const plId = String(item.id ?? item.dissid ?? item.tid ?? item.listId)
+                const id = `pl_${source}_${plId}`
+                const img = typeof item.img === 'string' && item.img
+                    ? (item.img.startsWith('//') ? `https:${item.img}` : item.img)
+                    : 'logo'
+                return {
+                    id,
+                    name: `歌单·${item.name || item.dissname || '未知歌单'}`,
+                    comment: '歌单(只读)',
+                    owner,
+                    public: true,
+                    songCount: 0,
+                    duration: 0,
+                    created: new Date().toISOString(),
+                    changed: new Date().toISOString(),
+                    coverArt: img,
+                }
+            })
+        } catch (err) {
+            subsonicLog.error('[Subsonic] getSharedPlaylists error:', err)
+            return []
+        }
+    }
+
+    private async handleGetSharedPlaylist(res: http.ServerResponse, username: string, id: string, format: string) {
+        const parts = id.split('_') // ['pl', source, plId...]
+        const source = parts[1]
+        const plId = parts.slice(2).join('_')
+        try {
+            const sl = (musicSdk as any)[source]?.songList
+            if (!sl || typeof sl.getListDetail !== 'function') return this.sendError(res, 70, 'Playlist source not found', format)
+            const detail: any = await sl.getListDetail(plId, 1)
+            const list: any[] = detail?.list || []
+            let musics: LX.Music.MusicInfo[] = list.map((s: any) => {
+                const m = this.normalizeLeaderboardSong(s, source)
+                this.cacheOnlineSong(m)
+                return m
+            })
+            if (global.lx.config['subsonic.hideDisliked']) {
+                musics = await this.filterDislikedSongs(username, musics)
+            }
+            const coverArt = (musics[0] as any)?.img || 'logo'
+            const playlistMeta = {
+                id,
+                name: `歌单·${detail?.name || plId}`,
+                comment: '歌单(只读)',
+                owner: 'lxserver',
+                public: true,
+                songCount: musics.length,
+                duration: musics.reduce((sum: number, m: any) => sum + this.parseDuration(m.interval), 0),
+                created: new Date().toISOString(),
+                changed: new Date().toISOString(),
+                coverArt,
+            }
+            if (format === 'json') {
+                return this.sendResponse(res, {
+                    playlist: {
+                        ...playlistMeta,
+                        entry: musics.map((m: any) => this.musicToSongFlat(m, id, undefined, username)),
+                    },
+                }, format)
+            }
+            return this.sendResponse(res, {
+                playlist: {
+                    attrs: playlistMeta,
+                    children: {
+                        entry: musics.map((m: any) => this.musicToSongXml(m, id, undefined, username)),
+                    },
+                },
+            }, format)
+        } catch (err: any) {
+            subsonicLog.error('[Subsonic] handleGetSharedPlaylist error:', err)
+            return this.sendError(res, 0, '获取歌单失败: ' + (err?.message || err), format)
+        }
     }
 
     // getAlbum: 返回 album + song[] 格式（音流等客户端期望的格式）

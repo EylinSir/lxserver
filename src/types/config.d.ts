@@ -280,6 +280,12 @@ declare namespace LX {
      */
     'subsonic.leaderboardSource'?: string
 
+    /** Subsonic 共享歌单内容模式 (leaderboard | playlist | both，默认 leaderboard) */
+    'subsonic.sharedListMode'?: string
+
+    /** Subsonic 共享歌单排序 (hot | new，默认 hot) */
+    'subsonic.sharedListSort'?: string
+
     /**
      * Subsonic 评分联动 dislike 的阈值 (默认 1)
      * 评分 rating 满足 0 < rating <= dislikeRating 时视为「不喜欢」，写回 lx-music 原生 dislike 规则。

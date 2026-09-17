@@ -6768,6 +6768,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
             'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'] ?? false,
             'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'] ?? 'tx',
+            'subsonic.sharedListMode': global.lx.config['subsonic.sharedListMode'] ?? 'leaderboard',
+            'subsonic.sharedListSort': global.lx.config['subsonic.sharedListSort'] ?? 'hot',
             'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'] ?? 1,
             'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'] ?? false,
             'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'] ?? false,
@@ -6904,6 +6906,14 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 const s = String(newConfig['subsonic.leaderboardSource']).trim().toLowerCase()
                 if (['tx', 'wy', 'kg', 'kw', 'mg'].includes(s)) global.lx.config['subsonic.leaderboardSource'] = s
               }
+              if (newConfig['subsonic.sharedListMode'] !== undefined) {
+                const m = String(newConfig['subsonic.sharedListMode']).trim().toLowerCase()
+                if (['leaderboard', 'playlist', 'both'].includes(m)) global.lx.config['subsonic.sharedListMode'] = m as any
+              }
+              if (newConfig['subsonic.sharedListSort'] !== undefined) {
+                const st = String(newConfig['subsonic.sharedListSort']).trim().toLowerCase()
+                if (['hot', 'new'].includes(st)) global.lx.config['subsonic.sharedListSort'] = st as any
+              }
               if (newConfig['subsonic.dislikeRating'] !== undefined) global.lx.config['subsonic.dislikeRating'] = Number(newConfig['subsonic.dislikeRating'])
               if (newConfig['subsonic.hideDisliked'] !== undefined) global.lx.config['subsonic.hideDisliked'] = !!newConfig['subsonic.hideDisliked']
               if (newConfig['subsonic.dislikeCrossSource'] !== undefined) global.lx.config['subsonic.dislikeCrossSource'] = !!newConfig['subsonic.dislikeCrossSource']
@@ -7000,6 +7010,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'],
                 'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'],
                 'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'],
+                'subsonic.sharedListMode': global.lx.config['subsonic.sharedListMode'],
+                'subsonic.sharedListSort': global.lx.config['subsonic.sharedListSort'],
                 'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'],
                 'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'],
                 'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'],
