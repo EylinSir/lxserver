@@ -2403,22 +2403,35 @@ class SubsonicHandler {
             source = parts[1]
             artistId = parts.slice(2).join('_')
         } else if (id.startsWith('artist_')) {
-            // 兼容旧版或 Fallback: 使用 getSingerMid 动态寻址
+            // 名字型 id：先不在线寻址，交给下面的「本地优先」逻辑
             singerName = decodeURIComponent(id.slice(7))
-            const mid = await getSingerMid(singerName)
-            if (mid) {
-                source = 'tx' // 寻址成功后默认切换到 TX
-                artistId = mid
-            } else {
-                artistId = singerName
-            }
         } else {
             artistId = id
         }
 
-        // 本地「歌手维度」聚合数据：在线接口取不到时用它兜底，保证歌手页不空白
-        const localEntry = (await this.buildArtistDirectory(username)).find(a => a.id === id)
+        // 本地「歌手维度」聚合数据，两个用途：
+        // 1) 在线接口取不到时用它兜底，保证歌手页不空白（否则只有客户端本地收藏的那几首）；
+        // 2) 名字型 id(artist_<名字>) 若本地目录里有规范 id(source+singerId)，直接复用，
+        //    不再依赖在线寻址——寻址走音源搜索接口，偶发失败会让整页专辑/歌曲栏空白。
+        const directory = await this.buildArtistDirectory(username)
+        const localEntry = directory.find(a => a.id === id)
+            || (singerName && singerName !== 'Unknown' ? directory.find(a => a.name === singerName) : undefined)
         if (localEntry && (!singerName || singerName === 'Unknown')) singerName = localEntry.name
+
+        if (!artistId && singerName && singerName !== 'Unknown') {
+            if (localEntry?.source && localEntry?.singerId) {
+                source = localEntry.source
+                artistId = String(localEntry.singerId)
+            } else {
+                const mid = await getSingerMid(singerName)
+                if (mid) {
+                    source = 'tx' // 寻址成功后默认切换到 TX
+                    artistId = mid
+                } else {
+                    artistId = singerName // 退化：按名字查（多数源会失败，最终靠本地兜底）
+                }
+            }
+        }
 
         // 定义精准的平台 ID (用于封面和元数据绑定)
         const resolvedId = (source && artistId && artistId !== id) ? `art_${source}_${artistId}` : id
@@ -3095,6 +3108,35 @@ class SubsonicHandler {
                 for (const a of onlineAlbums) {
                     if (!albumIds.has(a.id)) { matchedAlbums.push(a); albumIds.add(a.id) }
                 }
+            }
+        }
+
+        // [新增] 跨源同名去重：同一首歌常会被多个音源各返回一次（搜一次出现 5 份），
+        // 按「歌名 + 主歌手」归一后只保留一份，优先保留 subsonic.source.priority 中更靠前的源。
+        // 只合并"同名同歌手"的跨源重复，不合并不同版本（Live/Remix 等歌名本身不同）。
+        if (matchedSongs.length > 1) {
+            const rawPriority = global.lx.config['subsonic.source.priority']
+            const priority: string[] = Array.isArray(rawPriority) ? rawPriority : ['kw', 'tx', 'wy', 'mg', 'kg']
+            const rankOf = (src: string) => {
+                const i = priority.indexOf(src)
+                return i < 0 ? priority.length : i
+            }
+            const picked = new Map<string, { item: any, rank: number }>()
+            const order: string[] = []
+            for (const it of matchedSongs as any[]) {
+                const m = it.music || it
+                const key = `${normalizeText(String(m.name || ''))}@${normalizeText(String((m.singer || '').split('、')[0] || ''))}`
+                const rank = rankOf(String(m.source || ''))
+                const prev = picked.get(key)
+                if (!prev) {
+                    picked.set(key, { item: it, rank })
+                    order.push(key)
+                } else if (rank < prev.rank) {
+                    picked.set(key, { item: it, rank })
+                }
+            }
+            if (order.length !== matchedSongs.length) {
+                matchedSongs = order.map(k => picked.get(k)!.item)
             }
         }
 
