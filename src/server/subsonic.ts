@@ -289,6 +289,56 @@ export function writePlayQueue(username: string, state: PlayQueueState) {
     }
 }
 
+// 拼音首字母边界字：每个字母取汉语拼音中最靠前的那个汉字。
+// 拼音没有 I / U / V 开头，故不在表内——与主流音乐客户端的索引一致。
+const PY_INDEX_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'W', 'X', 'Y', 'Z']
+const PY_INDEX_BOUNDS = ['吖', '八', '嚓', '哒', '妸', '发', '旮', '哈', '讥', '咔', '垃', '妈', '拏', '噢', '妑', '七', '呥', '仨', '他', '哇', '夕', '丫', '匝']
+const pyCollator = typeof Intl !== 'undefined' ? new Intl.Collator('zh-Hans-CN') : null
+
+/**
+ * 取艺术家索引分组键：英文名取首字母，中文名按拼音首字母归入 A-Z，其余归入 “#”。
+ *
+ * [修复] 之前只认 [A-Z]，全部中文歌手都落进同一个 “#” 分组，
+ * 客户端的字母索引 / 快速跳转形同虚设，列表看起来就是一整坨没排序。
+ * 判定依赖 ICU 中文排序（本机与官方 node 镜像均启用 full-icu），
+ * 相比 GB2312 区位码方案不依赖字符编码。
+ */
+/**
+ * 歌手头像用的图片降尺寸。
+ *
+ * 头像此前是原图直出，实测单张达 17.9MB；而 coverArtScaling 扩展只是声明、并未真正生效
+ * （size 参数被忽略），生产镜像又是 `npm install --omit=dev`、sharp 并未安装，
+ * 无法在服务端缩放。因此改为改写上游 URL 自带的尺寸参数，零依赖地把头像压到小图：
+ *  - 腾讯：尺寸就编码在路径里 (.../T002R800x800M000xxx.jpg) -> 改成 300x300
+ *  - 网易：追加或替换 ?param=300y300
+ * 仅用于歌手头像场景，专辑 / 歌曲封面仍走原图以保证清晰度。
+ */
+export function downscaleAvatarUrl(url: string, size = 300): string {
+    if (!url || typeof url !== 'string') return url
+    if (/y\.gtimg\.cn\/.*\/T\d{3}R\d+x\d+M/.test(url)) {
+        return url.replace(/(T\d{3}R)\d+x\d+(M)/, `$1${size}x${size}$2`)
+    }
+    if (/music\.126\.net/.test(url)) {
+        const param = `${size}y${size}`
+        if (/[?&]param=/.test(url)) return url.replace(/([?&]param=)[^&]*/, `$1${param}`)
+        return url + (url.includes('?') ? '&' : '?') + `param=${param}`
+    }
+    return url
+}
+
+export function getArtistIndexKey(name: string): string {
+    const ch = (name || '').trim().charAt(0)
+    if (!ch) return '#'
+    if (/[a-zA-Z]/.test(ch)) return ch.toUpperCase()
+    if (!/[\u4e00-\u9fa5]/.test(ch)) return '#'
+    if (pyCollator) {
+        for (let i = PY_INDEX_BOUNDS.length - 1; i >= 0; i--) {
+            if (pyCollator.compare(ch, PY_INDEX_BOUNDS[i]) >= 0) return PY_INDEX_LETTERS[i]
+        }
+    }
+    return '#'
+}
+
 /**
  * 反向同步：网页前端原生收藏(媒体库 artists/albums)变更 -> Subsonic 星标。
  * added/removed 为原生条目 {id, source, name}。
@@ -2451,22 +2501,24 @@ class SubsonicHandler {
                 albumCount: a.albumKeys.size,
                 songCount: a.songCount,
                 coverArt: a.id,
-                artistImageUrl: a.picUrl || undefined,
+                // 头像字段同样降尺寸：客户端直连时会直接下载，原图实测有 17.9MB
+                artistImageUrl: a.picUrl ? downscaleAvatarUrl(a.picUrl) : undefined,
                 ...(a.starred ? { starred: new Date().toISOString() } : {}),
             }))
             .sort((x, y) => x.name.localeCompare(y.name, 'zh-Hans-CN'))
 
-        // 按首字母分组
+        // 按索引分组：中文按拼音首字母归入 A-Z，
+        // 避免中文歌手全部挤在 “#” 里导致客户端字母索引失效
         const indexMap = new Map<string, any[]>()
         for (const a of artists) {
-            const firstChar = a.name[0]?.toUpperCase() || '#'
-            const key = /[A-Z]/.test(firstChar) ? firstChar : '#'
+            const key = getArtistIndexKey(a.name)
             if (!indexMap.has(key)) indexMap.set(key, [])
             indexMap.get(key)!.push(a)
         }
 
+        // “#” 组排在最后（与 Navidrome 等服务端实现一致），其余按字母顺序
         const indexArr = Array.from(indexMap.entries())
-            .sort((a, b) => a[0].localeCompare(b[0]))
+            .sort((a, b) => ((a[0] === '#' ? 1 : 0) - (b[0] === '#' ? 1 : 0)) || a[0].localeCompare(b[0]))
             .map(([name, artistList]) => ({
                 name,
                 artist: artistList,
@@ -2976,7 +3028,7 @@ class SubsonicHandler {
                             title: name,
                             albumCount: item.albumSize ?? 0,
                             coverArt: id,               // 交给 getCoverArt 的 art_ 分支解析
-                            artistImageUrl: item.picUrl || undefined,
+                            artistImageUrl: item.picUrl ? downscaleAvatarUrl(item.picUrl) : undefined,
                             isDir: true,
                             _source: src,
                             _score: this.artistRelevance(query, name),
@@ -4883,12 +4935,12 @@ class SubsonicHandler {
                 const libArtists = await this.getLibraryData(username, 'artists')
                 const localArt = libArtists.find(a => (a.source === source && a.id === realId) || a.name === realId)
                 if (localArt && (localArt.picUrl || localArt.img)) {
-                    return proxyCoverImage(res, localArt.picUrl || localArt.img)
+                    return proxyCoverImage(res, downscaleAvatarUrl(localArt.picUrl || localArt.img))
                 }
 
                 // 2. 兜底尝试使用歌手名搜索照片
                 const cover = await getSingerPic(localArt?.name || realId)
-                if (cover) return proxyCoverImage(res, cover)
+                if (cover) return proxyCoverImage(res, downscaleAvatarUrl(cover))
             } else if (id.includes('_')) {
                 // 1.5 歌曲不在已加载的库中，解析 ID 直接尝试 SDK
                 const parts = id.split('_')
@@ -4908,7 +4960,7 @@ class SubsonicHandler {
                 const singerName = id.slice(7)
                 if (singerName) {
                     const cover = await getSingerPic(singerName)
-                    if (cover) return proxyCoverImage(res, cover)
+                    if (cover) return proxyCoverImage(res, downscaleAvatarUrl(cover))
                 }
             }
 
@@ -5074,17 +5126,18 @@ class SubsonicHandler {
      */
     private async handleGetIndexes(res: http.ServerResponse, username: string, format: string) {
         const directory = await this.buildArtistDirectory(username)
-        const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        // 与 getArtists 使用同一套索引分组（中文按拼音首字母），保持一致
         const buckets = new Map<string, any[]>()
         for (const a of directory) {
-            const first = (a.name || '').trim().charAt(0).toUpperCase()
-            const key = LETTERS.includes(first) ? first : '#'
+            const key = getArtistIndexKey(a.name)
             if (!buckets.has(key)) buckets.set(key, [])
             buckets.get(key)!.push(a)
         }
+        const keys = Array.from(buckets.keys())
+            .sort((a, b) => ((a === '#' ? 1 : 0) - (b === '#' ? 1 : 0)) || a.localeCompare(b))
 
         const child: any[] = []
-        for (const key of ['#'].concat(LETTERS.split(''))) {
+        for (const key of keys) {
             const items = buckets.get(key)
             if (!items || !items.length) continue
             const artists = items.map(a => ({
