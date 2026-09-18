@@ -1316,11 +1316,13 @@ class App {
         const operateToggle = document.getElementById('user-custom-dir-operate-toggle');
         const writeToggle = document.getElementById('user-custom-dir-write-toggle');
         const statusEl = document.getElementById('user-custom-dir-status');
+        const autoDownloadToggle = document.getElementById('user-auto-download-toggle');
 
         if (toggle) toggle.checked = user.enableCustomMusicDir === true;
         if (dirInput) dirInput.value = user.customMusicDir || '';
         if (operateToggle) operateToggle.checked = user.allowOperateCustomMusicDir === true;
         if (writeToggle) writeToggle.checked = user.allowWriteCustomMusicDir === true;
+        if (autoDownloadToggle) autoDownloadToggle.checked = user.enableAutoDownload === true;
         if (statusEl) statusEl.textContent = '';
 
         if (user.enableCustomMusicDir) {
@@ -1342,6 +1344,7 @@ class App {
         const customDir = document.getElementById('user-custom-dir-input')?.value.trim() || '';
         const allowOperateCustomDir = document.getElementById('user-custom-dir-operate-toggle')?.checked || false;
         const allowWriteCustomDir = document.getElementById('user-custom-dir-write-toggle')?.checked || false;
+        const enableAutoDownload = document.getElementById('user-auto-download-toggle')?.checked || false;
 
         if (!newName) {
             showInfo('请填写用户名');
@@ -1354,7 +1357,8 @@ class App {
                 enableCustomMusicDir: enableCustomDir,
                 customMusicDir: customDir,
                 allowOperateCustomMusicDir: allowOperateCustomDir,
-                allowWriteCustomMusicDir: allowWriteCustomDir
+                allowWriteCustomMusicDir: allowWriteCustomDir,
+                enableAutoDownload: enableAutoDownload,
             };
             if (newName !== this.editingUser) {
                 bodyData.newName = newName;
@@ -2437,6 +2441,12 @@ class App {
             if (form.elements['sync.backupInterval']) {
                 form.elements['sync.backupInterval'].value = config['sync.backupInterval'] || 24;
             }
+            if (form.elements['webdav.excludeCache']) {
+                form.elements['webdav.excludeCache'].checked = config['webdav.excludeCache'] === true;
+            }
+            if (form.elements['webdav.excludeMusic']) {
+                form.elements['webdav.excludeMusic'].checked = config['webdav.excludeMusic'] === true;
+            }
 
             // URL路径配置
             if (form.elements['admin.path']) {
@@ -2927,6 +2937,8 @@ class App {
             'webdav.backupPath': (formData.get('webdav.backupPath') || '').trim() || '/lx-sync-backups',
             'sync.interval': parseInt(formData.get('sync.interval')) || 60,
             'sync.backupInterval': parseInt(formData.get('sync.backupInterval')) || 24,
+            'webdav.excludeCache': formData.get('webdav.excludeCache') === 'on',
+            'webdav.excludeMusic': formData.get('webdav.excludeMusic') === 'on',
             'admin.path': adminPath,
             'player.path': playerPath,
             'subsonic.enable': formData.get('subsonic.enable') === 'on',
@@ -4253,6 +4265,20 @@ class App {
                 }
             }, 300);
         });
+    }
+
+    openWebdavUsageModal() {
+        const modal = document.getElementById('webdav-usage-modal');
+        if (modal) {
+            modal.classList.remove('hidden');
+        }
+    }
+
+    closeWebdavUsageModal() {
+        const modal = document.getElementById('webdav-usage-modal');
+        if (modal) {
+            modal.classList.add('hidden');
+        }
     }
 }
 

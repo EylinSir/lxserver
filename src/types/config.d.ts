@@ -41,6 +41,11 @@ declare namespace LX {
      * 是否允许写入歌曲文件（如手动关联、批量更新元数据、批量嵌入歌词）
      */
     allowWriteCustomMusicDir?: boolean
+
+    /**
+     * 是否启用此用户自动下载歌曲功能（允许该用户将歌单内容自动同步下载至本地数据目录）
+     */
+    enableAutoDownload?: boolean
   }
 
   interface UserConfig extends User {
@@ -189,6 +194,16 @@ declare namespace LX {
      * 全量备份间隔(小时)，默认 24
      */
     'sync.backupInterval'?: number
+
+    /**
+     * 是否排除缓存目录 (data/<user>/cache) 的增量同步与全量备份
+     */
+    'webdav.excludeCache'?: boolean
+
+    /**
+     * 是否排除音乐下载目录 (data/<user>/music) 的增量同步与全量备份
+     */
+    'webdav.excludeMusic'?: boolean
 
     /**
      * 是否开启Web播放器访问密码

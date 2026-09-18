@@ -249,6 +249,13 @@ if (envParams.BACKUP_INTERVAL) {
   const backupInterval = parseInt(envParams.BACKUP_INTERVAL)
   if (!isNaN(backupInterval)) global.lx.config['sync.backupInterval'] = backupInterval
 }
+if (envParams.WEBDAV_EXCLUDE_CACHE !== undefined) {
+  setBoolConfig('webdav.excludeCache', envParams.WEBDAV_EXCLUDE_CACHE)
+}
+if (envParams.WEBDAV_EXCLUDE_MUSIC !== undefined) {
+  setBoolConfig('webdav.excludeMusic', envParams.WEBDAV_EXCLUDE_MUSIC)
+}
+
 if (envParams.USER_ENABLE_PATH !== undefined) {
   setBoolConfig('user.enablePath', envParams.USER_ENABLE_PATH)
 }
@@ -578,7 +585,10 @@ const webdavSync = new WebDAVSync({
   backupPath: global.lx.config['webdav.backupPath'],
   interval: global.lx.config['sync.interval'],
   backupInterval: global.lx.config['sync.backupInterval'],
+  excludeCache: global.lx.config['webdav.excludeCache'],
+  excludeMusic: global.lx.config['webdav.excludeMusic'],
 }, global.lx.dataPath)
+
 
 // 导出 webdavSync 实例供全局使用
 global.lx.webdavSync = webdavSync

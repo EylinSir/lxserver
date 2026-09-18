@@ -879,6 +879,40 @@
                                             value="24" min="1" />
                                         <small class="config-hint">用于定时自动创建 ZIP 全量备份包并上传至云端</small>
                                     </div>
+                                    <div class="config-divider"></div>
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info">
+                                            <span class="config-toggle-label">排除缓存目录同步</span>
+                                            <span class="config-toggle-desc">开启后 data/&lt;用户&gt;/cache 目录将不参与增量同步及全量备份（已同步至云端的文件不会被删除）</span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" name="webdav.excludeCache" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                        </label>
+                                    </div>
+                                    <div class="config-divider"></div>
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info">
+                                            <span class="config-toggle-label">排除下载目录同步</span>
+                                            <span class="config-toggle-desc">开启后 data/&lt;用户&gt;/music 目录将不参与增量同步及全量备份（已同步至云端的文件不会被删除）</span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" name="webdav.excludeMusic" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                        </label>
+                                    </div>
+                                    <div class="config-divider"></div>
+                                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0 0.1rem;">
+                                        <span style="font-size: 0.8rem; color: var(--text-secondary);">💡 深入了解同步机制、增量比对与排除规则</span>
+                                        <button type="button" class="btn-help-guide" onclick="app.openWebdavUsageModal()">
+                                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                                <circle cx="12" cy="12" r="10"></circle>
+                                                <line x1="12" y1="16" x2="12" y2="12"></line>
+                                                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                            </svg>
+                                            <span>查看使用场景与工作原理</span>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div id="webdav-disabled-hint" style="display: none;">
                                     <div class="config-divider"></div>
@@ -1577,10 +1611,20 @@
 
                         <!-- 云端操作区 -->
                         <div id="webdav-cloud-group">
-                            <div class="section-badge-header">
-                                <span class="badge-dot dot-blue"></span>
-                                <span class="section-badge-title">云端存储协同</span>
-                                <span class="section-badge-desc">支持全量快照归档与跨端增量同步</span>
+                            <div class="section-badge-header" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+                                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                                    <span class="badge-dot dot-blue"></span>
+                                    <span class="section-badge-title">云端存储协同</span>
+                                    <span class="section-badge-desc">支持全量快照归档与跨端增量同步</span>
+                                </div>
+                                <button type="button" class="btn-help-guide" onclick="app.openWebdavUsageModal()">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                    </svg>
+                                    <span>使用场景与原理说明</span>
+                                </button>
                             </div>
                             <div class="sync-actions-grid">
                                 <button id="backup-webdav-btn" class="action-card glass card-featured">
@@ -1919,6 +1963,18 @@
                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                     </label>
                 </div>
+                <div class="config-toggle-row"
+                    style="margin-top: 0; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+                    <div class="config-toggle-info">
+                        <span class="config-toggle-label" style="font-weight: 500;">启用此用户自动下载歌曲</span>
+                        <span class="config-toggle-desc"
+                            style="font-size: 0.75rem; color: var(--text-secondary);">为该用户开放歌单同步下载权限。完整启用需三步：① 此处打开开关（后台授权）；② 在该用户的音乐设置中开启「自动更新网络歌单」；③ 在本地音乐页面筛选「下载」目录，点击「同步下载」按钮，在面板中开启「启用同步下载」并逐一启用需要同步的歌单。</span>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="user-auto-download-toggle" />
+                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    </label>
+                </div>
                 <div id="user-custom-dir-container" class="form-group hidden" style="margin-top: 15px;">
                     <label>自定义歌曲目录地址</label>
                     <div class="config-input-group">
@@ -2032,6 +2088,177 @@
             </div>
         </div>
     </div>
+
+    <!-- WebDAV 使用场景与同步原理说明模态框 (现代化设计) -->
+    <div id="webdav-usage-modal" class="modal hidden" onclick="if(event.target===this)app.closeWebdavUsageModal()">
+        <div class="modal-content glass usage-modal-dialog">
+            <div class="usage-modal-header">
+                <div style="display: flex; align-items: center; gap: 0.85rem;">
+                    <div style="width: 40px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35); flex-shrink: 0;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" style="width: 22px; height: 22px;">
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                            <polyline points="7.5 4.21 12 6.81 16.5 4.21" />
+                            <polyline points="7.5 19.79 7.5 14.6 3 12" />
+                            <polyline points="21 12 16.5 14.6 16.5 19.79" />
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                            <line x1="12" y1="22.08" x2="12" y2="12" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;">WebDAV 存储协同与同步机制说明</h3>
+                        <p style="margin: 3px 0 0; font-size: 0.8rem; color: var(--text-secondary);">深入了解增量同步、全量归档快照、双向合并与排除目录策略</p>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="app.closeWebdavUsageModal()">&times;</button>
+            </div>
+
+            <div class="usage-modal-body">
+                <!-- 模块 1: 两种核心机制对比 -->
+                <div>
+                    <div style="font-size: 0.88rem; font-weight: 600; color: #93c5fd; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 6px;">
+                        <span>⚡</span>
+                        <span>两种核心云端同步机制</span>
+                    </div>
+                    <div class="usage-grid-two">
+                        <div class="usage-card">
+                            <div class="usage-card-header">
+                                <span class="usage-card-title">
+                                    <span style="color:#a855f7;">📄</span> 增量散文件同步
+                                </span>
+                                <span class="usage-tag usage-tag-purple">远端 /lx-sync</span>
+                            </div>
+                            <p class="usage-scenario-desc">
+                                <b>工作原理：</b>直接遍历 <code>data/</code> 散列文件，比对文件最后修改时间（mtime）与大小。不打包压缩，直接以原始目录结构多线程增量传输变动文件。
+                            </p>
+                            <div style="font-size: 0.76rem; color: #c084fc; background: rgba(168,85,247,0.08); padding: 6px 10px; border-radius: 6px;">
+                                💡 <b>适用：</b>日常多端高频快速增量更新、跨端数据实时合并。
+                            </div>
+                        </div>
+
+                        <div class="usage-card">
+                            <div class="usage-card-header">
+                                <span class="usage-card-title">
+                                    <span style="color:#38bdf8;">📦</span> 全量 ZIP 快照归档
+                                </span>
+                                <span class="usage-tag usage-tag-blue">远端 /lx-sync-backups</span>
+                            </div>
+                            <p class="usage-scenario-desc">
+                                <b>工作原理：</b>将整个 <code>data/</code> 打包为带精准时间戳的 <code>lx-backup-YYYY-MM-DD_HH-mm-ss.zip</code> 压缩包上传归档，支持云端按时间点回滚历史版本。
+                            </p>
+                            <div style="font-size: 0.76rem; color: #7dd3fc; background: rgba(56,189,248,0.08); padding: 6px 10px; border-radius: 6px;">
+                                💡 <b>适用：</b>定时自动全量备份（支持按小时周期）、灾难恢复与冷备。
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 模块 2: 常见使用场景指南 -->
+                <div>
+                    <div style="font-size: 0.88rem; font-weight: 600; color: #a78bfa; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 6px;">
+                        <span>📋</span>
+                        <span>4 大常见使用场景与操作指引</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <div class="usage-scenario-item">
+                            <div class="usage-scenario-title">
+                                <span style="color: #60a5fa;">① 本地有修改，想推送到云端</span>
+                                <span class="usage-tag usage-tag-blue">本地 ➔ 云端</span>
+                            </div>
+                            <p class="usage-scenario-desc">
+                                刚添加了新歌单或调整了配置，想同步给其他设备：点击 <b>「同步所有文件」</b>，系统将多线程增量上传所有新文件；若需要备份归档，可点击 <b>「立即全量备份」</b>。
+                            </p>
+                        </div>
+
+                        <div class="usage-scenario-item border-purple">
+                            <div class="usage-scenario-title">
+                                <span style="color: #c084fc;">② 其他端更新了数据，想拉取合并到当前服务器</span>
+                                <span class="usage-tag usage-tag-purple">云端 ➔ 本地增量</span>
+                            </div>
+                            <p class="usage-scenario-desc">
+                                在其他电脑或手机修改了歌单：点击 <b>「从云端恢复」</b> ➔ 切换到 <b>「散文件增量恢复」</b>。系统仅拉取云端更新文件并合并，<b>本地独有的新歌单不会被删除</b>。
+                            </p>
+                        </div>
+
+                        <div class="usage-scenario-item border-amber">
+                            <div class="usage-scenario-title">
+                                <span style="color: #fbbf24;">③ 数据损坏/误删，想回滚到历史时间点</span>
+                                <span class="usage-tag usage-tag-amber">ZIP 历史快照还原</span>
+                            </div>
+                            <p class="usage-scenario-desc">
+                                点击 <b>「从云端恢复」</b> ➔ 默认的 <b>「全量 ZIP 快照恢复」</b>，面板会列出云端所有历史备份时间点，选择对应版本的备份包点击一键还原并自动热重载。
+                            </p>
+                        </div>
+
+                        <div class="usage-scenario-item border-emerald">
+                            <div class="usage-scenario-title">
+                                <span style="color: #34d399;">④ 没有 WebDAV 或需要离线保存备份</span>
+                                <span class="usage-tag usage-tag-emerald">本地离线文件</span>
+                            </div>
+                            <p class="usage-scenario-desc">
+                                点击 <b>「打包本地备份」</b> 直接由浏览器下载 ZIP 到电脑；换服务器时点击 <b>「上传还原备份」</b> 上传该 ZIP 即可一键恢复。
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 模块 3: 排除目录同步机制 (v2.1.0 新增) -->
+                <div>
+                    <div style="font-size: 0.88rem; font-weight: 600; color: #34d399; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 6px;">
+                        <span>📁</span>
+                        <span>排除目录同步机制（缓存与下载）</span>
+                    </div>
+                    <div class="usage-grid-two">
+                        <div class="usage-card" style="border-color: rgba(16,185,129,0.2);">
+                            <div class="usage-card-header">
+                                <span class="usage-card-title" style="color: #6ee7b7;">
+                                    <span>🗂️</span> 排除缓存目录 (<code>cache/</code>)
+                                </span>
+                            </div>
+                            <p class="usage-scenario-desc">
+                                存放播放临时音频切片与歌手封面缓存。排除后<b>仅同步核心歌单与用户配置</b>，大幅减少备份包体积与网络带宽消耗。
+                            </p>
+                        </div>
+
+                        <div class="usage-card" style="border-color: rgba(16,185,129,0.2);">
+                            <div class="usage-card-header">
+                                <span class="usage-card-title" style="color: #6ee7b7;">
+                                    <span>🎵</span> 排除下载目录 (<code>music/</code>)
+                                </span>
+                            </div>
+                            <p class="usage-scenario-desc">
+                                存放完整下载的离线音乐文件。开启排除后离线音乐仅保存在本地服务器，避免占用宝贵的云盘容量。
+                            </p>
+                        </div>
+                    </div>
+                    <div style="margin-top: 0.75rem; padding: 0.85rem 1rem; border-radius: 8px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); font-size: 0.8rem; color: #a7f3d0; line-height: 1.5;">
+                        🛡️ <b>云端安全保障：</b>如果关闭了某目录的同步，<b>之前已经同步到云端的历史文件绝不会被删除</b>；只有在保持启用状态下，新增或变动的文件才会继续同步上传。
+                    </div>
+                </div>
+
+                <!-- 模块 4: 本地与云端不同步时的处理原则 -->
+                <div>
+                    <div style="font-size: 0.88rem; font-weight: 600; color: #f59e0b; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 6px;">
+                        <span>🔄</span>
+                        <span>本地与云端文件存在差异时的同步原则</span>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.25); border-radius: 10px; padding: 1rem 1.15rem; border: 1px solid rgba(255,255,255,0.06); font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6;">
+                        <p style="margin: 0 0 0.5rem 0;">
+                            • <b>以本地为最新：</b>点击 <b>「同步所有文件」</b>，会将本地最新文件直接推送到云端覆盖远端同名旧文件。<br>
+                            • <b>以云端为最新：</b>点击 <b>「从云端恢复」➔「散文件增量恢复」</b>，会将云端文件更新到本地并自动重载。<br>
+                            • <b>多端防冲突建议：</b>每次在另一端修改前，先点击「散文件增量恢复」拉取云端；编辑完成后再点击「同步所有文件」推送到云端。
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer" style="background: rgba(15, 23, 42, 0.9); border-top: 1px solid rgba(255,255,255,0.08); padding: 0.85rem 1.5rem;">
+                <button type="button" class="btn-primary" onclick="app.closeWebdavUsageModal()" style="padding: 0.5rem 1.5rem;">
+                    我知道了
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 

@@ -990,13 +990,19 @@ async function checkAndUpdateCustomDirUI() {
                         console.log('[Auth] 用户 Token 已失效，已自动续签。');
                     }
                 }
+                // token 失效，重置权限
+                window.userEnableAutoDownload = false;
             } else {
                 userEnableCustomDir = !!vData.enableCustomMusicDir;
                 window.userAllowOperateCustomDir = !!vData.allowOperateCustomMusicDir;
+                window.userEnableAutoDownload = !!vData.enableAutoDownload;
             }
         } catch (e) {
             console.warn('[Auth] Token 验证失败:', e);
+            window.userEnableAutoDownload = false;
         }
+    } else {
+        window.userEnableAutoDownload = false;
     }
 
     const switchContainer = document.getElementById('custom-dir-switch-container');
@@ -1036,8 +1042,41 @@ async function checkAndUpdateCustomDirUI() {
             }
         }
     }
+
+    // 更新同步下载按钮的可见状态
+    updateSyncDownloadBtnVisibility();
 }
 window.checkAndUpdateCustomDirUI = checkAndUpdateCustomDirUI;
+
+/**
+ * 更新"同步下载"按钮的显示状态
+ * 条件：用户启用了自动下载功能 AND 当前位置为"数据目录(data)" AND 当前分类为"下载(download)"
+ * 可在位置/分类变化时调用以刷新状态
+ */
+function updateSyncDownloadBtnVisibility() {
+    const btn = document.getElementById('lm-sync-download-btn');
+    if (!btn) return;
+
+    const locationSelect = document.getElementById('lm-location-select');
+    const currentLocation = locationSelect ? locationSelect.value : '';
+
+    // filterFolder: 'music' 对应显示的"下载"筛选（HTML option value="music"）
+    const currentFolderFilter = (typeof window.LocalMusicManager !== 'undefined' && window.LocalMusicManager.filterFolder != null)
+        ? window.LocalMusicManager.filterFolder
+        : '';
+
+    const shouldShow = !!(window.userEnableAutoDownload)
+        && currentLocation === 'data'
+        && currentFolderFilter === 'music';
+
+    if (shouldShow) {
+        btn.classList.remove('hidden');
+    } else {
+        btn.classList.add('hidden');
+    }
+}
+window.updateSyncDownloadBtnVisibility = updateSyncDownloadBtnVisibility;
+
 
 /**
  * 顶部栏退出登录处理 (带确认弹窗与全量缓存清理)
@@ -4719,24 +4758,35 @@ function updateAdminUI() {
         }
     });
 
-    // 2. 弹窗内的远程同步输入框及客户端模式勾选框：仅在远程已连或开启了客户端模式时才禁用
-    // (勾选客户端模式后锁定输入，防止在自动同步流程中改动配置)
-    const disableModalRemote = isRemoteConnected || settings.enableClientModeSync;
-    const modalInputIds = ['remote-overwrite-url', 'remote-overwrite-code', 'setting-client-mode-sync'];
+    // 2. 弹窗内的远程同步输入框：在远程已连接或开启了客户端模式时锁定输入
+    const disableModalInputs = isRemoteConnected || settings.enableClientModeSync;
+    const modalInputIds = ['remote-overwrite-url', 'remote-overwrite-code'];
     modalInputIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-            el.disabled = disableModalRemote;
-            if (disableModalRemote) {
+            el.disabled = disableModalInputs;
+            if (disableModalInputs) {
                 el.classList.add('opacity-40', 'cursor-not-allowed', 'grayscale');
-                // 注意：勾选框的父级不要加 pointer-events-none，否则无法取消
-                if (id !== 'setting-client-mode-sync') el.parentElement?.classList.add('pointer-events-none');
+                el.parentElement?.classList.add('pointer-events-none');
             } else {
                 el.classList.remove('opacity-40', 'cursor-not-allowed', 'grayscale');
-                if (id !== 'setting-client-mode-sync') el.parentElement?.classList.remove('pointer-events-none');
+                el.parentElement?.classList.remove('pointer-events-none');
             }
         }
     });
+
+    // 客户端模式勾选框本身：只要当前没有处于活动连接传输中，用户就可以随时勾选或取消勾选
+    const clientModeToggle = document.getElementById('setting-client-mode-sync');
+    if (clientModeToggle) {
+        clientModeToggle.disabled = isRemoteConnected;
+        if (isRemoteConnected) {
+            clientModeToggle.classList.add('opacity-40', 'cursor-not-allowed', 'grayscale');
+            clientModeToggle.parentElement?.classList.add('pointer-events-none');
+        } else {
+            clientModeToggle.classList.remove('opacity-40', 'cursor-not-allowed', 'grayscale');
+            clientModeToggle.parentElement?.classList.remove('pointer-events-none');
+        }
+    }
 
 
     const modeBtnIds = ['btn-mode-local', 'btn-mode-remote'];
@@ -4774,8 +4824,8 @@ function updateAdminUI() {
     ];
     modalActionButtons.forEach(btn => {
         if (btn) {
-            btn.disabled = disableModalRemote;
-            if (disableModalRemote) btn.classList.add('opacity-30', 'pointer-events-none', 'grayscale');
+            btn.disabled = disableModalInputs;
+            if (disableModalInputs) btn.classList.add('opacity-30', 'pointer-events-none', 'grayscale');
             else btn.classList.remove('opacity-30', 'pointer-events-none', 'grayscale');
         }
     });

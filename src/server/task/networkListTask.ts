@@ -261,6 +261,15 @@ export const createNetworkListTask = (): ScheduledTask => {
     isRunning: false,
     run: async () => {
       const res = await checkAllUsersNetworkLists()
+
+      // 网络歌单更新完成后，触发同步下载任务（低耦合：按需导入，运行中则跳过）
+      try {
+        const { syncDownloadForAllUsers } = await import('./syncDownloadTask.js')
+        void syncDownloadForAllUsers()
+      } catch (e: any) {
+        syncLog.warn(`[NetworkListTask] 触发同步下载失败: ${e.message}`)
+      }
+
       return {
         taskId: TASK_ID,
         timestamp: Date.now(),
@@ -271,3 +280,4 @@ export const createNetworkListTask = (): ScheduledTask => {
     }
   }
 }
+

@@ -56,6 +56,7 @@ export const getUserConfig = (userName: string): Required<LX.User> => {
     customMusicDir: '',
     allowOperateCustomMusicDir: false,
     allowWriteCustomMusicDir: false,
+    enableAutoDownload: false,
     ...user,
   }
 }

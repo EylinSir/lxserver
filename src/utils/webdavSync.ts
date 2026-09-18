@@ -17,6 +17,8 @@ interface WebDAVConfig {
     backupPath?: string
     interval?: number
     backupInterval?: number
+    excludeCache?: boolean  // 排除缓存目录 (data/cache)
+    excludeMusic?: boolean  // 排除下载目录 (data/music)
 }
 
 interface SyncLog {
@@ -41,6 +43,8 @@ class WebDAVSync extends EventEmitter {
     private backupPath: string
     private syncInterval: number // 文件增量变化检测与同步间隔（毫秒）
     private backupInterval: number // 全量备份间隔（毫秒）
+    private excludeCache: boolean  // 是否排除缓存目录 (data/cache)
+    private excludeMusic: boolean  // 是否排除下载目录 (data/music)
     private watchTimer: NodeJS.Timeout | null = null
     private backupTimer: NodeJS.Timeout | null = null
     private filesHash: Map<string, string> = new Map()
@@ -63,6 +67,8 @@ class WebDAVSync extends EventEmitter {
         }
         this.syncInterval = (config.interval || 60) * 60 * 1000
         this.backupInterval = (config.backupInterval || 24) * 60 * 60 * 1000
+        this.excludeCache = config.excludeCache ?? false
+        this.excludeMusic = config.excludeMusic ?? false
         this.dataPath = dataPath
     }
 
@@ -140,10 +146,20 @@ class WebDAVSync extends EventEmitter {
         // 忽略全量备份 zip（避免散文件同步备份 zip 造成循环与网络巨量浪费）
         if (basename.startsWith('lx-sync-backup-') && basename.endsWith('.zip')) return true
 
-        // 忽略海量临时缓存目录 (subsonic 歌曲流缓存、在线搜索临时缓存、封面临时缓存等)
-        if (norm === 'cache' || norm.startsWith('cache/')) return true
+        // 忽略运行时临时目录
         if (norm === 'tmp' || norm.startsWith('tmp/')) return true
         if (norm === 'logs' || norm.startsWith('logs/')) return true
+        if (norm === 'runtime' || norm.startsWith('runtime/')) return true
+
+        // 用户配置：排除缓存目录 (data/cache/ 下存放各用户缓存文件)
+        if (this.excludeCache) {
+            if (norm === 'cache' || norm.startsWith('cache/')) return true
+        }
+
+        // 用户配置：排除下载/音乐目录 (data/music/ 下存放各用户下载音乐)
+        if (this.excludeMusic) {
+            if (norm === 'music' || norm.startsWith('music/')) return true
+        }
 
         return false
     }
@@ -540,18 +556,27 @@ class WebDAVSync extends EventEmitter {
                 archive.on('error', (err: Error) => reject(err))
 
                 archive.pipe(output)
-                archive.glob('**/*', {
-                    cwd: this.dataPath,
-                    ignore: [
+                const backupIgnore: string[] = [
                         'temp-*.zip',
                         '*.log',
                         '*.lock',
                         '*.tmp',
                         'lx-sync-backup-*.zip',
-                        'cache/**',
                         'tmp/**',
-                        'logs/**'
-                    ],
+                        'logs/**',
+                        'runtime/**'
+                    ]
+                if (this.excludeCache) {
+                    // data/cache/ 下存放各用户缓存文件
+                    backupIgnore.push('cache/**')
+                }
+                if (this.excludeMusic) {
+                    // data/music/ 下存放各用户下载音乐
+                    backupIgnore.push('music/**')
+                }
+                archive.glob('**/*', {
+                    cwd: this.dataPath,
+                    ignore: backupIgnore,
                 })
 
                 archive.finalize()
@@ -1337,6 +1362,14 @@ class WebDAVSync extends EventEmitter {
         }
         if (config.backupInterval !== undefined && (config.backupInterval * 60 * 60 * 1000) !== this.backupInterval) {
             this.backupInterval = config.backupInterval * 60 * 60 * 1000
+            changed = true
+        }
+        if (config.excludeCache !== undefined && config.excludeCache !== this.excludeCache) {
+            this.excludeCache = config.excludeCache
+            changed = true
+        }
+        if (config.excludeMusic !== undefined && config.excludeMusic !== this.excludeMusic) {
+            this.excludeMusic = config.excludeMusic
             changed = true
         }
 

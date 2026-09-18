@@ -3,9 +3,11 @@ import path from 'node:path'
 import { syncLog } from '@/utils/log4js'
 import { ScheduledTask, TaskExecutionResult } from './task/types'
 import { createNetworkListTask } from './task/networkListTask'
+import { createSyncDownloadTask, syncDownloadForAllUsers } from './task/syncDownloadTask'
 
 export * from './task/types'
 export { parseIntervalMs, checkAllUsersNetworkLists } from './task/networkListTask'
+export { createSyncDownloadTask, syncDownloadForAllUsers }
 
 // 调度器内部状态
 const registeredTasks = new Map<string, ScheduledTask>()
@@ -193,6 +195,10 @@ export const startScheduler = () => {
   // 注册默认网络歌单任务（从 task/networkListTask.ts 加载）
   const networkListTask = createNetworkListTask()
   registerTask(networkListTask)
+
+  // 注册歌曲同步下载任务（从 task/syncDownloadTask.ts 加载）
+  const syncDownloadTask = createSyncDownloadTask()
+  registerTask(syncDownloadTask)
 
   syncLog.info('[Scheduler] 后台任务调度器已启动')
 

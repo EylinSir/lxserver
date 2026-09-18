@@ -18,25 +18,25 @@
         }
     },
     {
-        "comment": "=== 版本更新 v2.0.2 ===",
-        "id": "update_v2_0_2",
+        "comment": "=== 版本更新 v2.1.0 ===",
+        "id": "update_v2_1_0",
         "status": "active",
         "type": "version",
         "logic": {
-            "target_version": "v2.0.2",
+            "target_version": "v2.1.0",
             "operator": "<",
             "interval_hours": 24
         },
         "ui": {
-            "title": "发现新版本 v2.0.2",
-            "date": "2026-09-08",
-            "message": "本次更新包含多项 Subsonic 功能增强与核心修复：\n1. 🏆 Subsonic 公开排行榜映射，在线排行榜只读暴露 (#348)\n2. 💾 Subsonic 播放时自动缓存，离线体验增强 (#339)\n3. ❤️ Subsonic 红心收藏双向联动与在线兜底解析 (#338)\n4. 📁 文件管理器界面现代化，Docker 升级数据保留无缝迁移 (#341, #345)\n5. 🐛 修复 Subsonic 封面拉取防崩、自定义目录 songmid 报错等多个问题 (#344, #347)",
+            "title": "发现新版本 v2.1.0",
+            "date": "2026-09-19",
+            "message": "本次更新包含多项重磅功能升级与体验优化：\n1. 🎨 管理后台与 WebDAV 同步全面现代化重构，支持排除缓存/下载目录与场景指南\n2. 📥 新增「歌单同步下载」功能，支持后台自动同步、实时进度展示与封面自动识别\n3. 🚫 不喜欢 (Dislike) 规则与管理全面升级，支持精准过滤与 Subsonic 联动 (#366)\n4. 🎵 本地音乐支持未关联歌曲与网络歌词失败时的原生内嵌歌词自动读取兜底 (#37)\n5. 🐛 修复 Web 播放器连接远程后无法取消客户端模式 (#378)、音频代理流截断 (#357) 等问题",
             "confirm_text": "查看日志",
             "cancel_text": "稍后提醒"
         },
         "action": {
             "type": "link",
-            "url": "https://github.com/XCQ0607/lxserver/releases/tag/v2.0.2"
+            "url": "https://github.com/XCQ0607/lxserver/releases/tag/v2.1.0"
         }
     }
 ]

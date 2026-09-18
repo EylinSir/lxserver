@@ -24,6 +24,7 @@ const config: LX.Config = {
 
   users: [
     // 用户配置例子
+    // 提示：你也可以通过环境变量 LX_USER_<用户名>={"password":"123","enableCustomMusicDir":true} 的 JSON 格式来配置高级选项
     // {
     //   name: 'user1', // 用户名，必须，不能与其他用户名重复
     //   password: '123.def', // 是连接密码，必须，不能与其他用户密码重复，若在外网，务必增加密码复杂度
@@ -33,6 +34,7 @@ const config: LX.Config = {
     //   customMusicDir: '', // 可选，自定义歌曲目录绝对路径
     //   allowOperateCustomMusicDir: false, // 可选，是否允许操作目录歌曲（如删除、洗版）
     //   allowWriteCustomMusicDir: false, // 可选，是否允许写入歌曲文件（如关联、更新元信息、嵌入歌词）
+    //   enableAutoDownload: false, // 可选，是否启用此用户自动下载歌曲功能
     // },
   ],
 
@@ -47,6 +49,9 @@ const config: LX.Config = {
   'webdav.backupPath': '/lx-sync-backups', // 全量备份远程路径
   'sync.interval': 60, // 同步间隔（分钟）默认1小时
   'sync.backupInterval': 24, // 全量备份间隔（小时）默认24小时
+  'webdav.excludeCache': false, // 是否排除缓存目录 (data/<user>/cache) 的同步与备份
+  'webdav.excludeMusic': false, // 是否排除音乐下载目录 (data/<user>/music) 的同步与备份
+
 
   // Web播放器配置
   'player.enableAuth': false,

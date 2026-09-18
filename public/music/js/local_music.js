@@ -810,6 +810,10 @@ window.LocalMusicManager = {
             if (subPathText) subPathText.innerText = '全部';
 
             this.refresh();
+            // 位置切换后刷新同步下载按钮可见状态
+            if (typeof window.updateSyncDownloadBtnVisibility === 'function') {
+                window.updateSyncDownloadBtnVisibility();
+            }
         } catch (e) {
             if (typeof showError === 'function') showError('切换目录失败');
         }
@@ -819,6 +823,10 @@ window.LocalMusicManager = {
         const el = document.getElementById('lm-folder-select');
         this.filterFolder = el.value;
         this.applyFilters();
+        // 位置筛选切换后刷新同步下载按钮可见状态
+        if (typeof window.updateSyncDownloadBtnVisibility === 'function') {
+            window.updateSyncDownloadBtnVisibility();
+        }
     },
 
     toggleUnindexed() {
@@ -2798,6 +2806,10 @@ window.LocalMusicManager = {
         if (text) text.innerText = displayText;
         this.closeSubPathModal();
         this.applyFilters();
+        // 分类文件夹切换后刷新同步下载按钮可见状态
+        if (typeof window.updateSyncDownloadBtnVisibility === 'function') {
+            window.updateSyncDownloadBtnVisibility();
+        }
     },
 
     async batchCategorize(targetSubPath) {

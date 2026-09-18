@@ -32,6 +32,7 @@ import * as serverDownloadQueue from './serverDownloadQueue'
 import * as remasterQueue from './remasterQueue'
 import * as scheduler from './scheduler'
 import { getUpdatedListIds, removeUpdatedListId } from './task/networkListTask'
+import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSyncProgress, triggerUserSync, cancelUserSync } from './task/syncDownloadTask'
 import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import needle from 'needle'
@@ -664,6 +665,7 @@ const saveUsers = () => {
       customMusicDir: u.customMusicDir,
       allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
       allowWriteCustomMusicDir: u.allowWriteCustomMusicDir,
+      enableAutoDownload: u.enableAutoDownload,
     })), null, 2))
     if (typeof global.lx.saveConfig === 'function') {
       global.lx.saveConfig()
@@ -1417,9 +1419,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             customMusicDir: u.customMusicDir || '',
             allowOperateCustomMusicDir: u.allowOperateCustomMusicDir ?? false,
             allowWriteCustomMusicDir: u.allowWriteCustomMusicDir ?? false,
+            enableAutoDownload: u.enableAutoDownload ?? false,
           }))
           if (global.lx.config['user.enablePublicFavorites']) {
-            users.unshift({ name: '_open', password: '', enableCustomMusicDir: false, customMusicDir: '', allowOperateCustomMusicDir: false, allowWriteCustomMusicDir: false })
+            users.unshift({ name: '_open', password: '', enableCustomMusicDir: false, customMusicDir: '', allowOperateCustomMusicDir: false, allowWriteCustomMusicDir: false, enableAutoDownload: false })
           }
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -1467,7 +1470,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         if (req.method === 'PUT') {
           void readBody(req).then(body => {
             try {
-              const { name, newName, password, enableCustomMusicDir, customMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir } = JSON.parse(body)
+              const { name, newName, password, enableCustomMusicDir, customMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir, enableAutoDownload } = JSON.parse(body)
               if (!name) {
                 res.writeHead(400)
                 res.end('Missing required fields')
@@ -1488,6 +1491,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 if (customMusicDir !== undefined) user.customMusicDir = String(customMusicDir).trim()
                 if (allowOperateCustomMusicDir !== undefined) user.allowOperateCustomMusicDir = !!allowOperateCustomMusicDir
                 if (allowWriteCustomMusicDir !== undefined) user.allowWriteCustomMusicDir = !!allowWriteCustomMusicDir
+                if (enableAutoDownload !== undefined) user.enableAutoDownload = !!enableAutoDownload
                 saveUsers()
                 res.writeHead(200)
                 res.end(JSON.stringify({ success: true }))
@@ -2120,6 +2124,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         const valid = !!username
         let enableCustomMusicDir = false
         let allowOperateCustomMusicDir = false
+        let enableAutoDownload = false
         if (username) {
           const user = global.lx.config.users.find(u => u.name === username)
           // 全局总开关 user.enableCustomMusicDir 必须为 true，才读取用户自身配置
@@ -2128,9 +2133,12 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             enableCustomMusicDir = !!user.enableCustomMusicDir
             allowOperateCustomMusicDir = !!user.allowOperateCustomMusicDir
           }
+          if (user) {
+            enableAutoDownload = !!user.enableAutoDownload
+          }
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ valid, username: username || null, enableCustomMusicDir, allowOperateCustomMusicDir }))
+        res.end(JSON.stringify({ valid, username: username || null, enableCustomMusicDir, allowOperateCustomMusicDir, enableAutoDownload }))
         return
       }
 
@@ -2577,6 +2585,211 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // ─── 同步下载 API ─────────────────────────────────────────────────────
+      // GET /api/user/sync-download/status  查询当前用户同步下载配置 + 歌单列表 + 进度
+      if (pathname === '/api/user/sync-download/status' && req.method === 'GET') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        try {
+          const userSpace = getUserSpace(username)
+          const listData = await userSpace.listManage.getListData()
+          const syncData = getSyncDownloadData(username)
+          const progress = getUserSyncProgress(username)
+          // 检查是否开启了自动更新网络歌单
+          const settingsPath = path.join(userSpace.dataManage.userDir, File.userSettingsJSON)
+          let autoUpdateNetworkList = false
+          if (fs.existsSync(settingsPath)) {
+            try { autoUpdateNetworkList = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')).autoUpdateNetworkList === true } catch { }
+          }
+          // 获取调度器网络歌单任务状态，以便提供准确的下次触发时间
+          const taskStatus = scheduler.getSchedulerStatus()
+          const networkTask = taskStatus.find(t => t.id === 'network_list_autocheck')
+          const nextSyncTime = (autoUpdateNetworkList && networkTask?.enabled) ? (networkTask.nextRunTime || null) : null
+
+          const getSongCoverUrl = (song: any): string => {
+            if (!song) return ''
+            return song.img ||
+              song.pic ||
+              song.picUrl ||
+              song.meta?.picUrl ||
+              song.meta?.pic ||
+              song.meta?.albumPic ||
+              song.meta?.cover ||
+              song.album?.picUrl ||
+              song.album?.pic ||
+              song.album?.img ||
+              song.otherSource?.meta?.picUrl ||
+              ''
+          }
+
+          const playlists = (listData?.userList ?? []).map((l: any) => {
+            let cover = l.Album || l.album || l.cover || l.pic || l.picUrl || ''
+            if (!cover && Array.isArray(l.list) && l.list.length > 0) {
+              for (const song of l.list) {
+                const sCover = getSongCoverUrl(song)
+                if (sCover) {
+                  cover = sCover
+                  break
+                }
+              }
+            }
+            return {
+              id: l.id,
+              name: l.name,
+              cover: cover || null,
+              source: l.source || null,
+              songCount: Array.isArray(l.list) ? l.list.length : 0,
+              isNetwork: !!l.sourceListId,
+              syncConfig: syncData.playlists[l.id] ?? { enabled: false, lastSyncTime: null, failedSongs: [] },
+            }
+          })
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: true,
+            data: {
+              autoUpdateNetworkList,
+              nextSyncTime,
+              syncDownload: {
+                enabled: syncData.enabled,
+                lastSyncTime: syncData.lastSyncTime,
+                lastSyncResult: syncData.lastSyncResult,
+              },
+              playlists,
+              progress,
+            }
+          }))
+        } catch (e: any) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, message: e.message })) }
+        return
+      }
+
+      // PUT /api/user/sync-download/settings  保存同步下载配置
+      if (pathname === '/api/user/sync-download/settings' && req.method === 'PUT') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          if (global.lx.config['user.enablePublicRestriction']) {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['frontend.password']) {
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '权限不足：公共用户受限模式下需要管理员权限' }))
+              return
+            }
+          }
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async body => {
+          try {
+            const payload = JSON.parse(body)
+            const syncData = getSyncDownloadData(username!)
+            if (typeof payload.enabled === 'boolean') syncData.enabled = payload.enabled
+            if (payload.playlists && typeof payload.playlists === 'object') {
+              for (const [id, cfg] of Object.entries(payload.playlists) as any) {
+                if (!syncData.playlists[id]) {
+                  syncData.playlists[id] = { enabled: false, lastSyncTime: null, failedSongs: [] }
+                }
+                if (typeof cfg.enabled === 'boolean') syncData.playlists[id].enabled = cfg.enabled
+              }
+            }
+            saveSyncDownloadData(username!, syncData)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true }))
+          } catch (e: any) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, message: e.message })) }
+        })
+        return
+      }
+
+      // POST /api/user/sync-download/trigger  手动触发同步
+      if (pathname === '/api/user/sync-download/trigger' && req.method === 'POST') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          if (global.lx.config['user.enablePublicRestriction']) {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['frontend.password']) {
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '权限不足：公共用户受限模式下需要管理员权限' }))
+              return
+            }
+          }
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        try {
+          const result = await triggerUserSync(username)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, ...result }))
+        } catch (e: any) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, message: e.message })) }
+        return
+      }
+
+      // POST /api/user/sync-download/cancel  取消/暂停当前同步
+      if ((pathname === '/api/user/sync-download/cancel' || pathname === '/api/user/sync-download/pause') && req.method === 'POST') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const cancelled = cancelUserSync(username)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, cancelled, message: cancelled ? '已暂停同步' : '当前无正在进行的同步' }))
+        return
+      }
+
+      // GET /api/user/sync-download/progress  轮询实时进度
+      if (pathname === '/api/user/sync-download/progress' && req.method === 'GET') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, data: getUserSyncProgress(username) }))
+        return
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       // [新增] Get User Settings (User Auth)
       if (pathname === '/api/user/settings' && req.method === 'GET') {
         const reqUsername = req.headers['x-user-name'] as string
@@ -2984,7 +3197,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           }
         }
 
-        const taskId = urlObj.searchParams.get('id') || 'network_list_autocheck'
+        let taskId = urlObj.searchParams.get('id') || 'network_list_autocheck'
+        if (taskId === 'sync_download') taskId = 'sync_download_task'
         void scheduler.executeTask(taskId).then(result => {
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
@@ -3010,7 +3224,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
         const taskId = urlObj.searchParams.get('task') || ''
 
-        // 目前支持的任务类型：network_list_autocheck
+        // 目前支持的任务类型：network_list_autocheck, sync_download_task
         if (taskId === 'network_list_autocheck') {
           if (req.method === 'GET') {
             const updatedListIds = getUpdatedListIds(targetUser)
@@ -3032,6 +3246,41 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 const updatedListIds = getUpdatedListIds(targetUser)
                 res.writeHead(200, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: true, updatedListIds }))
+              } catch (err: any) {
+                res.writeHead(500, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: err.message }))
+              }
+            })
+            return
+          }
+        }
+
+        if (taskId === 'sync_download_task' || taskId === 'sync_download') {
+          if (req.method === 'GET') {
+            const syncData = getSyncDownloadData(targetUser)
+            const progress = getUserSyncProgress(targetUser)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, syncData, progress }))
+            return
+          }
+
+          if (req.method === 'POST') {
+            void readBody(req).then(async body => {
+              try {
+                let action = ''
+                if (typeof body === 'string') {
+                  try { action = JSON.parse(body).action || '' } catch { }
+                } else if (body && typeof body === 'object') {
+                  action = (body as any).action || ''
+                }
+                if (action === 'trigger') {
+                  const result = await triggerUserSync(targetUser)
+                  res.writeHead(200, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ success: true, ...result }))
+                } else {
+                  res.writeHead(200, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ success: true }))
+                }
               } catch (err: any) {
                 res.writeHead(500, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, message: err.message }))
@@ -6505,6 +6754,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'webdav.backupPath': global.lx.config['webdav.backupPath'] || '/lx-sync-backups',
             'sync.interval': global.lx.config['sync.interval'] || 60,
             'sync.backupInterval': global.lx.config['sync.backupInterval'] || 24,
+            'webdav.excludeCache': global.lx.config['webdav.excludeCache'] ?? false,
+            'webdav.excludeMusic': global.lx.config['webdav.excludeMusic'] ?? false,
             'proxy.all.enabled': global.lx.config['proxy.all.enabled'] || false,
             'proxy.all.address': global.lx.config['proxy.all.address'] || '',
             'admin.path': global.lx.config['admin.path'] ?? '/music',
@@ -6604,6 +6855,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['webdav.backupPath'] !== undefined) global.lx.config['webdav.backupPath'] = newConfig['webdav.backupPath']
               if (newConfig['sync.interval'] !== undefined) global.lx.config['sync.interval'] = parseInt(newConfig['sync.interval'])
               if (newConfig['sync.backupInterval'] !== undefined) global.lx.config['sync.backupInterval'] = parseInt(newConfig['sync.backupInterval']) || 24
+              if (newConfig['webdav.excludeCache'] !== undefined) global.lx.config['webdav.excludeCache'] = !!newConfig['webdav.excludeCache']
+              if (newConfig['webdav.excludeMusic'] !== undefined) global.lx.config['webdav.excludeMusic'] = !!newConfig['webdav.excludeMusic']
               if (newConfig['proxy.all.enabled'] !== undefined) global.lx.config['proxy.all.enabled'] = newConfig['proxy.all.enabled']
               if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = newConfig['proxy.all.address']
 
@@ -6685,7 +6938,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               }
 
               // 更新 WebDAVSync 配置
-              if (global.lx.webdavSync && (newConfig['webdav.enable'] !== undefined || newConfig['webdav.url'] || newConfig['webdav.username'] || newConfig['webdav.password'] || newConfig['webdav.syncPath'] || newConfig['webdav.backupPath'] || newConfig['sync.interval'] || newConfig['sync.backupInterval'])) {
+              if (global.lx.webdavSync && (newConfig['webdav.enable'] !== undefined || newConfig['webdav.url'] || newConfig['webdav.username'] || newConfig['webdav.password'] || newConfig['webdav.syncPath'] || newConfig['webdav.backupPath'] || newConfig['sync.interval'] || newConfig['sync.backupInterval'] || newConfig['webdav.excludeCache'] !== undefined || newConfig['webdav.excludeMusic'] !== undefined)) {
                 global.lx.webdavSync.updateConfig({
                   enable: global.lx.config['webdav.enable'],
                   url: global.lx.config['webdav.url'],
@@ -6695,6 +6948,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                   backupPath: global.lx.config['webdav.backupPath'],
                   interval: global.lx.config['sync.interval'],
                   backupInterval: global.lx.config['sync.backupInterval'],
+                  excludeCache: global.lx.config['webdav.excludeCache'],
+                  excludeMusic: global.lx.config['webdav.excludeMusic'],
                 })
               }
 
@@ -6731,6 +6986,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'webdav.backupPath': global.lx.config['webdav.backupPath'],
                 'sync.interval': global.lx.config['sync.interval'],
                 'sync.backupInterval': global.lx.config['sync.backupInterval'],
+                'webdav.excludeCache': global.lx.config['webdav.excludeCache'],
+                'webdav.excludeMusic': global.lx.config['webdav.excludeMusic'],
                 'proxy.all.enabled': global.lx.config['proxy.all.enabled'],
                 'proxy.all.address': global.lx.config['proxy.all.address'],
                 'admin.path': global.lx.config['admin.path'] ?? '/admin',
@@ -7906,6 +8163,17 @@ export const startServer = async (port: number, ip: string) => {
       requestedSource: resolved.requestedSource,
       downloadSource: resolved.downloadSource,
       sourceName: resolved.sourceName,
+    }
+  })
+
+  // 注入同步下载引擎的 resolver（低耦合：由此处唯一注入）
+  setSongResolver(async (songInfo, quality, username) => {
+    const apiUsername = username === '_open' ? 'open' : username
+    const resolved = await resolveServerSong(normalizeSongInfo(songInfo), quality, apiUsername, true)
+    return {
+      url: resolved.url,
+      quality: resolved.quality,
+      songInfo: resolved.songInfo,
     }
   })
 
