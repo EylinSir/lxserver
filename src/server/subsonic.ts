@@ -25,6 +25,56 @@ import { getMusicInfo as mgGetMusicInfo } from '@/modules/utils/musicSdk/mg/musi
 import bdMusicInfo from '@/modules/utils/musicSdk/bd/musicInfo.js'
 const musicSdk = musicSdkRaw as any
 
+// 排行榜列表封面缓存：getBoards 接口不带封面，按需抓取榜单首歌封面并按榜单缓存，避免每次 getPlaylists 都实拉
+const leaderboardCoverCache = new Map<string, { ts: number; url: string }>()
+const leaderboardCoverInflight = new Map<string, Promise<string>>()
+const LEADERBOARD_COVER_TTL = 30 * 60 * 1000
+
+// 共享歌单(各音源歌单)封面缓存：getList 返回的歌单项含 img，列表阶段直接记录，getCoverArt 命中即用
+const sharedPlaylistCoverCache = new Map<string, string>()
+
+// ─────────────────────────────────────────────
+// Subsonic 服务端转码:ffmpeg 可用性检测 + 并发限流
+// ─────────────────────────────────────────────
+let ffmpegProbeDone = false
+let ffmpegAvailable = false
+async function probeFfmpeg(): Promise<boolean> {
+    if (ffmpegProbeDone) return ffmpegAvailable
+    try {
+        await new Promise<void>((resolve) => {
+            const p = spawn('ffmpeg', ['-version'])
+            p.on('error', () => resolve())
+            p.on('close', () => resolve())
+        })
+        ffmpegAvailable = true
+    } catch {
+        ffmpegAvailable = false
+    }
+    ffmpegProbeDone = true
+    return ffmpegAvailable
+}
+
+class TranscodeSemaphore {
+    private active = 0
+    private queue: Array<() => void> = []
+    constructor(private max: number) {}
+    async acquire(): Promise<void> {
+        if (this.active < this.max) { this.active++; return }
+        await new Promise<void>((resolve) => this.queue.push(resolve))
+        this.active++
+    }
+    release(): void {
+        this.active--
+        const next = this.queue.shift()
+        if (next) next()
+    }
+}
+let transcodeSemaphore: TranscodeSemaphore | null = null
+function getTranscodeSemaphore(max: number): TranscodeSemaphore {
+    if (!transcodeSemaphore) transcodeSemaphore = new TranscodeSemaphore(max)
+    return transcodeSemaphore
+}
+
 // 推荐结果缓存：同一类型短时间内共享一次 QQ 抓取结果，避免客户端并发请求（启动瞬间
 // newest/recent/random 同时打来）重复访问。缓存成功后保留较长时间，并在 QQ 失败时
 // 回退到上次成功结果，确保刷新/限流时每日推荐不消失。
@@ -1308,13 +1358,51 @@ class SubsonicHandler {
                     duration: 0,
                     created: new Date().toISOString(),
                     changed: new Date().toISOString(),
-                    coverArt: 'logo',
+                    // coverArt 用榜单歌单 id 作为令牌（lb_<source>_<bangid>），
+                    // 由 getCoverArt 按需拉取该榜单首歌封面并代理返回；不再统一用 'logo'（SVG 部分客户端不渲染）
+                    coverArt: id,
                 }
             })
         } catch (err) {
             subsonicLog.error('[Subsonic] getLeaderboardPlaylists error:', err)
             return []
         }
+    }
+
+    /**
+     * 解析排行榜封面令牌 lb_<source>_<bangid>，按需抓取该榜单首歌封面（带缓存与并发复用）。
+     * getBoards 接口不返回封面，故列表项 coverArt 用令牌占位，由 getCoverArt 在客户端真正请求时才拉取。
+     */
+    private async getLeaderboardCoverUrl(token: string): Promise<string> {
+        const m = /^lb_([^_]+)_(.+)$/.exec(token)
+        if (!m) return 'logo'
+        const source = m[1]
+        const bangid = m[2]
+        const key = `${source}_${bangid}`
+        const now = Date.now()
+        const cached = leaderboardCoverCache.get(key)
+        if (cached && now - cached.ts < LEADERBOARD_COVER_TTL) return cached.url
+        let inflight = leaderboardCoverInflight.get(key)
+        if (!inflight) {
+            inflight = (async () => {
+                try {
+                    const lb = (musicSdk as any)[source]?.leaderboard
+                    if (!lb || typeof lb.getList !== 'function') return 'logo'
+                    const data: any = await lb.getList(bangid, 1)
+                    const list: any[] = data?.list || []
+                    const img = list[0]?.img
+                    return (typeof img === 'string' && img) ? img : 'logo'
+                } catch {
+                    return 'logo'
+                } finally {
+                    leaderboardCoverInflight.delete(key)
+                }
+            })()
+            leaderboardCoverInflight.set(key, inflight)
+        }
+        const url = await inflight
+        leaderboardCoverCache.set(key, { ts: now, url })
+        return url
     }
 
     private async handleGetLeaderboardPlaylist(res: http.ServerResponse, username: string, id: string, format: string) {
@@ -1405,6 +1493,8 @@ class SubsonicHandler {
                 const img = typeof item.img === 'string' && item.img
                     ? (item.img.startsWith('//') ? `https:${item.img}` : item.img)
                     : 'logo'
+                // 记录封面，便于客户端以 pl_ id 请求 getCoverArt 时直接命中
+                sharedPlaylistCoverCache.set(id, img)
                 return {
                     id,
                     name: `歌单·${item.name || item.dissname || '未知歌单'}`,
@@ -1441,10 +1531,11 @@ class SubsonicHandler {
             if (global.lx.config['subsonic.hideDisliked']) {
                 musics = await this.filterDislikedSongs(username, musics)
             }
-            const coverArt = (musics[0] as any)?.img || 'logo'
+            const coverArt = (musics[0] as any)?.img || detail?.info?.img || 'logo'
             const playlistMeta = {
                 id,
-                name: `歌单·${detail?.name || plId}`,
+                // SDK 的歌单名在 info.name（旧接口在顶层 name），都要兼容
+                name: `歌单·${detail?.info?.name || detail?.name || plId}`,
                 comment: '歌单(只读)',
                 owner: 'lxserver',
                 public: true,
@@ -4214,6 +4305,35 @@ class SubsonicHandler {
                 try { coverUrl = decodeURIComponent(coverUrl) } catch { /* 解码失败保持原值 */ }
             }
             if (coverUrl.startsWith('http')) return proxyCoverImage(res, coverUrl)
+
+            // [新增] 排行榜虚拟歌单封面：coverArt 形如 lb_<source>_<bangid>，getBoards 接口不带图，
+            // 按需拉取该榜单首歌封面（带缓存）后代理返回；失败回退 logo。
+            if (id.startsWith('lb_')) {
+                const url = await this.getLeaderboardCoverUrl(id)
+                if (url && url !== 'logo') {
+                    return proxyCoverImage(res, url.startsWith('//') ? `https:${url}` : url)
+                }
+                const logoPath = path.join(global.lx.staticPath, 'music/assets/logo.svg')
+                if (fs.existsSync(logoPath)) {
+                    res.writeHead(200, { 'Content-Type': 'image/svg+xml' })
+                    return fs.createReadStream(logoPath).pipe(res)
+                }
+                return res.end()
+            }
+
+            // [新增] 共享歌单(歌单)虚拟歌单封面：coverArt 形如 pl_<source>_<plId>，列表阶段已记录歌单 img
+            if (id.startsWith('pl_')) {
+                const url = sharedPlaylistCoverCache.get(id)
+                if (url && url !== 'logo') {
+                    return proxyCoverImage(res, url.startsWith('//') ? `https:${url}` : url)
+                }
+                const logoPath = path.join(global.lx.staticPath, 'music/assets/logo.svg')
+                if (fs.existsSync(logoPath)) {
+                    res.writeHead(200, { 'Content-Type': 'image/svg+xml' })
+                    return fs.createReadStream(logoPath).pipe(res)
+                }
+                return res.end()
+            }
 
             // [新增] 兼容逻辑：处理不规范的 ID（如原始 albumMid）
             if (!id.includes('_')) {
