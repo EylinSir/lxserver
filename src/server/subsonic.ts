@@ -33,6 +33,35 @@ const LEADERBOARD_COVER_TTL = 30 * 60 * 1000
 // 共享歌单(各音源歌单)封面缓存：getList 返回的歌单项含 img，列表阶段直接记录，getCoverArt 命中即用
 const sharedPlaylistCoverCache = new Map<string, string>()
 
+/** 给 Promise 加超时（超时即 reject 并清理定时器），避免单个音源挂住整个搜索请求 */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)
+        Promise.resolve(p).then(
+            v => { clearTimeout(timer); resolve(v) },
+            e => { clearTimeout(timer); reject(e) },
+        )
+    })
+}
+
+/** 多源结果按源轮询交错取数，避免"响应最快的源"占满全部名额 */
+function interleaveBySource<T>(groups: T[][], max: number): T[] {
+    const out: T[] = []
+    let i = 0
+    let added = true
+    while (out.length < max && added) {
+        added = false
+        for (const g of groups) {
+            if (!g || i >= g.length) continue
+            out.push(g[i])
+            added = true
+            if (out.length >= max) break
+        }
+        i++
+    }
+    return out
+}
+
 // ─────────────────────────────────────────────
 // Subsonic 服务端转码:ffmpeg 可用性检测 + 并发限流
 // ─────────────────────────────────────────────
@@ -2717,6 +2746,85 @@ class SubsonicHandler {
         return interleaved
     }
 
+    /**
+     * 在线搜索歌手（各源 extendSearch.searchSinger），映射为 Subsonic artist 结构。
+     * 各源并发、单源 8s 超时、按规范 id 去重，失败静默跳过（不影响其它源）。
+     */
+    private async fetchOnlineSearchArtists(query: string, sources: string[], limit: number): Promise<any[]> {
+        const max = Math.max(1, Math.min(limit || 20, 50))
+        const seen = new Set<string>()
+        const groups = await Promise.all(sources.map(async (src): Promise<any[]> => {
+            const sdk = (musicSdk as any)[src]
+            if (!sdk?.extendSearch?.searchSinger) return []
+            const rows: any[] = []
+            try {
+                const data: any = await withTimeout(sdk.extendSearch.searchSinger(query, 1, max), 8000)
+                for (const item of (data?.list || [])) {
+                    const mid = String(item.mid || item.id || '')
+                    if (!mid) continue
+                    const id = `art_${src}_${mid}`
+                    if (seen.has(id)) continue
+                    seen.add(id)
+                    rows.push({
+                        id,
+                        name: item.name || '',
+                        title: item.name || '',
+                        albumCount: item.albumSize ?? 0,
+                        coverArt: id,               // 交给 getCoverArt 的 art_ 分支解析
+                        artistImageUrl: item.picUrl || undefined,
+                        isDir: true,
+                    })
+                }
+            } catch { /* 单源失败忽略 */ }
+            return rows
+        }))
+        return interleaveBySource(groups, max)
+    }
+
+    /**
+     * 在线搜索专辑（各源 extendSearch.searchAlbum），映射为 Subsonic album 结构。
+     * id 采用 alb_<source>_<albumMid>，点进去即可走 handleGetAlbum 的 SDK 分支。
+     */
+    private async fetchOnlineSearchAlbums(query: string, sources: string[], limit: number): Promise<any[]> {
+        const max = Math.max(1, Math.min(limit || 20, 50))
+        const seen = new Set<string>()
+        const groups = await Promise.all(sources.map(async (src): Promise<any[]> => {
+            const sdk = (musicSdk as any)[src]
+            if (!sdk?.extendSearch?.searchAlbum) return []
+            const rows: any[] = []
+            try {
+                const data: any = await withTimeout(sdk.extendSearch.searchAlbum(query, 1, max), 8000)
+                for (const item of (data?.list || [])) {
+                    const mid = String(item.mid || item.id || '')
+                    if (!mid) continue
+                    const id = `alb_${src}_${mid}`
+                    if (seen.has(id)) continue
+                    seen.add(id)
+                    const artistName = item.artistName || ''
+                    const artistId = item.artistId
+                        ? `art_${src}_${item.artistId}`
+                        : (artistName ? `artist_${artistName}` : id)
+                    rows.push({
+                        id,
+                        name: item.name || '',
+                        title: item.name || '',
+                        album: item.name || '',
+                        artist: artistName,
+                        artistId,
+                        isDir: true,
+                        coverArt: item.picUrl || id,
+                        songCount: item.size || 0,
+                        duration: 0,
+                        created: new Date().toISOString(),
+                        playCount: 0,
+                    })
+                }
+            } catch { /* 单源失败忽略 */ }
+            return rows
+        }))
+        return interleaveBySource(groups, max)
+    }
+
     private async handleSearch(res: http.ServerResponse, username: string, params: URLSearchParams, format: string, method: string = 'search3') {
         let rawQuery = (params.get('query') || '').trim()
         if (rawQuery === '""' || rawQuery === "''") rawQuery = '' // 处理某些客户端发送的空占位符
@@ -2961,6 +3069,31 @@ class SubsonicHandler {
                             existingIds.add(item.music.id)
                         }
                     }
+                }
+            }
+        }
+
+        // [新增] 在线歌手/专辑搜索：Subsonic 客户端搜索页有「艺人 / 专辑」两栏，
+        // 此前它们只从本地库取（未收藏时恒为空）。这里在本地区结果不足时并发补在线结果。
+        if (cleanQuery && searchMode !== 'local_only') {
+            const needArtists = artistCount > 0 && matchedArtists.length < artistOffset + artistCount
+            const needAlbums = albumCount > 0 && matchedAlbums.length < albumOffset + albumCount
+            if (needArtists || needAlbums) {
+                const [onlineArtists, onlineAlbums] = await Promise.all([
+                    needArtists
+                        ? this.fetchOnlineSearchArtists(cleanQuery, targetOnlineSources, artistOffset + artistCount)
+                        : Promise.resolve([] as any[]),
+                    needAlbums
+                        ? this.fetchOnlineSearchAlbums(cleanQuery, targetOnlineSources, albumOffset + albumCount)
+                        : Promise.resolve([] as any[]),
+                ])
+                const artistIds = new Set(matchedArtists.map((a: any) => a.id))
+                for (const a of onlineArtists) {
+                    if (!artistIds.has(a.id)) { matchedArtists.push(a); artistIds.add(a.id) }
+                }
+                const albumIds = new Set(matchedAlbums.map((a: any) => a.id))
+                for (const a of onlineAlbums) {
+                    if (!albumIds.has(a.id)) { matchedAlbums.push(a); albumIds.add(a.id) }
                 }
             }
         }
