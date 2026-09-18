@@ -210,6 +210,86 @@ export function writeSubsonicMeta(username: string, meta: SubsonicMeta) {
 }
 
 /**
+ * 播放历史（scrobble 上报）条目。
+ * 只存 id + 时间戳：scrobble 是高频写入（音流实测 1853 次/月量级），
+ * 若写入时还要回源解析歌名会显著拖慢，歌名留给读取时按需解析。
+ */
+export interface ScrobbleEntry {
+    id: string
+    time: number
+}
+
+/** 播放队列状态（savePlayQueue / getPlayQueue 跨设备续播用） */
+export interface PlayQueueState {
+    ids: string[]
+    current?: string
+    position?: number
+    changed: number
+    changedBy?: string
+}
+
+const MAX_SCROBBLES = 2000
+const MAX_QUEUE_IDS = 1000
+
+function getScrobbleFilePath(username: string): string {
+    return path.join(global.lx.userPath, getUserDirname(username), 'subsonic-scrobbles.json')
+}
+
+function getPlayQueueFilePath(username: string): string {
+    return path.join(global.lx.userPath, getUserDirname(username), 'subsonic-playqueue.json')
+}
+
+export function readScrobbles(username: string): ScrobbleEntry[] {
+    try {
+        const filePath = getScrobbleFilePath(username)
+        if (fs.existsSync(filePath)) {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+            if (Array.isArray(data)) return data.filter(it => it && typeof it.id === 'string')
+        }
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to read subsonic-scrobbles.json:', e)
+    }
+    return []
+}
+
+export function writeScrobbles(username: string, list: ScrobbleEntry[]) {
+    try {
+        const filePath = getScrobbleFilePath(username)
+        const dirPath = path.dirname(filePath)
+        if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
+        // 只保留最近若干条，避免长期运行后文件无限增长
+        const trimmed = list.length > MAX_SCROBBLES ? list.slice(list.length - MAX_SCROBBLES) : list
+        fs.writeFileSync(filePath, JSON.stringify(trimmed), 'utf8')
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to write subsonic-scrobbles.json:', e)
+    }
+}
+
+export function readPlayQueue(username: string): PlayQueueState | null {
+    try {
+        const filePath = getPlayQueueFilePath(username)
+        if (fs.existsSync(filePath)) {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+            if (data && Array.isArray(data.ids)) return data as PlayQueueState
+        }
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to read subsonic-playqueue.json:', e)
+    }
+    return null
+}
+
+export function writePlayQueue(username: string, state: PlayQueueState) {
+    try {
+        const filePath = getPlayQueueFilePath(username)
+        const dirPath = path.dirname(filePath)
+        if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
+        fs.writeFileSync(filePath, JSON.stringify({ ...state, ids: state.ids.slice(0, MAX_QUEUE_IDS) }), 'utf8')
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to write subsonic-playqueue.json:', e)
+    }
+}
+
+/**
  * 反向同步：网页前端原生收藏(媒体库 artists/albums)变更 -> Subsonic 星标。
  * added/removed 为原生条目 {id, source, name}。
  */
@@ -755,10 +835,19 @@ class SubsonicHandler {
                     return this.handleDeletePlaylist(res, username, params, format)
 
                 case 'scrobble':
-                    return this.sendResponse(res, {}, format)
+                    return this.handleScrobble(res, username, params, format)
 
                 case 'getNowPlaying':
-                    return this.sendResponse(res, { nowPlaying: { entry: [] } }, format)
+                    return this.handleGetNowPlaying(res, username, format)
+
+                case 'savePlayQueue':
+                    return this.handleSavePlayQueue(res, username, params, format)
+
+                case 'getPlayQueue':
+                    return this.handleGetPlayQueue(res, username, format)
+
+                case 'getIndexes':
+                    return this.handleGetIndexes(res, username, format)
 
                 case 'getScanStatus':
                     return this.sendResponse(res, format === 'json'
@@ -2137,7 +2226,22 @@ class SubsonicHandler {
         const RECOMMEND_POOL_SIZE = Math.max(20, Math.min(500, global.lx.config['subsonic.recommendPoolSize'] ?? 100))
         let recommendPool: any[] = []
 
-        if (type === 'recent' || type === 'newest' || type === 'random' || type === 'byGenre') {
+        // [播放历史] recent / frequent 优先使用真实播放记录（scrobble）。
+        // 之前这两个 type 返回的都是在线推荐的新专辑，与用户实际听过的内容毫无关系，
+        // 导致客户端「最近播放」页面显示的并不是自己听过的东西。
+        if (type === 'recent' || type === 'frequent') {
+            try {
+                const history = readScrobbles(username)
+                if (history.length) {
+                    recommendPool = await this.buildPlayedAlbums(username, history, type, RECOMMEND_POOL_SIZE)
+                }
+            } catch (e) {
+                subsonicLog.error(`[Subsonic] 播放历史构造专辑列表失败(${type}):`, e)
+                recommendPool = []
+            }
+        }
+
+        if (recommendPool.length === 0 && (type === 'recent' || type === 'newest' || type === 'random' || type === 'byGenre')) {
             try {
                 if (type === 'byGenre') {
                     const genreNameOrId = params.get('genre') || ''
@@ -4842,6 +4946,218 @@ class SubsonicHandler {
             if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' })
             if (!res.writableEnded) res.end(JSON.stringify({ error: 'cover art error' }))
         }
+    }
+
+    /**
+     * 按歌曲 id 取出可直接返回的条目：JSON 用平铺对象，XML 需要包成 { attrs }。
+     * 先查本地列表，其次在线歌曲缓存（findMusicById 内部会加载 onlineSongCache）。
+     */
+    private async songEntryById(username: string, id: string, format: string): Promise<any | null> {
+        const found = await this.findMusicById(username, id)
+        if (!found) return null
+        const flat = this.musicToSongFlat(found.music, found.listId, undefined, username)
+        return format === 'json' ? flat : { attrs: flat }
+    }
+
+    /**
+     * scrobble：客户端上报播放。
+     * [修复] 之前这里直接返回空成功、什么都不记录，服务端无从得知用户听过什么
+     * （音流在高频调用，NAS 实例日志里 1853 次）。现在落盘为播放历史。
+     */
+    private async handleScrobble(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const ids = params.getAll('id')
+            .flatMap(v => String(v).split(','))
+            .map(s => s.trim())
+            .filter(Boolean)
+        if (!ids.length) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+
+        const timeParam = params.get('time')
+        const parsed = timeParam ? Number(timeParam) : NaN
+        // 客户端可能传毫秒(13 位)或秒(10 位)时间戳
+        const eventTime = Number.isFinite(parsed) && parsed > 0
+            ? (String(Math.floor(parsed)).length >= 13 ? parsed : parsed * 1000)
+            : Date.now()
+
+        const list = readScrobbles(username)
+        for (const id of ids) list.push({ id, time: eventTime })
+        writeScrobbles(username, list)
+
+        return this.sendResponse(res, {}, format)
+    }
+
+    /**
+     * getNowPlaying：最近的播放活动。用 scrobble 历史近似（15 分钟窗口），
+     * 同一首歌只保留最近一条；按 ID 解析出完整歌曲条目返回。
+     */
+    private async handleGetNowPlaying(res: http.ServerResponse, username: string, format: string) {
+        const since = Date.now() - 15 * 60 * 1000
+        const latest = new Map<string, number>()
+        for (const it of readScrobbles(username)) {
+            if (it.time < since) continue
+            latest.set(it.id, it.time)
+        }
+        const entries = Array.from(latest.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 20)
+
+        const songs: any[] = []
+        for (const [id, time] of entries) {
+            const entry = await this.songEntryById(username, id, format)
+            if (!entry) continue
+            const extra = {
+                userName: username,
+                minutesAgo: Math.max(0, Math.round((Date.now() - time) / 60000)),
+                playerId: 0,
+                playerName: 'lxserver',
+            }
+            songs.push(format === 'json' ? { ...entry, ...extra } : { attrs: { ...entry.attrs, ...extra } })
+        }
+
+        // toXml 的数组必须挂在 children 下，否则会渲染成空元素 <nowPlaying />
+        return this.sendResponse(res, format === 'json'
+            ? { nowPlaying: { entry: songs } }
+            : { nowPlaying: { children: { entry: songs } } }, format)
+    }
+
+    /** savePlayQueue：保存当前播放队列，用于跨设备 / 重连后续播 */
+    private async handleSavePlayQueue(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const ids = params.getAll('id')
+            .flatMap(v => String(v).split(','))
+            .map(s => s.trim())
+            .filter(Boolean)
+        const current = params.get('current') || (ids.length ? ids[ids.length - 1] : '')
+        const position = Math.max(0, Math.floor(Number(params.get('position') || 0)) || 0)
+
+        writePlayQueue(username, {
+            ids,
+            current,
+            position,
+            changed: Date.now(),
+            changedBy: params.get('c') || '',
+        })
+
+        subsonicLog.debug(`[Subsonic] savePlayQueue: ${ids.length} 首 current=${current} position=${position}ms (user=${username})`)
+        return this.sendResponse(res, {}, format)
+    }
+
+    /** getPlayQueue：读取上次保存的播放队列（含当前曲目下标与播放位置） */
+    private async handleGetPlayQueue(res: http.ServerResponse, username: string, format: string) {
+        const state = readPlayQueue(username)
+        const ids = state?.ids || []
+        const entries: any[] = []
+        for (const id of ids) {
+            const entry = await this.songEntryById(username, id, format)
+            if (entry) entries.push(entry)
+        }
+
+        const currentIndex = state?.current ? Math.max(0, ids.indexOf(state.current)) : 0
+        const position = state?.position || 0
+        const changed = new Date(state?.changed || 0).toISOString()
+        const changedBy = state?.changedBy || ''
+
+        if (format === 'json') {
+            return this.sendResponse(res, {
+                playQueue: { entry: entries, current: currentIndex, position, username, changed, changedBy },
+            }, format)
+        }
+        return this.sendResponse(res, {
+            playQueue: {
+                attrs: { current: currentIndex, position, username, changed, changedBy },
+                children: { entry: entries },
+            },
+        }, format)
+    }
+
+    /**
+     * getIndexes：目录浏览的根索引（旧式 / 部分客户端依赖，音流实测未调用）。
+     * 按首字母分组为 index，非 A-Z 归入 “#”（与多数服务端实现一致）。
+     */
+    private async handleGetIndexes(res: http.ServerResponse, username: string, format: string) {
+        const directory = await this.buildArtistDirectory(username)
+        const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        const buckets = new Map<string, any[]>()
+        for (const a of directory) {
+            const first = (a.name || '').trim().charAt(0).toUpperCase()
+            const key = LETTERS.includes(first) ? first : '#'
+            if (!buckets.has(key)) buckets.set(key, [])
+            buckets.get(key)!.push(a)
+        }
+
+        const child: any[] = []
+        for (const key of ['#'].concat(LETTERS.split(''))) {
+            const items = buckets.get(key)
+            if (!items || !items.length) continue
+            const artists = items.map(a => ({
+                attrs: {
+                    id: a.id,
+                    name: a.name,
+                    albumCount: a.albumKeys?.size ?? 0,
+                },
+            }))
+            child.push({ attrs: { name: key }, children: { artist: artists } })
+        }
+
+        const lastModified = Date.now()
+        if (format === 'json') {
+            const childJson = child.map(c => ({
+                name: c.attrs.name,
+                artist: c.children.artist.map((x: any) => x.attrs),
+            }))
+            return this.sendResponse(res, {
+                indexes: { lastModified, ignoredArticles: '', child: childJson },
+            }, format)
+        }
+        return this.sendResponse(res, {
+            indexes: { attrs: { lastModified, ignoredArticles: '' }, children: { child } },
+        }, format)
+    }
+
+    /**
+     * 基于真实播放历史(scrobble)构造专辑列表，结构与推荐池保持一致：
+     * - recent   (最近播放)：按专辑最后一次播放时间降序
+     * - frequent (最常播放)：按专辑累计播放次数降序
+     * 只回溯最近若干条，避免历史很长时逐首解析过慢。
+     */
+    private async buildPlayedAlbums(username: string, history: ScrobbleEntry[], type: 'recent' | 'frequent', limit: number) {
+        const stats = new Map<string, { count: number, lastTime: number, song: any }>()
+
+        for (const item of history.slice(-400)) {
+            const song = await this.songEntryById(username, item.id, 'json')
+            if (!song) continue
+            const albumId = String(song.albumId || song.parent || '').trim()
+            if (!albumId) continue
+            const cur = stats.get(albumId)
+            if (!cur) {
+                stats.set(albumId, { count: 1, lastTime: item.time, song })
+            } else {
+                cur.count++
+                if (item.time > cur.lastTime) {
+                    cur.lastTime = item.time
+                    cur.song = song
+                }
+            }
+        }
+
+        const list = Array.from(stats.entries()).map(([albumId, s]) => ({
+            id: albumId,
+            name: s.song.album || '未知专辑',
+            title: s.song.album || '未知专辑',
+            album: s.song.album || '未知专辑',
+            artist: s.song.artist || '未知歌手',
+            artistId: s.song.artistId || `artist_${s.song.artist || ''}`,
+            isDir: true,
+            coverArt: s.song.coverArt || albumId,
+            songCount: 0,
+            duration: 0,
+            created: new Date(s.lastTime).toISOString(),
+            playCount: s.count,
+        }))
+
+        list.sort(type === 'frequent'
+            ? (a, b) => (b.playCount - a.playCount) || (Date.parse(b.created) - Date.parse(a.created))
+            : (a, b) => Date.parse(b.created) - Date.parse(a.created))
+
+        return list.slice(0, limit)
     }
 
     private async handleGetTopSongs(
