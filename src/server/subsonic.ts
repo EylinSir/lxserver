@@ -10,6 +10,7 @@ import { fetchRecommendedSongs } from '@/server/utils/recommendSongs'
 import { filterDisliked, splitSingers, type DislikeRuleSet } from '@/modules/dislike/match'
 import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
+import { buildQueryVariants } from '@/server/utils/zhConvert'
 import { getCachedDislikeRuleSet, invalidateDislikeCache } from '@/server/utils/dislikeCache'
 import { proxyCoverImage } from '@/server/coverProxy'
 import { subsonicLog } from '@/utils/log4js'
@@ -2694,18 +2695,23 @@ class SubsonicHandler {
                 const allItems: any[] = []
                 const existingIds = new Set<string>()
 
-                for (let page = 1; page <= pagesToFetch; page++) {
-                    const searchRes = await musicSdk[source].musicSearch.search(cleanQuery, page, pageSize)
-                    const list = Array.isArray(searchRes?.list) ? searchRes.list : []
-                    if (list.length === 0) break
+                // [新增] 简繁变体补搜：原词命中不足时换个字形再搜一轮
+                // （实测「黄霄雲」(繁) 各源合计仅 5 条，「黄霄云」(简) 有 203 条）
+                for (const kw of buildQueryVariants(cleanQuery)) {
+                    for (let page = 1; page <= pagesToFetch; page++) {
+                        const searchRes = await musicSdk[source].musicSearch.search(kw, page, pageSize)
+                        const list = Array.isArray(searchRes?.list) ? searchRes.list : []
+                        if (list.length === 0) break
 
-                    for (const item of list) {
-                        const songmid = String(item.songmid || item.id || '')
-                        if (!songmid || existingIds.has(songmid)) continue
-                        existingIds.add(songmid)
-                        allItems.push(item)
+                        for (const item of list) {
+                            const songmid = String(item.songmid || item.id || '')
+                            if (!songmid || existingIds.has(songmid)) continue
+                            existingIds.add(songmid)
+                            allItems.push(item)
+                        }
+
+                        if (allItems.length >= targetLimit) break
                     }
-
                     if (allItems.length >= targetLimit) break
                 }
 
@@ -2771,22 +2777,26 @@ class SubsonicHandler {
             if (!sdk?.extendSearch?.searchSinger) return []
             const rows: any[] = []
             try {
-                const data: any = await withTimeout(sdk.extendSearch.searchSinger(query, 1, max), 8000)
-                for (const item of (data?.list || [])) {
-                    const mid = String(item.mid || item.id || '')
-                    if (!mid) continue
-                    const id = `art_${src}_${mid}`
-                    if (seen.has(id)) continue
-                    seen.add(id)
-                    rows.push({
-                        id,
-                        name: item.name || '',
-                        title: item.name || '',
-                        albumCount: item.albumSize ?? 0,
-                        coverArt: id,               // 交给 getCoverArt 的 art_ 分支解析
-                        artistImageUrl: item.picUrl || undefined,
-                        isDir: true,
-                    })
+                // [新增] 简繁变体补搜（同歌曲搜索）
+                for (const kw of buildQueryVariants(query)) {
+                    const data: any = await withTimeout(sdk.extendSearch.searchSinger(kw, 1, max), 8000)
+                    for (const item of (data?.list || [])) {
+                        const mid = String(item.mid || item.id || '')
+                        if (!mid) continue
+                        const id = `art_${src}_${mid}`
+                        if (seen.has(id)) continue
+                        seen.add(id)
+                        rows.push({
+                            id,
+                            name: item.name || '',
+                            title: item.name || '',
+                            albumCount: item.albumSize ?? 0,
+                            coverArt: id,               // 交给 getCoverArt 的 art_ 分支解析
+                            artistImageUrl: item.picUrl || undefined,
+                            isDir: true,
+                        })
+                    }
+                    if (rows.length >= max) break
                 }
             } catch { /* 单源失败忽略 */ }
             return rows
@@ -2806,31 +2816,35 @@ class SubsonicHandler {
             if (!sdk?.extendSearch?.searchAlbum) return []
             const rows: any[] = []
             try {
-                const data: any = await withTimeout(sdk.extendSearch.searchAlbum(query, 1, max), 8000)
-                for (const item of (data?.list || [])) {
-                    const mid = String(item.mid || item.id || '')
-                    if (!mid) continue
-                    const id = `alb_${src}_${mid}`
-                    if (seen.has(id)) continue
-                    seen.add(id)
-                    const artistName = item.artistName || ''
-                    const artistId = item.artistId
-                        ? `art_${src}_${item.artistId}`
-                        : (artistName ? `artist_${artistName}` : id)
-                    rows.push({
-                        id,
-                        name: item.name || '',
-                        title: item.name || '',
-                        album: item.name || '',
-                        artist: artistName,
-                        artistId,
-                        isDir: true,
-                        coverArt: item.picUrl || id,
-                        songCount: item.size || 0,
-                        duration: 0,
-                        created: new Date().toISOString(),
-                        playCount: 0,
-                    })
+                // [新增] 简繁变体补搜（同歌曲搜索）
+                for (const kw of buildQueryVariants(query)) {
+                    const data: any = await withTimeout(sdk.extendSearch.searchAlbum(kw, 1, max), 8000)
+                    for (const item of (data?.list || [])) {
+                        const mid = String(item.mid || item.id || '')
+                        if (!mid) continue
+                        const id = `alb_${src}_${mid}`
+                        if (seen.has(id)) continue
+                        seen.add(id)
+                        const artistName = item.artistName || ''
+                        const artistId = item.artistId
+                            ? `art_${src}_${item.artistId}`
+                            : (artistName ? `artist_${artistName}` : id)
+                        rows.push({
+                            id,
+                            name: item.name || '',
+                            title: item.name || '',
+                            album: item.name || '',
+                            artist: artistName,
+                            artistId,
+                            isDir: true,
+                            coverArt: item.picUrl || id,
+                            songCount: item.size || 0,
+                            duration: 0,
+                            created: new Date().toISOString(),
+                            playCount: 0,
+                        })
+                    }
+                    if (rows.length >= max) break
                 }
             } catch { /* 单源失败忽略 */ }
             return rows

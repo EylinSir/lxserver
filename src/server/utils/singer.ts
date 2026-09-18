@@ -5,6 +5,7 @@
 
 // @ts-ignore
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
+import { buildQueryVariants } from '@/server/utils/zhConvert'
 const musicSdk = musicSdkRaw as any
 
 export interface SingerDetail {
@@ -128,9 +129,15 @@ export async function getSingerDetail(singerName: string, sourcePriority?: Array
         const started = Date.now()
         try {
             const sdk = musicSdk[source]
-            const searchResult = await sdk.extendSearch.searchSinger(singerName, 1, 5)
+            // [新增] 简繁变体补搜：音源对异体字命中差（"黄霄雲" ↔ "黄霄云"），两种字形都试一轮
+            let singerList: any[] = []
+            for (const kw of buildQueryVariants(singerName)) {
+                const searchResult = await sdk.extendSearch.searchSinger(kw, 1, 5)
+                const list: any[] = searchResult?.list || []
+                if (list.length) singerList = singerList.concat(list)
+                if (singerList.length >= 5) break
+            }
             const elapsed = Date.now() - started
-            const singerList: any[] = searchResult?.list || []
 
             if (singerList.length === 0) {
                 console.warn(`[SingerUtils] ${source} 搜索歌手「${singerName}」返回 0 条 (${elapsed}ms)`)
