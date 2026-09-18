@@ -4,13 +4,16 @@ import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
 import { callUserApiGetMusicUrl } from '@/server/userApi'
 import { downloadAndCache, checkCache, serveCacheFile } from '@/server/fileCache'
-import { getSingerPic, getSingerDetail, getSingerMid } from '@/server/utils/singer'
+import {
+    getSingerPic, getSingerDetail, getSingerMid, nameSimilarity,
+    resolveSingerSources, getOrderedSingerSources, normalizeName as normalizeSingerName,
+} from '@/server/utils/singer'
 import { fetchRecommendedAlbums } from '@/server/utils/recommendAlbums'
 import { fetchRecommendedSongs } from '@/server/utils/recommendSongs'
 import { filterDisliked, splitSingers, type DislikeRuleSet } from '@/modules/dislike/match'
 import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
-import { buildQueryVariants } from '@/server/utils/zhConvert'
+import { buildQueryVariants, toSimplified } from '@/server/utils/zhConvert'
 import { getCachedDislikeRuleSet, invalidateDislikeCache } from '@/server/utils/dislikeCache'
 import { proxyCoverImage } from '@/server/coverProxy'
 import { subsonicLog } from '@/utils/log4js'
@@ -2424,10 +2427,13 @@ class SubsonicHandler {
                 source = localEntry.source
                 artistId = String(localEntry.singerId)
             } else {
-                const mid = await getSingerMid(singerName)
-                if (mid) {
-                    source = 'tx' // 寻址成功后默认切换到 TX
-                    artistId = mid
+                // [修复] 之前这里把源写死成 'tx'，违反 singer.sourcePriority：
+                // getSingerMid 若命中的是 wy，却拿 wy 的 mid 去请求 tx 的专辑接口，必然失败或串台。
+                const detail = await getSingerDetail(singerName)
+                if (detail) {
+                    source = detail.source
+                    artistId = detail.mid
+                    if (detail.matchedName) singerName = detail.matchedName
                 } else {
                     artistId = singerName // 退化：按名字查（多数源会失败，最终靠本地兜底）
                 }
@@ -2442,84 +2448,137 @@ class SubsonicHandler {
         let hotSongs: LX.Music.MusicInfo[] = []
         let artistPic = ''
 
+        // [跨源合并] 歌手名未知时（例如直接点 art_tx_<mid> 进来），先向主源要一次详情拿名字，
+        // 否则无法按名字到其它平台寻址
+        if ((!singerName || singerName === 'Unknown') && artistId && musicSdk[source]?.extendDetail?.getArtistDetail) {
+            const d = await musicSdk[source].extendDetail.getArtistDetail(artistId).catch(() => null)
+            if (d?.name) singerName = d.name
+            if (d?.avatar || d?.pic) artistPic = d.avatar || d.pic
+        }
+
+        // 参与抓取的「源 + 该源自己的 mid」：
+        // 1) 主源（id 里带的那个平台）永远排第一；
+        // 2) singer.sourcePriority 配了多个源时，按歌手名到其它平台再寻址一轮，
+        //    把那些平台的专辑/歌曲也合并进来——各平台 mid 不通用，必须各自寻址。
+        //    只配了 1 个源时行为不变（单源）。
+        const sourceTargets: Array<{ source: string, id: string }> = []
+        if (artistId && artistId !== singerName) sourceTargets.push({ source, id: artistId })
+        if (singerName && singerName !== 'Unknown' && getOrderedSingerSources().length > 1) {
+            const hits = await resolveSingerSources(singerName).catch(() => [] as any[])
+            for (const h of hits) {
+                if (!sourceTargets.some(t => t.source === h.source)) {
+                    sourceTargets.push({ source: h.source, id: h.mid })
+                }
+            }
+        }
+
+        // 单个源上抓取：专辑多页（最多 5 页 × 50）+ 热门歌曲多页（最多 5 页 × 100）
+        const fetchSourceData = async (src: string, sid: string) => {
+            const sdk = musicSdk[src]?.extendDetail
+            if (!sdk) return { albums: [] as any[], songs: [] as any[], pic: '', name: '' }
+
+            const fetchAllAlbums = async () => {
+                const MAX_PAGES = 5
+                const PAGE_SIZE = 50
+                let all: any[] = []
+                for (let p = 1; p <= MAX_PAGES; p++) {
+                    try {
+                        const data = await sdk.getArtistAlbums(sid, p, PAGE_SIZE)
+                        const pageList = data.list || []
+                        all = all.concat(pageList)
+                        if (pageList.length < PAGE_SIZE) break
+                    } catch (err) {
+                        subsonicLog.error(`[Subsonic] SDK getArtistAlbums(${src}) Error at page ${p}:`, err)
+                        break
+                    }
+                }
+                return all
+            }
+            const fetchAllSongs = async () => {
+                const MAX_PAGES = 5
+                const PAGE_SIZE = 100
+                let all: any[] = []
+                for (let p = 1; p <= MAX_PAGES; p++) {
+                    try {
+                        const data = await sdk.getArtistSongs(sid, p, PAGE_SIZE, 'hot')
+                        const pageList = data.list || []
+                        all = all.concat(pageList)
+                        if (pageList.length < PAGE_SIZE) break
+                    } catch (err) {
+                        subsonicLog.error(`[Subsonic] SDK getArtistSongs(${src}) Error at page ${p}:`, err)
+                        break
+                    }
+                }
+                return all
+            }
+
+            const [rawAlbums, allSongsRaw] = await Promise.all([
+                fetchAllAlbums().catch(() => [] as any[]),
+                fetchAllSongs().catch(() => [] as any[]),
+            ])
+
+            return {
+                albums: rawAlbums,
+                songs: allSongsRaw,
+                pic: rawAlbums[0]?.singerPic || (allSongsRaw[0] as any)?.singerPic || '',
+                name: rawAlbums[0]?.singerName || '',
+            }
+        }
+
         try {
-            if (musicSdk[source]?.extendDetail) {
-                // 1. 先抓取专辑列表 (多页，最多 5 页 × 50 = 250 张；顺序执行以保证稳定性)
-                const fetchAllAlbums = async () => {
-                    const MAX_PAGES = 5
-                    const PAGE_SIZE = 50
-                    let all: any[] = []
-                    for (let p = 1; p <= MAX_PAGES; p++) {
-                        try {
-                            const data = await musicSdk[source].extendDetail.getArtistAlbums(artistId, p, PAGE_SIZE)
-                            const pageList = data.list || []
-                            all = all.concat(pageList)
-                            if (pageList.length < PAGE_SIZE) break
-                        } catch (err) {
-                            subsonicLog.error(`[Subsonic] SDK getArtistAlbums Error at page ${p}:`, err)
-                            break
-                        }
-                    }
-                    return all
+            const perSource = await Promise.all(sourceTargets.map(t => fetchSourceData(t.source, t.id)))
+
+            // [修复] 歌手名取 SDK 返回的官方名，并只保留主歌手：
+            // 之前无条件取 allSongsRaw[0].singer，热歌首曲若为合唱，整页名字会串成「黄霄雲、刘端端」
+            for (const r of perSource) {
+                if (!r.name) continue
+                singerName = splitSingers(r.name)[0] || r.name
+                break
+            }
+            if ((!singerName || singerName === 'Unknown') && localEntry?.name) singerName = localEntry.name
+            if (!singerName) {
+                const libArtists = await this.getLibraryData(username, 'artists')
+                const localArt = libArtists.find(a => (a.source === source && a.id === artistId) || a.name === artistId)
+                if (localArt) singerName = localArt.name
+            }
+
+            // 封面：主源优先，任一个有图即可
+            if (!artistPic) {
+                for (const r of perSource) {
+                    if (r.pic) { artistPic = r.pic; break }
                 }
-                const rawAlbums = await fetchAllAlbums().catch(() => [] as any[])
+            }
 
-                // 2. 循环抓取多页歌曲 (最多 5 页，共 500 首)
-                const fetchAllSongs = async () => {
-                    const MAX_PAGES = 5
-                    const PAGE_SIZE = 100
-                    let all: any[] = []
-                    for (let p = 1; p <= MAX_PAGES; p++) {
-                        try {
-                            const data = await musicSdk[source].extendDetail.getArtistSongs(artistId, p, PAGE_SIZE, 'hot')
-                            const pageList = data.list || []
-                            all = all.concat(pageList)
-                            if (pageList.length < PAGE_SIZE) break
-                        } catch (err) {
-                            subsonicLog.error(`[Subsonic] SDK getArtistSongs Error at page ${p}:`, err)
-                            break
-                        }
-                    }
-                    return all
-                }
+            // 合并各源结果：专辑按归一化专辑名去重，歌曲按「归一歌名 + 主歌手」去重，主源版本胜出
+            const seenAlbum = new Set<string>()
+            const seenSong = new Set<string>()
+            for (let i = 0; i < perSource.length; i++) {
+                const src = sourceTargets[i].source
 
-                const allSongsRaw = await fetchAllSongs()
-
-                // [关键修复] 必须先恢复 singerName 才能进行 albums.map
-                // 优先级：从热门歌曲中提取 > 从本地收藏库匹配 > 原有推断
-                if (allSongsRaw.length > 0) {
-                    singerName = allSongsRaw[0].singer
-                    if ((allSongsRaw[0] as any).singerPic) artistPic = (allSongsRaw[0] as any).singerPic
+                for (const alb of perSource[i].albums) {
+                    const key = normalizeSingerName(alb.name)
+                    if (!key || seenAlbum.has(key)) continue
+                    seenAlbum.add(key)
+                    albums.push({
+                        id: `alb_${src}_${alb.id || alb.albumMid}`,
+                        name: alb.name,
+                        title: alb.name,
+                        album: alb.name,
+                        artist: singerName || alb.singerName || 'Unknown',
+                        artistId: resolvedId,
+                        songCount: alb.total || 0,
+                        coverArt: alb.img || alb.picUrl || resolvedId,
+                        isDir: true,
+                        year: alb.publishTime ? parseInt(String(alb.publishTime).split(/[/-]/)[0]) : undefined,
+                    })
                 }
 
-                if (singerName === 'Unknown' || !singerName) {
-                    const libArtists = await this.getLibraryData(username, 'artists')
-                    const localArt = libArtists.find(a => (a.source === source && a.id === artistId) || a.name === artistId)
-                    if (localArt) singerName = localArt.name
+                for (const s of perSource[i].songs) {
+                    const dedupKey = `${normalizeSingerName(s.name)}@${normalizeSingerName(splitSingers(s.singer || '')[0] || '')}`
+                    if (seenSong.has(dedupKey)) continue
+                    seenSong.add(dedupKey)
+                    hotSongs.push({ ...s, id: `${src}_${s.songmid || s.songId}` } as any)
                 }
-
-                if (rawAlbums[0]?.singerPic) artistPic = rawAlbums[0].singerPic
-                if (rawAlbums[0]?.singerName && (singerName === 'Unknown' || !singerName)) {
-                    singerName = rawAlbums[0].singerName
-                }
-
-                albums = rawAlbums.map((alb: any) => ({
-                    id: `alb_${source}_${alb.id || alb.albumMid}`,
-                    name: alb.name,
-                    title: alb.name,
-                    album: alb.name,
-                    artist: singerName || alb.singerName || 'Unknown',
-                    artistId: resolvedId,
-                    songCount: alb.total || 0,
-                    coverArt: alb.img || alb.picUrl || resolvedId,
-                    isDir: true,
-                    year: alb.publishTime ? parseInt(String(alb.publishTime).split(/[/-]/)[0]) : undefined,
-                }))
-
-                hotSongs = allSongsRaw.map((s: any) => ({
-                    ...s,
-                    id: `${source}_${s.songmid || s.songId}`
-                }))
             }
         } catch (e) {
             subsonicLog.error(`[Subsonic] SDK Artist load error:`, e)
@@ -2584,7 +2643,9 @@ class SubsonicHandler {
             albumCount: albums.length,
             songCount: hotSongs.length,
             coverArt: resolvedId,
-            artistImageUrl: artistPic || resolvedId,
+            // [修复] 没有封面时不能把 ID 令牌塞进 artistImageUrl（它是 URL 字段），
+            // 否则客户端会把它当图片直链去请求而必然失败；应留空让客户端回落到 coverArt
+            artistImageUrl: artistPic || undefined,
             ...(artistStarred ? { starred: new Date().toISOString() } : {}),
         }
 
@@ -2769,13 +2830,31 @@ class SubsonicHandler {
      * 在线搜索歌手（各源 extendSearch.searchSinger），映射为 Subsonic artist 结构。
      * 各源并发、单源 8s 超时、按规范 id 去重，失败静默跳过（不影响其它源）。
      */
+    /**
+     * 歌手名与查询词的相关度(0~1)：先做简繁/标点归一再比较，完全相等为 1，否则取字符命中率。
+     * 音源会把联想兜底结果一并返回（搜「黄霄云」会带回「周兴哲」这类完全无关的歌手），据此剔除。
+     */
+    private artistRelevance(query: string, name: string): number {
+        const q = normalizeSingerName(toSimplified(query || ''))
+        const n = normalizeSingerName(toSimplified(name || ''))
+        if (!q || !n) return 0
+        if (q === n) return 1
+        return nameSimilarity(q, n)
+    }
+
     private async fetchOnlineSearchArtists(query: string, sources: string[], limit: number): Promise<any[]> {
         const max = Math.max(1, Math.min(limit || 20, 50))
-        const seen = new Set<string>()
+        // 跨源合并与否由 singer.sourcePriority 决定：只配了 1 个源时保持单源行为
+        const orderedSources = getOrderedSingerSources()
+        const mergeAcrossSources = orderedSources.length > 1
+        const sourceRank = new Map<string, number>()
+        orderedSources.forEach((s, i) => sourceRank.set(s, i))
+
         const groups = await Promise.all(sources.map(async (src): Promise<any[]> => {
             const sdk = (musicSdk as any)[src]
             if (!sdk?.extendSearch?.searchSinger) return []
             const rows: any[] = []
+            const seen = new Set<string>()
             try {
                 // [新增] 简繁变体补搜（同歌曲搜索）
                 for (const kw of buildQueryVariants(query)) {
@@ -2786,14 +2865,17 @@ class SubsonicHandler {
                         const id = `art_${src}_${mid}`
                         if (seen.has(id)) continue
                         seen.add(id)
+                        const name = item.name || ''
                         rows.push({
                             id,
-                            name: item.name || '',
-                            title: item.name || '',
+                            name,
+                            title: name,
                             albumCount: item.albumSize ?? 0,
                             coverArt: id,               // 交给 getCoverArt 的 art_ 分支解析
                             artistImageUrl: item.picUrl || undefined,
                             isDir: true,
+                            _source: src,
+                            _score: this.artistRelevance(query, name),
                         })
                     }
                     if (rows.length >= max) break
@@ -2801,7 +2883,39 @@ class SubsonicHandler {
             } catch { /* 单源失败忽略 */ }
             return rows
         }))
-        return interleaveBySource(groups, max)
+
+        const all = groups.flat()
+        if (!all.length) return []
+
+        // 相关性保留线：音源会把联想兜底结果一起返回，名字与查询毫无交集的
+        //（搜「黄霄云」带回「周兴哲」这类）低于此线丢掉；
+        // 名字相关的（「黄霄雲的人」「黄霄云的面包」）保留，靠排序让真身排最前。
+        const MIN_SCORE = 0.3
+        let kept: any[] = all.filter(a => a._score > MIN_SCORE)
+        // 全部判为无关时回填原始结果，避免拼音/生僻写法被误伤导致搜空
+        if (!kept.length) kept = all
+        // 排序：先按相关度降序，同相关度按作品量降序（真身通常专辑/歌曲最多）
+        kept.sort((a, b) => (b._score - a._score) || ((b.albumCount || 0) - (a.albumCount || 0)))
+
+        // 同名多源合并：归一化姓名相同的不同平台条目合成一条，按 singer.sourcePriority 选代表
+        if (mergeAcrossSources) {
+            const byName = new Map<string, any>()
+            for (const item of kept) {
+                const key = normalizeSingerName(toSimplified(item.name || ''))
+                if (!key) continue
+                const exist = byName.get(key)
+                if (!exist) {
+                    byName.set(key, item)
+                    continue
+                }
+                const ra = sourceRank.has(exist._source) ? sourceRank.get(exist._source)! : 99
+                const rb = sourceRank.has(item._source) ? sourceRank.get(item._source)! : 99
+                if (rb < ra) byName.set(key, item)
+            }
+            kept = Array.from(byName.values())
+        }
+
+        return kept.slice(0, max).map(({ _source, _score, ...rest }) => rest)
     }
 
     /**
