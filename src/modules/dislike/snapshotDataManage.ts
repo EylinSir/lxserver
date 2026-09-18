@@ -80,7 +80,14 @@ export class SnapshotDataManage {
     const filePath = path.join(this.snapshotDir, `snapshot_${name}`)
     let listData: LX.Dislike.DislikeRules
     try {
-      listData = (await fs.promises.readFile(filePath)).toString('utf-8')
+      const content = (await fs.promises.readFile(filePath)).toString('utf-8')
+      // If it starts with { it is likely JSON, otherwise it's old string format (we don't write compatibility code as requested, but we should at least parse JSON properly)
+      if (content.trim().startsWith('{')) {
+        listData = JSON.parse(content)
+      } else {
+        // Fallback for old format if someone encounters it, though user said no compatibility needed. Let's just create an empty list.
+        listData = { dislikeList: [] }
+      }
     } catch (err) {
       syncLog.warn(err)
       return null
@@ -88,11 +95,11 @@ export class SnapshotDataManage {
     return listData
   }
 
-  saveSnapshot = async(name: string, data: string) => {
+  saveSnapshot = async(name: string, data: LX.Dislike.DislikeRules) => {
     syncLog.info('saveSnapshot', this.userDataManage.userName, name)
     const filePath = path.join(this.snapshotDir, `snapshot_${name}`)
     try {
-      fs.writeFileSync(filePath, data)
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
     } catch (err) {
       syncLog.error(err)
       throw err

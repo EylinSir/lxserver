@@ -23,15 +23,40 @@ declare namespace LX {
       singer: string
     }
 
-    type DislikeRules = string
+    /**
+     * 专辑维度（lxserver 扩展）
+     * 规则串中以 !<专辑名>@<歌手> 形式存储，按歌手拆成多条。
+     */
+    interface DislikeAlbumInfo {
+      albumName: string
+      singer: string
+    }
+
+    interface DislikeSongInfo {
+      id?: string
+      name: string
+      singer: string
+      source?: string
+      pic?: string
+      interval?: string
+      meta?: any
+      dislikeRule?: string
+    }
+
+    interface DislikeListData {
+      dislikeList: DislikeSongInfo[]
+    }
+
+    type DislikeRules = DislikeListData
 
     interface DislikeInfo {
       // musicIds: Set<string>
       names: Set<string>
       musicNames: Set<string>
       singerNames: Set<string>
+      // albumKeys: Set<string>
       // list: LX.Dislike.ListItem[]
-      rules: DislikeRules
+      rules: string // The raw string representation for matching
     }
   }
 }

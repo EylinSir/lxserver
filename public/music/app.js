@@ -61,6 +61,7 @@ function initGlobalListSearch() {
 
 document.addEventListener('DOMContentLoaded', () => {
     initGlobalListSearch();
+    if (window.DislikeManager) window.DislikeManager.load();
 });
 
 // Settings & Batch Selection
@@ -81,6 +82,7 @@ const DEFAULT_SETTINGS = {
     lyricFontFamily: '', // 词字体
     switchPlaylistOnSearchPlay: true, // 播放搜索歌曲时切换歌单 (默认开启)
     switchPlaylistOnSongListPlay: true, // 播放歌单/排行榜歌曲时切换歌单 (默认开启)
+    autoFilterDislikedSongs: true, // 播放列表自动剔除不喜欢歌曲 (默认开启)
     autoResume: true, // 自动恢复进度 (默认开启)
     showSidebarSongInfo: false, // 展示侧边栏封面
     enableCrossfade: true, // 音频淡入淡出
@@ -204,22 +206,245 @@ function parseNetworkListAutoCheckInterval(value) {
     if (value === undefined || value === null) return 0;
     const raw = String(value).trim().toLowerCase();
     if (raw === '' || raw === '0' || raw === 'off' || raw === 'none' || raw === 'disable') return 0;
-    const matched = raw.match(/^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/);
-    if (!matched) return null;
-    const count = parseFloat(matched[1]);
-    const unit = matched[2] || 'h';
-    if (!Number.isFinite(count) || count < 0) return null;
-    let intervalMs = null;
-    switch (unit) {
-        case 'ms': intervalMs = count; break;
-        case 's': intervalMs = count * 1000; break;
-        case 'm': intervalMs = count * 60 * 1000; break;
-        case 'h': intervalMs = count * 60 * 60 * 1000; break;
-        case 'd': intervalMs = count * 24 * 60 * 60 * 1000; break;
-        default: return null;
+
+    // 支持复合时间字符串，如 1d6h30m, 2h30m, 1d12h, 45m, 6h 等
+    const regex = /(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)/g;
+    let match;
+    let totalMs = 0;
+    let matchCount = 0;
+
+    while ((match = regex.exec(raw)) !== null) {
+        matchCount++;
+        const count = parseFloat(match[1]);
+        const unit = match[2];
+        if (!Number.isFinite(count) || count < 0) return null;
+        switch (unit) {
+            case 'ms': totalMs += count; break;
+            case 's': totalMs += count * 1000; break;
+            case 'm': totalMs += count * 60 * 1000; break;
+            case 'h': totalMs += count * 60 * 60 * 1000; break;
+            case 'd': totalMs += count * 24 * 60 * 60 * 1000; break;
+        }
     }
-    return Math.max(intervalMs, minIntervalMs);
+
+    // 如果匹配不到任何单位但纯是正数字，默认按小时算
+    if (matchCount === 0) {
+        if (/^\d+(\.\d+)?$/.test(raw)) {
+            totalMs = parseFloat(raw) * 60 * 60 * 1000;
+        } else {
+            return null;
+        }
+    }
+
+    return Math.max(totalMs, minIntervalMs);
 }
+
+function parseCompoundParts(value) {
+    const raw = String(value || '6h').trim().toLowerCase();
+    let days = 0;
+    let hours = 0;
+    let minutes = 0;
+
+    const regex = /(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)/g;
+    let match;
+    let matchedAny = false;
+    while ((match = regex.exec(raw)) !== null) {
+        matchedAny = true;
+        const count = parseFloat(match[1]);
+        const unit = match[2];
+        if (unit === 'd') days += Math.floor(count);
+        else if (unit === 'h') hours += Math.floor(count);
+        else if (unit === 'm') minutes += Math.floor(count);
+    }
+
+    if (!matchedAny && /^\d+$/.test(raw)) {
+        hours = parseInt(raw, 10);
+    }
+
+    return { days, hours, minutes };
+}
+
+function formatIntervalHumanReadable(value) {
+    const raw = String(value || '6h').trim().toLowerCase();
+    const { days, hours, minutes } = parseCompoundParts(raw);
+    const parts = [];
+    if (days > 0) parts.push(`${days}天`);
+    if (hours > 0) parts.push(`${hours}小时`);
+    if (minutes > 0) parts.push(`${minutes}分钟`);
+
+    if (parts.length === 0) {
+        // 尝试兜底单单位匹配 (例如 30s)
+        const single = raw.match(/^(\d+)(ms|s)$/);
+        if (single) {
+            const unitMap = { ms: '毫秒', s: '秒' };
+            return `${single[1]}${unitMap[single[2]] || single[2]}`;
+        }
+        return '6小时';
+    }
+    return parts.join(' ');
+}
+
+function updateIntervalPickerDisplay(val) {
+    const raw = String(val || settings.networkListAutoCheckInterval || '6h').trim();
+    const human = formatIntervalHumanReadable(raw);
+
+    const triggerLabel = document.getElementById('interval-trigger-label');
+    if (triggerLabel) triggerLabel.textContent = human;
+
+    const badgeDisplay = document.getElementById('interval-badge-display');
+    if (badgeDisplay) badgeDisplay.textContent = human;
+
+    const preview = document.getElementById('interval-preview-text');
+    if (preview) preview.textContent = human;
+
+    // 同步天/时/分三个输入框
+    const { days, hours, minutes } = parseCompoundParts(raw);
+    const inputD = document.getElementById('compound-interval-days');
+    const inputH = document.getElementById('compound-interval-hours');
+    const inputM = document.getElementById('compound-interval-minutes');
+    if (inputD) inputD.value = days;
+    if (inputH) inputH.value = hours;
+    if (inputM) inputM.value = minutes;
+
+    // 高亮匹配的预设按钮
+    document.querySelectorAll('.interval-preset-btn').forEach(btn => {
+        const match = btn.getAttribute('onclick')?.includes(`'${raw}'`);
+        if (match) {
+            btn.classList.add('bg-emerald-500', 'text-white', 'border-emerald-500');
+            btn.classList.remove('t-border-main');
+        } else {
+            btn.classList.remove('bg-emerald-500', 'text-white', 'border-emerald-500');
+            btn.classList.add('t-border-main');
+        }
+    });
+}
+
+function toggleIntervalPopover(e) {
+    if (e) e.stopPropagation();
+    const panel = document.getElementById('interval-popover-panel');
+    const chevron = document.getElementById('interval-chevron-icon');
+    if (!panel) return;
+    const isHidden = panel.classList.contains('hidden');
+    if (isHidden) {
+        panel.classList.remove('hidden');
+        if (chevron) chevron.classList.add('rotate-180');
+        updateIntervalPickerDisplay(settings.networkListAutoCheckInterval || '6h');
+    } else {
+        closeIntervalPopover();
+    }
+}
+
+function closeIntervalPopover() {
+    const panel = document.getElementById('interval-popover-panel');
+    const chevron = document.getElementById('interval-chevron-icon');
+    if (panel) panel.classList.add('hidden');
+    if (chevron) chevron.classList.remove('rotate-180');
+}
+
+function selectIntervalPreset(val) {
+    updateIntervalPickerDisplay(val);
+    applyIntervalValue(val);
+}
+
+function getCompoundValueFromInputs() {
+    const inputD = document.getElementById('compound-interval-days');
+    const inputH = document.getElementById('compound-interval-hours');
+    const inputM = document.getElementById('compound-interval-minutes');
+
+    const d = Math.max(0, parseInt(inputD?.value || '0', 10) || 0);
+    const h = Math.max(0, parseInt(inputH?.value || '0', 10) || 0);
+    const m = Math.max(0, parseInt(inputM?.value || '0', 10) || 0);
+
+    let parts = '';
+    if (d > 0) parts += `${d}d`;
+    if (h > 0) parts += `${h}h`;
+    if (m > 0) parts += `${m}m`;
+
+    if (!parts) parts = '30m'; // 至少保底30分钟
+    return parts;
+}
+
+function clampCompoundInputValue(unit, rawVal, allowEmpty = false) {
+    if (allowEmpty && (rawVal === '' || rawVal === null || rawVal === undefined)) {
+        return '';
+    }
+    const maxMap = { d: 365, h: 23, m: 59 };
+    const max = maxMap[unit] ?? 999;
+    let num = parseInt(rawVal, 10);
+    if (isNaN(num) || num < 0) {
+        return 0;
+    }
+    if (num > max) {
+        return max;
+    }
+    return num;
+}
+
+function onCompoundIntervalInput(unit) {
+    if (unit) {
+        const idMap = { d: 'compound-interval-days', h: 'compound-interval-hours', m: 'compound-interval-minutes' };
+        const inputEl = document.getElementById(idMap[unit]);
+        if (inputEl && inputEl.value !== '') {
+            const clamped = clampCompoundInputValue(unit, inputEl.value, false);
+            if (String(clamped) !== inputEl.value && parseInt(inputEl.value, 10) > (unit === 'h' ? 23 : unit === 'm' ? 59 : 365)) {
+                inputEl.value = clamped;
+            }
+        }
+    }
+    const val = getCompoundValueFromInputs();
+    const preview = document.getElementById('interval-preview-text');
+    if (preview) preview.textContent = formatIntervalHumanReadable(val);
+}
+
+function onCompoundIntervalChange(unit) {
+    const idMap = { d: 'compound-interval-days', h: 'compound-interval-hours', m: 'compound-interval-minutes' };
+    const inputEl = document.getElementById(idMap[unit]);
+    if (inputEl) {
+        inputEl.value = clampCompoundInputValue(unit, inputEl.value, false);
+    }
+    onCompoundIntervalInput();
+}
+
+function stepCompoundInterval(unit, delta) {
+    const idMap = { d: 'compound-interval-days', h: 'compound-interval-hours', m: 'compound-interval-minutes' };
+    const inputEl = document.getElementById(idMap[unit]);
+    if (!inputEl) return;
+
+    let cur = clampCompoundInputValue(unit, inputEl.value, false);
+    const maxMap = { d: 365, h: 23, m: 59 };
+    const max = maxMap[unit] ?? 999;
+    cur = Math.max(0, Math.min(max, cur + delta));
+    inputEl.value = cur;
+    onCompoundIntervalInput();
+}
+
+function applyIntervalPicker() {
+    const val = getCompoundValueFromInputs();
+    applyIntervalValue(val);
+}
+
+function applyIntervalValue(val) {
+    const hiddenInput = document.getElementById('setting-network-list-auto-check-interval');
+    if (hiddenInput) {
+        hiddenInput.value = val;
+    }
+    updateSetting('networkListAutoCheckInterval', val);
+    updateIntervalPickerDisplay(val);
+    closeIntervalPopover();
+    if (window.showToast) {
+        window.showToast('success', `网络歌单检测间隔已设为: ${formatIntervalHumanReadable(val)}`, 2000);
+    }
+}
+
+// 点击面板外部自动关闭 Popover
+document.addEventListener('click', (e) => {
+    const panel = document.getElementById('interval-popover-panel');
+    const btn = document.getElementById('btn-open-interval-popover');
+    if (!panel || panel.classList.contains('hidden')) return;
+    if (!panel.contains(e.target) && !btn?.contains(e.target)) {
+        closeIntervalPopover();
+    }
+});
 
 function setupNetworkListAutoCheck() {
     if (networkListAutoCheckTimer) {
@@ -240,6 +465,127 @@ function setupNetworkListAutoCheck() {
 }
 
 async function checkNetworkListUpdates(manual = false) {
+    if (manual) {
+        if (window.showToast) showToast('info', '已向服务端提交网络歌单检测任务...', 3000);
+    }
+
+    try {
+        // 1. 触发服务端后台定时任务执行
+        const res = await fetch(`${API_BASE}/tasks/trigger?id=network_list_autocheck`, {
+            method: 'POST',
+            headers: getUserAuthHeaders()
+        });
+        const result = await res.json();
+        console.log('[Scheduler] 手动触发后台任务结果:', result);
+
+        // 2. 从服务端拉取更新标记状态
+        await syncServerNetworkListUpdates();
+
+        if (manual) {
+            if (result.success) {
+                showSuccess(result.message || '网络歌单后台检测完成');
+            } else {
+                showError(result.message || '网络歌单检测失败');
+            }
+        }
+    } catch (err) {
+        console.warn('[CheckNetworkListUpdates] 服务端任务调用异常，降级到本地网页检测:', err);
+        await checkNetworkListUpdatesFallback(manual);
+    }
+}
+
+async function syncServerNetworkListUpdates() {
+    try {
+        const res = await fetch(`${API_BASE}/tasks/user-data?task=network_list_autocheck`, {
+            headers: getUserAuthHeaders()
+        });
+        const data = await res.json();
+        if (data && Array.isArray(data.updatedListIds)) {
+            window.networkListUpdateMap.clear();
+            for (const id of data.updatedListIds) {
+                window.networkListUpdateMap.add(id);
+            }
+            if (typeof renderMyLists === 'function' && currentListData) {
+                renderMyLists(currentListData);
+            }
+        }
+    } catch (e) {
+        console.warn('[Scheduler] 获取网络歌单更新状态失败:', e);
+    }
+    // 同步拉取后台任务执行状态并刷新北京时间展示
+    await refreshTaskScheduleStatus();
+}
+
+/**
+ * 格式化为北京时间 (UTC+8) 字符串
+ */
+function formatToBeijingTime(timestamp) {
+    if (!timestamp || typeof timestamp !== 'number') return '--';
+    try {
+        const date = new Date(timestamp);
+        return date.toLocaleString('zh-CN', {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+    } catch (err) {
+        const d = new Date(timestamp);
+        return d.toLocaleTimeString();
+    }
+}
+
+/**
+ * 从服务端拉取后台任务状态并在前端展示北京时间
+ */
+async function refreshTaskScheduleStatus() {
+    try {
+        const res = await fetch(`${API_BASE}/tasks/status`, {
+            headers: getUserAuthHeaders()
+        });
+        const data = await res.json();
+        if (!data || !Array.isArray(data.tasks)) return;
+
+        const task = data.tasks.find(t => t.id === 'network_list_autocheck');
+        if (!task) return;
+
+        const lastRunTextEl = document.getElementById('task-last-run-text');
+        const nextRunTextEl = document.getElementById('task-next-run-text');
+
+        if (lastRunTextEl) {
+            if (task.isRunning) {
+                lastRunTextEl.innerHTML = '<span class="text-emerald-500 animate-pulse font-medium"><i class="fas fa-spinner fa-spin mr-1"></i>正在执行后台检测...</span>';
+            } else if (task.lastRunTime) {
+                const bjTime = formatToBeijingTime(task.lastRunTime);
+                lastRunTextEl.innerHTML = `上次执行: <span class="text-emerald-600 dark:text-emerald-400 font-semibold">${bjTime}</span>`;
+            } else {
+                lastRunTextEl.innerHTML = '上次执行: <span class="text-gray-400">尚未执行</span>';
+            }
+        }
+
+        if (nextRunTextEl) {
+            if (!task.enabled) {
+                nextRunTextEl.innerHTML = '下次执行: <span class="text-gray-400">自动检测已关闭</span>';
+            } else if (task.nextRunTime) {
+                const bjTime = formatToBeijingTime(task.nextRunTime);
+                nextRunTextEl.innerHTML = `下次执行: <span class="text-emerald-600 dark:text-emerald-400 font-semibold">${bjTime}</span>`;
+            } else {
+                nextRunTextEl.innerHTML = '下次执行: <span class="text-gray-400">等待调度</span>';
+            }
+        }
+    } catch (e) {
+        console.warn('[Scheduler] 拉取任务执行时间失败:', e);
+    }
+}
+
+window.refreshTaskScheduleStatus = refreshTaskScheduleStatus;
+
+// 兜底本地浏览器检测机制
+async function checkNetworkListUpdatesFallback(manual = false) {
     if (!currentListData || !Array.isArray(currentListData.userList) || currentListData.userList.length === 0) {
         if (manual && window.showToast) showToast('info', '当前没有可检查的网络歌单', 3000);
         return;
@@ -270,17 +616,30 @@ async function checkNetworkListUpdates(manual = false) {
             });
 
             const localList = Array.isArray(list.list) ? list.list : [];
-            const sameLength = localList.length === remoteList.length;
-            const sameIds = sameLength && localList.every((item, index) => item && remoteList[index] && String(item.id || '') === String(remoteList[index].id || '') && String(item.source || '') === String(remoteList[index].source || ''));
+            // 用 Set 比较（顺序无关）
+            const normalizeIds = (arr) => arr.map(s => String(s.id || s.songmid || '').trim()).sort().join('|');
+            const sameIds = normalizeIds(localList) === normalizeIds(remoteList);
             if (!sameIds) {
+                // 直接就地更新歌单歌曲及信息
+                list.list = remoteList;
+                if (data.info) {
+                    if (data.info.name) list.name = data.info.name;
+                    if (data.info.img || data.info.pic) list.Album = data.info.img || data.info.pic;
+                }
                 window.networkListUpdateMap.add(list.id);
                 changedLists.push(list.name || list.id || list.sourceListId);
-            } else {
-                window.networkListUpdateMap.delete(list.id);
             }
         } catch (err) {
             console.error('[CheckNetworkListUpdates] 检查失败:', list.name || list.id || list.sourceListId, err);
             failedLists.push(list.name || list.id || list.sourceListId);
+        }
+    }
+
+    if (changedLists.length > 0) {
+        try {
+            await pushDataChange();
+        } catch (err) {
+            console.error('[CheckNetworkListUpdates] 持久化更新歌单失败:', err);
         }
     }
 
@@ -299,12 +658,11 @@ async function checkNetworkListUpdates(manual = false) {
         if (failedLists.length > 0) {
             showError(`部分歌单检测失败：${failedListNames.join('、')}`);
         }
-    } else if (changedLists.length > 0 && window.showToast) {
-        showToast('info', `检测到 ${changedLists.length} 个网络歌单有更新`, 5000);
     }
 }
 
 window.checkNetworkListUpdates = checkNetworkListUpdates;
+window.syncServerNetworkListUpdates = syncServerNetworkListUpdates;
 
 
 
@@ -315,6 +673,15 @@ setTimeout(() => {
         window.updateServerCacheConfig(settings.serverCacheLocation, settings.serverCacheNamingPattern);
     }
 }, 2000);
+
+// 页面加载后立即拉取服务端后台任务状态与歌单更新状态，并每隔 30 秒自动刷新
+setTimeout(() => {
+    syncServerNetworkListUpdates();
+}, 500);
+setInterval(() => {
+    refreshTaskScheduleStatus();
+    syncServerNetworkListUpdates();
+}, 30 * 1000);
 
 window.batchMode = false;
 window.selectedItems = new Set();
@@ -609,7 +976,7 @@ window.updateUserUI = updateUserUI;
 async function checkAndUpdateCustomDirUI() {
     let userEnableCustomDir = false;
     let localUserToken = typeof userToken !== 'undefined' ? userToken : localStorage.getItem('lx_user_token');
-    
+
     if (localUserToken) {
         try {
             const vRes = await fetch('/api/user/auth/verify', {
@@ -623,13 +990,19 @@ async function checkAndUpdateCustomDirUI() {
                         console.log('[Auth] 用户 Token 已失效，已自动续签。');
                     }
                 }
+                // token 失效，重置权限
+                window.userEnableAutoDownload = false;
             } else {
                 userEnableCustomDir = !!vData.enableCustomMusicDir;
                 window.userAllowOperateCustomDir = !!vData.allowOperateCustomMusicDir;
+                window.userEnableAutoDownload = !!vData.enableAutoDownload;
             }
         } catch (e) {
             console.warn('[Auth] Token 验证失败:', e);
+            window.userEnableAutoDownload = false;
         }
+    } else {
+        window.userEnableAutoDownload = false;
     }
 
     const switchContainer = document.getElementById('custom-dir-switch-container');
@@ -654,7 +1027,7 @@ async function checkAndUpdateCustomDirUI() {
         } else {
             switchContainer.classList.add('hidden');
             switchContainer.classList.remove('flex');
-            
+
             // 如果用户注销，则取消激活状态
             if (!isUser || !userEnableCustomDir) {
                 if (customDirSwitch && customDirSwitch.checked) {
@@ -669,8 +1042,41 @@ async function checkAndUpdateCustomDirUI() {
             }
         }
     }
+
+    // 更新同步下载按钮的可见状态
+    updateSyncDownloadBtnVisibility();
 }
 window.checkAndUpdateCustomDirUI = checkAndUpdateCustomDirUI;
+
+/**
+ * 更新"同步下载"按钮的显示状态
+ * 条件：用户启用了自动下载功能 AND 当前位置为"数据目录(data)" AND 当前分类为"下载(download)"
+ * 可在位置/分类变化时调用以刷新状态
+ */
+function updateSyncDownloadBtnVisibility() {
+    const btn = document.getElementById('lm-sync-download-btn');
+    if (!btn) return;
+
+    const locationSelect = document.getElementById('lm-location-select');
+    const currentLocation = locationSelect ? locationSelect.value : '';
+
+    // filterFolder: 'music' 对应显示的"下载"筛选（HTML option value="music"）
+    const currentFolderFilter = (typeof window.LocalMusicManager !== 'undefined' && window.LocalMusicManager.filterFolder != null)
+        ? window.LocalMusicManager.filterFolder
+        : '';
+
+    const shouldShow = !!(window.userEnableAutoDownload)
+        && currentLocation === 'data'
+        && currentFolderFilter === 'music';
+
+    if (shouldShow) {
+        btn.classList.remove('hidden');
+    } else {
+        btn.classList.add('hidden');
+    }
+}
+window.updateSyncDownloadBtnVisibility = updateSyncDownloadBtnVisibility;
+
 
 /**
  * 顶部栏退出登录处理 (带确认弹窗与全量缓存清理)
@@ -1650,7 +2056,10 @@ async function doSearch(page = 1, append = false, prefetch = false) {
         else if (currentSearchScope === 'lib_albums') targets = window.libraryData.albums;
         else if (currentSearchScope === 'local_list') {
             const listId = window.currentViewingListId || 'default';
-            if (currentListData) {
+            if (listId === 'dislike_songs') {
+                // [Fix] 不喜欢列表从 DislikeManager 读取
+                targets = window.DislikeManager?.state.dislikeList || [];
+            } else if (currentListData) {
                 if (listId === 'default') targets = currentListData.defaultList;
                 else if (listId === 'love') targets = currentListData.loveList;
                 else {
@@ -2057,8 +2466,13 @@ function renderSingerResults(list) {
                 </div>
                 <button id="singer-fav-${singer.id}" class="absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ${isArtistFavorited(singer.id, singer.source || 'wy') ? 'bg-rose-500 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'}"
                         title="${isArtistFavorited(singer.id, singer.source || 'wy') ? '取消收藏' : '收藏歌手'}"
-                        onclick="event.stopPropagation(); (async () => { const favd = await toggleArtistFavorite('${singer.id}', '${singer.source || 'wy'}', '${singer.name.replace(/'/g, "\\'")}', '${(singer.picUrl || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('singer-fav-${singer.id}'); if(btn){ btn.className = 'absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ' + (favd ? 'bg-rose-500 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'); btn.title = favd ? '取消收藏' : '收藏歌手'; } })()">
+                        onclick="event.stopPropagation(); (async () => { const favd = await toggleArtistFavorite('${singer.id}', '${singer.source || 'wy'}', '${singer.name.replace(/'/g, "\\'")}', '${(singer.picUrl || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('singer-fav-${singer.id}'); if(btn){ btn.className = 'absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ' + (favd ? 'bg-rose-500 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'); btn.title = favd ? '取消收藏' : '收藏歌手'; } const dBtn = document.getElementById('singer-dislike-${singer.id}'); if(dBtn && favd){ dBtn.className = 'absolute -top-1 -left-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 bg-black/30 text-white opacity-0 group-hover:opacity-100'; dBtn.title = '不喜欢'; } })()">
                     <i class="fas fa-heart text-[10px]"></i>
+                </button>
+                <button id="singer-dislike-${singer.id}" class="absolute -top-1 -left-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ${isArtistDisliked(singer.id, singer.source || 'wy') ? 'bg-gray-800 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'}"
+                        title="${isArtistDisliked(singer.id, singer.source || 'wy') ? '取消不喜欢' : '不喜欢'}"
+                        onclick="event.stopPropagation(); (async () => { const disd = await toggleArtistDislike('${singer.id}', '${singer.source || 'wy'}', '${singer.name.replace(/'/g, "\\'")}', '${(singer.picUrl || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('singer-dislike-${singer.id}'); if(btn){ btn.className = 'absolute -top-1 -left-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ' + (disd ? 'bg-gray-800 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'); btn.title = disd ? '取消不喜欢' : '不喜欢'; } const fBtn = document.getElementById('singer-fav-${singer.id}'); if(fBtn && disd){ fBtn.className = 'absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 bg-black/30 text-white opacity-0 group-hover:opacity-100'; fBtn.title = '收藏歌手'; } })()">
+                    <i class="fas fa-ban text-[10px]"></i>
                 </button>
             </div>
             <span class="text-[11px] md:text-sm font-bold t-text-main text-center truncate w-full" title="${singer.name}">${singer.name}</span>
@@ -2098,8 +2512,13 @@ function renderAlbumResults(list) {
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
                 <button id="album-fav-${item.id}" class="absolute top-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm ${isAlbumFavorited(item.id, item.source || 'wy') ? 'bg-rose-500 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'}"
                         title="${isAlbumFavorited(item.id, item.source || 'wy') ? '取消收藏' : '收藏专辑'}"
-                        onclick="event.stopPropagation(); (async () => { const favd = await toggleAlbumFavorite('${item.id}', '${item.source || 'wy'}', '${item.name.replace(/'/g, "\\'")}', '${(item.picUrl || '').replace(/'/g, "\\'")}', '${(item.artistName || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('album-fav-${item.id}'); if(btn){ btn.className = 'absolute top-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm ' + (favd ? 'bg-rose-500 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'); btn.title = favd ? '取消收藏' : '收藏专辑'; } })()">
+                        onclick="event.stopPropagation(); (async () => { const favd = await toggleAlbumFavorite('${item.id}', '${item.source || 'wy'}', '${item.name.replace(/'/g, "\\'")}', '${(item.picUrl || '').replace(/'/g, "\\'")}', '${(item.artistName || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('album-fav-${item.id}'); if(btn){ btn.className = 'absolute top-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm ' + (favd ? 'bg-rose-500 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'); btn.title = favd ? '取消收藏' : '收藏专辑'; } const dBtn = document.getElementById('album-dislike-${item.id}'); if(dBtn && favd){ dBtn.className = 'absolute top-1.5 left-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm bg-black/30 text-white opacity-0 group-hover:opacity-100'; dBtn.title = '不喜欢'; } })()">
                     <i class="fas fa-heart text-xs"></i>
+                </button>
+                <button id="album-dislike-${item.id}" class="absolute top-1.5 left-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm ${isAlbumDisliked(item.id, item.source || 'wy') ? 'bg-gray-800 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'}"
+                        title="${isAlbumDisliked(item.id, item.source || 'wy') ? '取消不喜欢' : '不喜欢'}"
+                        onclick="event.stopPropagation(); (async () => { const disd = await toggleAlbumDislike('${item.id}', '${item.source || 'wy'}', '${item.name.replace(/'/g, "\\'")}', '${(item.picUrl || '').replace(/'/g, "\\'")}', '${(item.artistName || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('album-dislike-${item.id}'); if(btn){ btn.className = 'absolute top-1.5 left-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm ' + (disd ? 'bg-gray-800 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'); btn.title = disd ? '取消不喜欢' : '不喜欢'; } const fBtn = document.getElementById('album-fav-${item.id}'); if(fBtn && disd){ fBtn.className = 'absolute top-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm bg-black/30 text-white opacity-0 group-hover:opacity-100'; fBtn.title = '收藏专辑'; } })()">
+                    <i class="fas fa-ban text-xs"></i>
                 </button>
             </div>
             <span class="text-sm font-bold t-text-main line-clamp-2 h-10 leading-5 mb-1" title="${item.name}">${item.name}</span>
@@ -2233,10 +2652,38 @@ function renderArtistHeader(info, activeTab, order) {
                         btn.className = base + ' ' + (favd ? favedCls : normalCls);
                         btn.title = favd ? '取消收藏' : '收藏歌手';
                     } 
+                    const dBtn = document.getElementById('artist-header-dislike-btn');
+                    if(dBtn && favd){
+                        dBtn.className = 'absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90 bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main';
+                        dBtn.title = '不喜欢';
+                    }
                 })()"
                 class="absolute top-2 right-12 md:top-4 md:right-16 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full ${isArtistFavorited(info.id, info.source) ? 'bg-rose-500 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main'} transition-all z-30 shadow-sm active:scale-90"
                 title="${isArtistFavorited(info.id, info.source) ? '取消收藏' : '收藏歌手'}">
                 <i class="fas fa-heart"></i>
+            </button>
+
+            <!-- Dislike Button (Artist) -->
+            <button id="artist-header-dislike-btn"
+                onclick="(async () => { 
+                    const disd = await toggleArtistDislike('${info.id}', '${info.source}', '${info.name.replace(/'/g, "\\'")}', '${(info.avatar || '').replace(/'/g, "\\'")}'); 
+                    const btn = document.getElementById('artist-header-dislike-btn'); 
+                    if(btn){ 
+                        const base = 'absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90';
+                        const disdCls = 'bg-gray-800 text-white';
+                        const normalCls = 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main';
+                        btn.className = base + ' ' + (disd ? disdCls : normalCls);
+                        btn.title = disd ? '取消不喜欢' : '不喜欢';
+                    } 
+                    const fBtn = document.getElementById('artist-header-fav-btn');
+                    if(fBtn && disd){
+                        fBtn.className = 'absolute top-2 right-12 md:top-4 md:right-16 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90 bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main';
+                        fBtn.title = '收藏歌手';
+                    }
+                })()"
+                class="absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full ${isArtistDisliked(info.id, info.source) ? 'bg-gray-800 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main'} transition-all z-30 shadow-sm active:scale-90"
+                title="${isArtistDisliked(info.id, info.source) ? '取消不喜欢' : '不喜欢'}">
+                <i class="fas fa-ban"></i>
             </button>
 
             <!-- Fold Toggle Button -->
@@ -2502,7 +2949,10 @@ function renderArtistSongsUI(list, page) {
         const isMatched = window.ListSearch && window.ListSearch.isMatched(index);
         const isCurrentMatch = window.ListSearch && window.ListSearch.isCurrentMatch(index);
 
+        const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(item));
+
         let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 p-3 rounded-xl hover:t-bg-panel transition-all group cursor-pointer border border-transparent ';
+        if (isDisliked && window.currentViewingListId !== 'dislike_songs') rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
         if (isCurrentMatch) rowClass += 'search-current ';
         else if (isMatched) rowClass += 'search-match ';
         if (isSelected) rowClass += 'row-selected ring-1 ring-emerald-500/30 ';
@@ -2564,6 +3014,11 @@ function renderArtistSongsUI(list, page) {
                         </button>
                         <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors" title="添加到歌单" onclick="event.stopPropagation(); openPlaylistAddModalForSong(${index})">
                             <i class="fas fa-plus w-3.5 h-3.5"></i>
+                        </button>
+                        <button class="p-0.5 sm:p-1.5 hover:bg-red-50 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors"
+                                title="${(isDisliked) ? '取消不喜欢' : '不喜欢'}"
+                                onclick="event.stopPropagation(); toggleDislikeSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+                            <i class="fas fa-thumbs-down w-3.5 h-3.5"></i>
                         </button>
                     </div>
                 </div>
@@ -2974,6 +3429,9 @@ function getImgUrl(item) {
         (s.meta && (s.meta.img || s.meta.pic)) ||
         '/music/assets/logo.svg';
 }
+window.getImgUrl = getImgUrl;
+
+// Removed duplicate toggleDislikeSong
 
 // List search logic is now handled by ListSearch service in list_search.js
 function renderResults(list) {
@@ -3064,7 +3522,10 @@ function renderResults(list) {
         const isCurrentMatch = window.ListSearch.isCurrentMatch(actualIndexInOriginal);
         const isSelected = window.selectedItems.has(String(item.id));
 
+        const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(item));
+
         let rowClass = 'grid grid-cols-12 gap-4 p-3 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer ';
+        if (isDisliked && window.currentViewingListId !== 'dislike_songs') rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
         if (isCurrentMatch) rowClass += 'search-current ';
         else if (isMatched) rowClass += 'search-match ';
         if (isSelected) rowClass += 'row-selected ring-1 ring-emerald-500/30 ';
@@ -3162,7 +3623,12 @@ function renderResults(list) {
                         title="添加到歌单">
                     <i class="fas fa-plus w-3 h-3 sm:w-4 sm:h-4"></i>
                 </button>
-                ${currentSearchScope !== 'network' ? `
+                <button class="p-1 sm:p-1.5 hover:bg-red-50 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors"
+                        title="${(isDisliked) ? '取消不喜欢' : '不喜欢'}"
+                        onclick="event.stopPropagation(); toggleDislikeSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+                    <i class="fas fa-thumbs-down w-3 h-3 sm:w-4 sm:h-4"></i>
+                </button>
+                ${currentSearchScope !== 'network' && window.currentViewingListId !== 'dislike_songs' ? `
                 <button class="delete-song-btn p-1 sm:p-1.5 hover:bg-red-50 rounded-lg text-red-600 transition-colors"
                         title="删除">
                     <i class="fas fa-trash w-3 h-3 sm:w-4 sm:h-4"></i>
@@ -3215,6 +3681,72 @@ function renderResults(list) {
         }
     }
 }
+
+/**
+ * 搜索结果页「不喜欢」按钮的全局处理函数。
+ * renderResults 里的按钮通过 JSON.stringify 把整个 song 对象传进来，
+ * 这里调用 DislikeManager.toggleSong 后重新渲染当前搜索结果。
+ */
+async function toggleDislikeSong(song) {
+    if (!song || !window.DislikeManager) return;
+
+    // 检查登录状态：若未登录本地账号，友好提示并引导去登录
+    if (typeof isUserLoggedIn === 'function' && !isUserLoggedIn()) {
+        if (typeof window.showToast === 'function') {
+            window.showToast('info', '请先登录本地账号后再使用不喜欢功能');
+        }
+        // 自动引导跳转到设置-登录区域
+        if (typeof switchTab === 'function') {
+            switchTab('settings');
+            setTimeout(() => {
+                const el = document.getElementById('btn-mode-local');
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 150);
+        }
+        return;
+    }
+
+    try {
+        const nowDisliked = await window.DislikeManager.toggleSong(song);
+        // [Fix] 如果当前正在查看不喜欢列表，更新 viewingPlaylist 到最新的 dislikeList
+        if (window.currentViewingListId === 'dislike_songs') {
+            window.viewingPlaylist = window.DislikeManager.state.dislikeList || [];
+        }
+        // 重新渲染搜索结果（保持当前列表状态）
+        if (typeof renderResults === 'function' && Array.isArray(window.viewingPlaylist)) {
+            renderResults(window.viewingPlaylist);
+        }
+        if (typeof window.renderArtistSongsUI === 'function' && window.currentArtistSongsCache) {
+            window.renderArtistSongsUI(window.currentArtistSongsCache);
+        }
+        // [Fix] 实时刷新侧边栏不喜欢数量徽标
+        if (typeof refreshDislikeSidebarCount === 'function') {
+            refreshDislikeSidebarCount();
+        }
+        if (typeof window.showToast === 'function') {
+            window.showToast('success', nowDisliked ? '已加入不喜欢' : '已移出不喜欢');
+        }
+    } catch (e) {
+        console.error('[Search] dislike failed:', e);
+        if (e.isAuthError || e.status === 401 || (e.message && e.message.includes('401'))) {
+            if (typeof window.showToast === 'function') {
+                window.showToast('warning', '请先登录本地账号');
+            }
+            if (typeof switchTab === 'function') {
+                switchTab('settings');
+                setTimeout(() => {
+                    const el = document.getElementById('btn-mode-local');
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 150);
+            }
+        } else {
+            if (typeof window.showToast === 'function') {
+                window.showToast('error', '操作失败：' + (e.message || '未知错误'));
+            }
+        }
+    }
+}
+window.toggleDislikeSong = toggleDislikeSong;
 
 // Generic Marquee Helper
 function createMarqueeHtml(text, className = '') {
@@ -3276,7 +3808,7 @@ function lazyLoadImages(root = document) {
     const loadImage = (img) => {
         const src = img.getAttribute('data-src');
         if (!src) return;
-        if (img.src.includes('logo.svg')) {
+        if (img.src && img.src.includes('logo.svg')) {
             img.classList.add('is-placeholder');
         }
         img.src = src;
@@ -3308,7 +3840,13 @@ function lazyLoadImages(root = document) {
 
         const images = scope.querySelectorAll('img.lazy-image[data-src]');
         images.forEach(img => {
-            imageObserver.observe(img);
+            // Check if element is already within viewport / visible
+            const rect = img.getBoundingClientRect();
+            if (rect.top < (window.innerHeight || document.documentElement.clientHeight) + 150 && rect.bottom > -50) {
+                loadImage(img);
+            } else {
+                imageObserver.observe(img);
+            }
         });
     } else {
         // Fallback for older browsers
@@ -4220,24 +4758,35 @@ function updateAdminUI() {
         }
     });
 
-    // 2. 弹窗内的远程同步输入框及客户端模式勾选框：仅在远程已连或开启了客户端模式时才禁用
-    // (勾选客户端模式后锁定输入，防止在自动同步流程中改动配置)
-    const disableModalRemote = isRemoteConnected || settings.enableClientModeSync;
-    const modalInputIds = ['remote-overwrite-url', 'remote-overwrite-code', 'setting-client-mode-sync'];
+    // 2. 弹窗内的远程同步输入框：在远程已连接或开启了客户端模式时锁定输入
+    const disableModalInputs = isRemoteConnected || settings.enableClientModeSync;
+    const modalInputIds = ['remote-overwrite-url', 'remote-overwrite-code'];
     modalInputIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-            el.disabled = disableModalRemote;
-            if (disableModalRemote) {
+            el.disabled = disableModalInputs;
+            if (disableModalInputs) {
                 el.classList.add('opacity-40', 'cursor-not-allowed', 'grayscale');
-                // 注意：勾选框的父级不要加 pointer-events-none，否则无法取消
-                if (id !== 'setting-client-mode-sync') el.parentElement?.classList.add('pointer-events-none');
+                el.parentElement?.classList.add('pointer-events-none');
             } else {
                 el.classList.remove('opacity-40', 'cursor-not-allowed', 'grayscale');
-                if (id !== 'setting-client-mode-sync') el.parentElement?.classList.remove('pointer-events-none');
+                el.parentElement?.classList.remove('pointer-events-none');
             }
         }
     });
+
+    // 客户端模式勾选框本身：只要当前没有处于活动连接传输中，用户就可以随时勾选或取消勾选
+    const clientModeToggle = document.getElementById('setting-client-mode-sync');
+    if (clientModeToggle) {
+        clientModeToggle.disabled = isRemoteConnected;
+        if (isRemoteConnected) {
+            clientModeToggle.classList.add('opacity-40', 'cursor-not-allowed', 'grayscale');
+            clientModeToggle.parentElement?.classList.add('pointer-events-none');
+        } else {
+            clientModeToggle.classList.remove('opacity-40', 'cursor-not-allowed', 'grayscale');
+            clientModeToggle.parentElement?.classList.remove('pointer-events-none');
+        }
+    }
 
 
     const modeBtnIds = ['btn-mode-local', 'btn-mode-remote'];
@@ -4275,8 +4824,8 @@ function updateAdminUI() {
     ];
     modalActionButtons.forEach(btn => {
         if (btn) {
-            btn.disabled = disableModalRemote;
-            if (disableModalRemote) btn.classList.add('opacity-30', 'pointer-events-none', 'grayscale');
+            btn.disabled = disableModalInputs;
+            if (disableModalInputs) btn.classList.add('opacity-30', 'pointer-events-none', 'grayscale');
             else btn.classList.remove('opacity-30', 'pointer-events-none', 'grayscale');
         }
     });
@@ -4490,8 +5039,8 @@ async function showServerDirectories() {
                         </div>
                         <p class="text-[11px] t-text-muted">
                             ${isSeparated
-                                ? '开启“仅下载模式”时，歌曲将独立持久保存在此目录，不参与缓存容量淘汰，洗版功能仅针对此目录生效。'
-                                : '未开启“仅下载模式”时，下载歌曲与缓存歌曲合并存储在同一目录下。'}
+                ? '开启“仅下载模式”时，歌曲将独立持久保存在此目录，不参与缓存容量淘汰，洗版功能仅针对此目录生效。'
+                : '未开启“仅下载模式”时，下载歌曲与缓存歌曲合并存储在同一目录下。'}
                         </p>
                     </div>
 
@@ -4679,12 +5228,12 @@ async function runRecoveryFlow(error, state = currentRecoveryState) {
     } else if (currentStep === 'switch_platform') {
         RecoveryToast.show(state.originalSong, '原平台所有音源均无法播放，正在全网搜索备选源...');
         const matches = await findOtherSourceMatches(state.originalSong);
-        
+
         if (state !== currentRecoveryState) {
             console.log('[Recovery] Aborted because user played another song during findOtherSourceMatches.');
             return;
         }
-        
+
         const matchedSong = matches.find(song => !state.triedPlatforms.includes(song.source));
         if (matchedSong) {
             state.currentSong = matchedSong;
@@ -5026,7 +5575,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 // - 歌单/排行榜(songlist/leaderboard)：updatePlaylist 已把队列设为歌单/排行榜，
                 //   开启设置=保持歌单/排行榜队列(do nothing)，关闭设置=退回 defaultList
                 const isSongListOrLeaderboard = currentPlayingScope === 'songlist' || currentPlayingScope === 'leaderboard';
-                
+
                 let fallbackTriggered = false;
                 if (isSongListOrLeaderboard) {
                     // 歌单/排行榜：关闭"切换歌单"时，才退回 defaultList
@@ -5243,6 +5792,21 @@ function updatePlaylist(list, startIndex = 0, scope = 'local_list', shouldAddToD
     if (!list || list.length === 0) {
         showError('播放列表为空');
         return;
+    }
+
+    if (settings.autoFilterDislikedSongs !== false && window.DislikeManager && window.currentViewingListId !== 'dislike_songs') {
+        const targetSong = list[startIndex]; // The explicitly played song
+        list = list.filter((song, idx) => {
+            // Do not filter out the song being clicked/played right now
+            if (song === targetSong || idx === startIndex) return true;
+            return !window.DislikeManager.isDisliked(song);
+        });
+        
+        // Update startIndex to reflect new position
+        if (targetSong) {
+            startIndex = list.indexOf(targetSong);
+            if (startIndex === -1) startIndex = 0; // fallback
+        }
     }
 
     // [New] Deduplicate by quality if setting enabled
@@ -6259,6 +6823,11 @@ function loadSettings() {
     // 同步 UI 状态
     syncSettingsUI();
     setupNetworkListAutoCheck();
+
+    // 从服务端拉取后台任务检测到的网络歌单更新状态
+    if (typeof syncServerNetworkListUpdates === 'function') {
+        syncServerNetworkListUpdates();
+    }
 }
 
 // ========== 键盘快捷键逻辑 ==========
@@ -6451,6 +7020,9 @@ async function updateSetting(key, value) {
     syncSettingsUI(key, value);
     if (key === 'networkListAutoCheckInterval' || key === 'autoUpdateNetworkList') {
         setupNetworkListAutoCheck();
+        if (typeof refreshTaskScheduleStatus === 'function') {
+            setTimeout(refreshTaskScheduleStatus, 300);
+        }
     }
 
     // [New] Push to server if enabled
@@ -6491,6 +7063,7 @@ const SETTINGS_UI_MAP = {
     defaultEntry: { id: 'setting-default-entry', type: 'value' },
     switchPlaylistOnSearchPlay: { id: 'setting-switch-playlist-search', type: 'checkbox' },
     switchPlaylistOnSongListPlay: { id: 'setting-switch-playlist-songlist', type: 'checkbox' },
+    autoFilterDislikedSongs: { id: 'setting-auto-filter-disliked', type: 'checkbox' },
     autoResume: { id: 'setting-auto-resume', type: 'checkbox' },
     autoCompactPlaybar: { id: 'setting-auto-compact-playbar', type: 'checkbox' },
     enableAutoSwitchSource: { id: 'setting-auto-switch-source', type: 'checkbox' },
@@ -6622,7 +7195,15 @@ const SETTINGS_UI_MAP = {
 
     // 系统 & 网络 (System & Network)
     autoUpdateNetworkList: { id: 'setting-auto-update-list', type: 'checkbox' },
-    networkListAutoCheckInterval: { id: 'setting-network-list-auto-check-interval', type: 'value' },
+    networkListAutoCheckInterval: {
+        id: 'setting-network-list-auto-check-interval',
+        type: 'value',
+        action: (v) => {
+            if (typeof updateIntervalPickerDisplay === 'function') {
+                updateIntervalPickerDisplay(v);
+            }
+        }
+    },
     saveAccountSettingsToFile: { id: 'setting-save-settings-to-file', type: 'checkbox' },
     enableLyricCache: { id: 'setting-enable-lyric-cache', type: 'checkbox' },
     enableSongUrlCache: { id: 'setting-enable-url-cache', type: 'checkbox' },
@@ -7514,6 +8095,71 @@ function updateDetailInfo(song) {
     setImg('detail-bg-cover', imgUrl);
 }
 
+
+/**
+ * 读取本地未关联歌曲的内嵌歌词（或作为网络获取失败时的兜底）
+ * @param {object} song 歌曲对象
+ * @param {boolean} [silent=false] 是否静默模式（为 true 时若无内嵌歌词不覆盖 UI 为暂无歌词）
+ * @returns {Promise<boolean>} 是否成功获取并应用了内嵌歌词
+ */
+async function fetchEmbedLyricForLocalSong(song, silent = false) {
+    const filename = song._localFilename;
+    const username = song._localUsername || '';
+    const isCustomDir = !!song._isCustomDir;
+
+    // 显示加载状态（若非静默模式）
+    if (!silent) {
+        const lyricContent = document.getElementById('lyric-content');
+        if (lyricContent) lyricContent.innerHTML = '<p class="t-text-muted text-lg animate-pulse">正在加载内嵌歌词...</p>';
+        currentLyricLines = [];
+    }
+
+    try {
+        const headers = {};
+        Object.assign(headers, getUserAuthHeaders());
+
+        let apiUrl;
+        if (isCustomDir) {
+            apiUrl = `/api/music/custom/embedLyric?filename=${encodeURIComponent(filename)}&user=${encodeURIComponent(username)}`;
+        } else {
+            const folder = song._localFolder || song.folder || 'cache';
+            apiUrl = `/api/music/cache/embedLyric?filename=${encodeURIComponent(filename)}&folder=${encodeURIComponent(folder)}`;
+        }
+
+        const res = await fetch(apiUrl, { headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const lrc = data.lrc || '';
+        if (!data.success || !lrc || lrc.trim().length < 5) {
+            console.log('[Lyric] 内嵌歌词为空，无歌词展示');
+            if (!silent) {
+                renderLyric([], '暂无内嵌歌词');
+            }
+            return false;
+        }
+
+        console.log(`[Lyric] 成功读取内嵌歌词: ${filename} (长度: ${lrc.length})`);
+        currentRawLrc = lrc;
+        currentRawTlrc = '';
+        currentRawRlrc = '';
+        currentRawKlrc = '';
+
+        // 更新歌词 key 防止重复加载
+        lastLyricSongId = `_local_embed_${filename}`;
+
+        initLyricPlayer();
+        applyLyricUpdate();
+        return true;
+    } catch (e) {
+        console.warn('[Lyric] 读取内嵌歌词失败:', e);
+        if (!silent) {
+            renderLyric([], '暂无歌词');
+        }
+        return false;
+    }
+}
+
 async function fetchLyric(song, quality = null) {
     if (!song) {
         return;
@@ -7534,9 +8180,15 @@ async function fetchLyric(song, quality = null) {
         source = song.meta.source;
     }
 
-    // 如果还是没有必要的数据,退出
+    // 如果还是没有必要的数据，检查是否为本地文件（可尝试读取内嵌歌词）
     if (!songmid || !source) {
-        console.warn('[Lyric] 歌曲缺少必要的字段 songmid/songId 或 source:', song);
+        // [新增] 本地未关联歌曲：优先尝试读取音频文件内嵌歌词
+        if (song.isLocal && song._localFilename) {
+            console.log('[Lyric] 本地未关联歌曲，尝试读取内嵌歌词:', song._localFilename);
+            await fetchEmbedLyricForLocalSong(song);
+        } else {
+            console.warn('[Lyric] 歌曲缺少必要的字段 songmid/songId 或 source:', song);
+        }
         return;
     }
 
@@ -7689,6 +8341,12 @@ async function fetchLyric(song, quality = null) {
         }
 
         if (!currentRawLrc) {
+            // [兜底] 若获取到的歌词为空，且该歌曲是本地文件，尝试读取其内嵌歌词兜底
+            if (song.isLocal && song._localFilename) {
+                console.log('[Lyric] 网络/缓存歌词为空，尝试使用本地内嵌歌词兜底:', song._localFilename);
+                const embedSuccess = await fetchEmbedLyricForLocalSong(song, true);
+                if (embedSuccess) return;
+            }
             renderLyric([]);
             return;
         }
@@ -7699,6 +8357,14 @@ async function fetchLyric(song, quality = null) {
 
     } catch (e) {
         console.error(`[Lyric] Failed (${source}_${songmid}):`, e);
+
+        // [兜底] 若网络获取歌词抛错，且该歌曲是本地文件，尝试读取其内嵌歌词兜底
+        if (song.isLocal && song._localFilename) {
+            console.log('[Lyric] 网络获取歌词异常，尝试使用本地内嵌歌词兜底:', song._localFilename);
+            const embedSuccess = await fetchEmbedLyricForLocalSong(song, true);
+            if (embedSuccess) return;
+        }
+
         renderLyric([], `暂无歌词 (${source}: ${songmid})`);
     }
 }
@@ -8327,6 +8993,8 @@ if (favArrow) favArrow.style.transform = 'rotate(-90deg)';
 
 /** 全局 library 数据 */
 window.libraryData = { artists: [], albums: [] };
+/** 全局 dislike library 数据 */
+window.dislikeLibraryData = { artists: [], albums: [] };
 
 /** 批量选中的 library 条目（id 集合） */
 window.libraryBatchSelected = new Set();
@@ -8351,26 +9019,44 @@ async function loadLibraryData() {
             headers = getUserAuthHeaders();
         }
 
-        const [ar, al] = await Promise.all([
+        const [ar, al, dar, dal] = await Promise.all([
             fetch(artistsUrl, { headers }).then(r => r.ok ? r.json() : []),
-            fetch(albumsUrl, { headers }).then(r => r.ok ? r.json() : [])
+            fetch(albumsUrl, { headers }).then(r => r.ok ? r.json() : []),
+            fetch(artistsUrl.replace('/library/', '/dislike/library/'), { headers }).then(r => r.ok ? r.json() : []),
+            fetch(albumsUrl.replace('/library/', '/dislike/library/'), { headers }).then(r => r.ok ? r.json() : [])
         ]);
         window.libraryData.artists = Array.isArray(ar) ? ar : [];
         window.libraryData.albums = Array.isArray(al) ? al : [];
+        window.dislikeLibraryData.artists = Array.isArray(dar) ? dar : [];
+        window.dislikeLibraryData.albums = Array.isArray(dal) ? dal : [];
 
         if (!isPublic && isUserLoggedIn()) {
             window.myPersonalLibraryData = {
                 artists: [...window.libraryData.artists],
                 albums: [...window.libraryData.albums]
             };
+            window.myPersonalDislikeLibraryData = {
+                artists: [...window.dislikeLibraryData.artists],
+                albums: [...window.dislikeLibraryData.albums]
+            };
+        }
+
+        // [DislikeSync] Load dislike rules into memory (handles grey-out matching)
+        if (window.DislikeManager) {
+            await window.DislikeManager.load();
         }
 
         // 刷新侧边栏数量
         refreshLibrarySidebarCount();
+        refreshDislikeSidebarCount();
         if (window.currentViewingListId === '__lib_artists__' && typeof renderLibraryArtists === 'function') {
             renderLibraryArtists(window.libraryData.artists);
         } else if (window.currentViewingListId === '__lib_albums__' && typeof renderLibraryAlbums === 'function') {
             renderLibraryAlbums(window.libraryData.albums);
+        } else if (window.currentViewingListId === 'dislike_artists' && typeof renderLibraryArtists === 'function') {
+            renderLibraryArtists(window.dislikeLibraryData.artists, true); // pass flag for dislike
+        } else if (window.currentViewingListId === 'dislike_albums' && typeof renderLibraryAlbums === 'function') {
+            renderLibraryAlbums(window.dislikeLibraryData.albums, true);
         }
     } catch (e) {
         console.warn('[Library] 加载失败:', e);
@@ -8385,6 +9071,22 @@ function refreshLibrarySidebarCount() {
     const albCount = document.getElementById('lib-album-count');
     if (artCount) artCount.textContent = window.libraryData.artists.length;
     if (albCount) albCount.textContent = window.libraryData.albums.length;
+}
+
+/** 刷新不喜欢菜单数量徽标 */
+function refreshDislikeSidebarCount() {
+    const sCount = document.getElementById('dislike-song-count');
+    const aCount = document.getElementById('dislike-artist-count');
+    const alCount = document.getElementById('dislike-album-count');
+    if (sCount && window.DislikeManager && window.DislikeManager.state.dislikeList) {
+        sCount.textContent = window.DislikeManager.state.dislikeList.length;
+    }
+    if (aCount && window.dislikeLibraryData) {
+        aCount.textContent = window.dislikeLibraryData.artists.length;
+    }
+    if (alCount && window.dislikeLibraryData) {
+        alCount.textContent = window.dislikeLibraryData.albums.length;
+    }
 }
 
 /** 持久化 artists 到后端（自动感知公开收藏状态） */
@@ -8426,6 +9128,162 @@ async function saveLibraryAlbums(customList = null) {
         refreshLibrarySidebarCount();
     } catch (e) { console.error('[Library] 保存专辑失败:', e); }
 }
+
+/** 持久化 disliked artists 到后端 */
+async function saveDislikeLibraryArtists(customList = null) {
+    try {
+        const isPublic = !isUserLoggedIn() || (!customList && window.isViewingPublicFavorites);
+        const listToSave = customList || window.dislikeLibraryData.artists;
+        let headers = { 'Content-Type': 'application/json' };
+        let url = '/api/user/dislike/library/artists';
+        if (isPublic) {
+            const adminPass = localStorage.getItem('lx_admin_password');
+            if (adminPass) headers['x-frontend-auth'] = adminPass;
+            headers['x-user-name'] = '_open';
+            url += '?user=_open';
+        } else {
+            headers = { 'Content-Type': 'application/json', ...getUserAuthHeaders() };
+        }
+        await fetch(url, { method: 'POST', headers, body: JSON.stringify(listToSave) });
+        // Refresh dislike rules in DislikeManager so song lists get updated with disabled/disliked state
+        if (window.DislikeManager && typeof window.DislikeManager.load === 'function') {
+            await window.DislikeManager.load(true);
+            if (typeof renderResults === 'function' && Array.isArray(window.viewingPlaylist)) {
+                renderResults(window.viewingPlaylist);
+            }
+            if (typeof window.renderArtistSongsUI === 'function' && window.currentArtistSongsCache) {
+                window.renderArtistSongsUI(window.currentArtistSongsCache);
+            }
+        }
+        // Mutual Exclusivity: refresh liked list to sync UI
+        setTimeout(() => loadLibraryData(), 500); 
+    } catch (e) { console.error('[DislikeLibrary] 保存不喜欢的歌手失败:', e); }
+}
+
+/** 持久化 disliked albums 到后端 */
+async function saveDislikeLibraryAlbums(customList = null) {
+    try {
+        const isPublic = !isUserLoggedIn() || (!customList && window.isViewingPublicFavorites);
+        const listToSave = customList || window.dislikeLibraryData.albums;
+        let headers = { 'Content-Type': 'application/json' };
+        let url = '/api/user/dislike/library/albums';
+        if (isPublic) {
+            const adminPass = localStorage.getItem('lx_admin_password');
+            if (adminPass) headers['x-frontend-auth'] = adminPass;
+            headers['x-user-name'] = '_open';
+            url += '?user=_open';
+        } else {
+            headers = { 'Content-Type': 'application/json', ...getUserAuthHeaders() };
+        }
+        await fetch(url, { method: 'POST', headers, body: JSON.stringify(listToSave) });
+        // Refresh dislike rules in DislikeManager so song lists get updated with disabled/disliked state
+        if (window.DislikeManager && typeof window.DislikeManager.load === 'function') {
+            await window.DislikeManager.load(true);
+            if (typeof renderResults === 'function' && Array.isArray(window.viewingPlaylist)) {
+                renderResults(window.viewingPlaylist);
+            }
+            if (typeof window.renderArtistSongsUI === 'function' && window.currentArtistSongsCache) {
+                window.renderArtistSongsUI(window.currentArtistSongsCache);
+            }
+        }
+        // Mutual Exclusivity: refresh liked list to sync UI
+        setTimeout(() => loadLibraryData(), 500);
+    } catch (e) { console.error('[DislikeLibrary] 保存不喜欢的专辑失败:', e); }
+}
+
+/** 检查歌手是否已拉黑 */
+function isArtistDisliked(id, source) {
+    const list = (isUserLoggedIn() && window.isViewingPublicFavorites && window.myPersonalDislikeLibraryData)
+        ? window.myPersonalDislikeLibraryData.artists
+        : window.dislikeLibraryData.artists;
+    return list.some(a => String(a.id) === String(id) && a.source === source);
+}
+window.isArtistDisliked = isArtistDisliked;
+
+/** 切换歌手拉黑；返回最新拉黑状态 true/false */
+async function toggleArtistDislike(id, source, name, picUrl) {
+    if (isUserLoggedIn()) {
+        const targetList = (window.isViewingPublicFavorites && window.myPersonalDislikeLibraryData)
+            ? window.myPersonalDislikeLibraryData.artists
+            : window.dislikeLibraryData.artists;
+
+        const idx = targetList.findIndex(a => String(a.id) === String(id) && a.source === source);
+        if (idx >= 0) {
+            targetList.splice(idx, 1);
+            await saveDislikeLibraryArtists(targetList);
+            showInfo(`已移除不喜欢歌手「${name}」`);
+            return false;
+        } else {
+            targetList.push({ id, source, name, picUrl: picUrl || '' });
+            await saveDislikeLibraryArtists(targetList);
+            showSuccess(`已标记不喜欢歌手「${name}」`);
+            return true;
+        }
+    } else {
+        if (!(await requireAdminForOpenWrite('修改公开不喜欢歌手'))) return false;
+        const list = window.dislikeLibraryData.artists;
+        const idx = list.findIndex(a => String(a.id) === String(id) && a.source === source);
+        if (idx >= 0) {
+            list.splice(idx, 1);
+            await saveDislikeLibraryArtists(list);
+            showInfo(`已移除公开不喜欢歌手「${name}」`);
+            return false;
+        } else {
+            list.push({ id, source, name, picUrl: picUrl || '' });
+            await saveDislikeLibraryArtists(list);
+            showSuccess(`已标记公开不喜欢歌手「${name}」`);
+            return true;
+        }
+    }
+}
+window.toggleArtistDislike = toggleArtistDislike;
+
+/** 检查专辑是否已拉黑 */
+function isAlbumDisliked(id, source) {
+    const list = (isUserLoggedIn() && window.isViewingPublicFavorites && window.myPersonalDislikeLibraryData)
+        ? window.myPersonalDislikeLibraryData.albums
+        : window.dislikeLibraryData.albums;
+    return list.some(a => String(a.id) === String(id) && a.source === source);
+}
+window.isAlbumDisliked = isAlbumDisliked;
+
+/** 切换专辑拉黑；返回最新拉黑状态 true/false */
+async function toggleAlbumDislike(id, source, name, picUrl, artistName) {
+    if (isUserLoggedIn()) {
+        const targetList = (window.isViewingPublicFavorites && window.myPersonalDislikeLibraryData)
+            ? window.myPersonalDislikeLibraryData.albums
+            : window.dislikeLibraryData.albums;
+
+        const idx = targetList.findIndex(a => String(a.id) === String(id) && a.source === source);
+        if (idx >= 0) {
+            targetList.splice(idx, 1);
+            await saveDislikeLibraryAlbums(targetList);
+            showInfo(`已移除不喜欢专辑「${name}」`);
+            return false;
+        } else {
+            targetList.push({ id, source, name, picUrl: picUrl || '', artistName: artistName || '' });
+            await saveDislikeLibraryAlbums(targetList);
+            showSuccess(`已标记不喜欢专辑「${name}」`);
+            return true;
+        }
+    } else {
+        if (!(await requireAdminForOpenWrite('修改公开不喜欢专辑'))) return false;
+        const list = window.dislikeLibraryData.albums;
+        const idx = list.findIndex(a => String(a.id) === String(id) && a.source === source);
+        if (idx >= 0) {
+            list.splice(idx, 1);
+            await saveDislikeLibraryAlbums(list);
+            showInfo(`已移除公开不喜欢专辑「${name}」`);
+            return false;
+        } else {
+            list.push({ id, source, name, picUrl: picUrl || '', artistName: artistName || '' });
+            await saveDislikeLibraryAlbums(list);
+            showSuccess(`已标记公开不喜欢专辑「${name}」`);
+            return true;
+        }
+    }
+}
+window.toggleAlbumDislike = toggleAlbumDislike;
 
 
 /** 切换歌手收藏；返回最新收藏状态 true/false */
@@ -8632,7 +9490,7 @@ window.isAlbumFavorited = isAlbumFavorited;
  * 渲染收藏歌手列表（带批量操作支持）
  * 直接复用搜索结果容器
  */
-function renderLibraryArtists(list) {
+function renderLibraryArtists(list, isDislike = false) {
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
     const paginationBar = document.getElementById('search-pagination-bar');
@@ -8647,29 +9505,29 @@ function renderLibraryArtists(list) {
         container.innerHTML = `
             <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
                 <i class="fas fa-user-slash text-6xl opacity-20"></i>
-                <p>还没有收藏任何歌手</p>
-                <p class="text-xs">在搜索结果中点击 ♥ 收藏歌手</p>
+                <p>${isDislike ? '还没有不喜欢任何歌手' : '还没有收藏任何歌手'}</p>
+                <p class="text-xs">在搜索结果中点击 ${isDislike ? '🚫 不喜欢歌手' : '♥ 收藏歌手'}</p>
             </div>`;
         return;
     }
 
     container.innerHTML = `
         <div class="p-3 md:p-4 border-b t-border-main t-bg-main flex items-center justify-between">
-            <span class="text-sm font-bold t-text-main">收藏歌手 <span class="text-emerald-500">${list.length}</span> 位</span>
+            <span class="text-sm font-bold t-text-main">${isDislike ? '不喜欢歌手' : '收藏歌手'} <span class="text-emerald-500">${list.length}</span> 位</span>
             <div class="flex items-center gap-2">
                 <button onclick="enterLibraryArtistBatch()" class="text-xs px-3 py-1.5 border t-border-main rounded-lg t-text-muted hover:text-emerald-600 hover:border-emerald-400 transition-all flex items-center gap-1">
                     <i class="fas fa-tasks"></i> 批量管理
                 </button>
             </div>
         </div>
-        <div id="lib-artist-batch-bar" class="hidden bg-emerald-50 border-b border-emerald-200 p-3 flex items-center justify-between">
+        <div id="lib-artist-batch-bar" class="hidden bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 p-3 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <span class="text-sm text-emerald-700">已选: <span id="lib-artist-sel-count" class="font-bold">0</span></span>
-                <button onclick="libSelectAllArtists()" class="text-xs px-3 py-1 t-bg-panel border border-emerald-300 rounded hover:bg-emerald-50 text-emerald-700">全选</button>
-                <button onclick="libDeselectAllArtists()" class="text-xs px-3 py-1 t-bg-panel border t-border-main rounded hover:t-bg-track t-text-muted">清空</button>
-                <button onclick="exitLibraryArtistBatch()" class="text-xs px-3 py-1 t-bg-panel border border-red-300 rounded hover:bg-red-50 text-red-600">退出</button>
+                <span class="text-sm text-emerald-700 dark:text-emerald-300">已选择: <span id="lib-artist-sel-count" class="font-bold">0</span></span>
+                <button onclick="libSelectAllArtists()" class="text-xs px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded shadow-sm transition-all font-medium">全选</button>
+                <button onclick="libDeselectAllArtists()" class="text-xs px-3 py-1 bg-gray-500 hover:bg-gray-600 text-white rounded shadow-sm transition-all font-medium">清空</button>
+                <button onclick="exitLibraryArtistBatch()" class="text-xs px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded shadow-sm transition-all font-medium">退出</button>
             </div>
-            <button onclick="libDeleteSelectedArtists()" class="text-xs px-4 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded transition-colors flex items-center gap-1">
+            <button onclick="libDeleteSelectedArtists()" class="text-xs px-4 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded shadow-sm transition-all font-medium flex items-center gap-1">
                 <i class="fas fa-trash"></i> 删除所选
             </button>
         </div>
@@ -8700,8 +9558,8 @@ function renderLibraryArtists(list) {
                     <i class="fas fa-check-circle text-white text-2xl"></i>
                 </div>
                 <button class="lib-fav-btn absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md z-10"
-                        title="取消收藏"
-                        onclick="event.stopPropagation(); removeLibraryArtist('${singer.id}', '${singer.source}')">
+                        title="${isDislike ? '取消不喜欢' : '取消收藏'}"
+                        onclick="event.stopPropagation(); removeLibraryArtist('${singer.id}', '${singer.source}', ${isDislike})">
                     <i class="fas fa-times text-[10px]"></i>
                 </button>
             </div>
@@ -8713,7 +9571,7 @@ function renderLibraryArtists(list) {
 window.renderLibraryArtists = renderLibraryArtists;
 
 /** 渲染收藏专辑列表（带批量操作支持） */
-function renderLibraryAlbums(list) {
+function renderLibraryAlbums(list, isDislike = false) {
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
     const paginationBar = document.getElementById('search-pagination-bar');
@@ -8728,32 +9586,33 @@ function renderLibraryAlbums(list) {
         container.innerHTML = `
             <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
                 <i class="fas fa-compact-disc text-6xl opacity-20"></i>
-                <p>还没有收藏任何专辑</p>
-                <p class="text-xs">在搜索结果中点击 ♥ 收藏专辑</p>
+                <p>${isDislike ? '还没有不喜欢任何专辑' : '还没有收藏任何专辑'}</p>
+                <p class="text-xs">在搜索结果中点击 ${isDislike ? '🚫 不喜欢专辑' : '♥ 收藏专辑'}</p>
             </div>`;
         return;
     }
 
     container.innerHTML = `
         <div class="p-3 md:p-4 border-b t-border-main t-bg-main flex items-center justify-between">
-            <span class="text-sm font-bold t-text-main">收藏专辑 <span class="text-emerald-500">${list.length}</span> 张</span>
+            <span class="text-sm font-bold t-text-main">${isDislike ? '不喜欢专辑' : '收藏专辑'} <span class="text-emerald-500">${list.length}</span> 张</span>
             <div class="flex items-center gap-2">
+                ${!isDislike ? `
                 <button id="sync-all-albums-btn" onclick="syncAllLibraryAlbums()" class="text-xs px-3 py-1.5 border t-border-main rounded-lg t-text-muted hover:text-blue-500 hover:border-blue-400 transition-all flex items-center gap-1">
                     <i class="fas fa-sync-alt"></i> 同步所有
-                </button>
+                </button>` : ''}
                 <button onclick="enterLibraryAlbumBatch()" class="text-xs px-3 py-1.5 border t-border-main rounded-lg t-text-muted hover:text-emerald-600 hover:border-emerald-400 transition-all flex items-center gap-1">
                     <i class="fas fa-tasks"></i> 批量管理
                 </button>
             </div>
         </div>
-        <div id="lib-album-batch-bar" class="hidden bg-emerald-50 border-b border-emerald-200 p-3 flex items-center justify-between">
+        <div id="lib-album-batch-bar" class="hidden bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 p-3 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <span class="text-sm text-emerald-700">已选: <span id="lib-album-sel-count" class="font-bold">0</span></span>
-                <button onclick="libSelectAllAlbums()" class="text-xs px-3 py-1 t-bg-panel border border-emerald-300 rounded hover:bg-emerald-50 text-emerald-700">全选</button>
-                <button onclick="libDeselectAllAlbums()" class="text-xs px-3 py-1 t-bg-panel border t-border-main rounded hover:t-bg-track t-text-muted">清空</button>
-                <button onclick="exitLibraryAlbumBatch()" class="text-xs px-3 py-1 t-bg-panel border border-red-300 rounded hover:bg-red-50 text-red-600">退出</button>
+                <span class="text-sm text-emerald-700 dark:text-emerald-300">已选择: <span id="lib-album-sel-count" class="font-bold">0</span></span>
+                <button onclick="libSelectAllAlbums()" class="text-xs px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded shadow-sm transition-all font-medium">全选</button>
+                <button onclick="libDeselectAllAlbums()" class="text-xs px-3 py-1 bg-gray-500 hover:bg-gray-600 text-white rounded shadow-sm transition-all font-medium">清空</button>
+                <button onclick="exitLibraryAlbumBatch()" class="text-xs px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded shadow-sm transition-all font-medium">退出</button>
             </div>
-            <button onclick="libDeleteSelectedAlbums()" class="text-xs px-4 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded transition-colors flex items-center gap-1">
+            <button onclick="libDeleteSelectedAlbums()" class="text-xs px-4 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded shadow-sm transition-all font-medium flex items-center gap-1">
                 <i class="fas fa-trash"></i> 删除所选
             </button>
         </div>
@@ -8781,6 +9640,7 @@ function renderLibraryAlbums(list) {
                 <div class="lib-batch-check absolute inset-0 bg-black/40 hidden items-center justify-center rounded-xl">
                     <i class="fas fa-check-circle text-white text-3xl"></i>
                 </div>
+                ${!isDislike ? `
                 <div class="absolute top-1.5 right-1.5 flex gap-1.5">
                     <button type="button" class="lib-album-download-btn w-8 h-8 rounded-full bg-black/45 hover:bg-emerald-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm disabled:opacity-60 disabled:cursor-wait" title="下载本专辑全部歌曲">
                         <i class="fas fa-download text-xs"></i>
@@ -8789,7 +9649,13 @@ function renderLibraryAlbums(list) {
                             onclick="event.stopPropagation(); removeLibraryAlbum('${item.id}', '${item.source}')">
                         <i class="fas fa-times text-xs"></i>
                     </button>
-                </div>
+                </div>` : `
+                <div class="absolute top-1.5 right-1.5 flex gap-1.5">
+                    <button type="button" class="lib-fav-btn w-8 h-8 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm" title="取消不喜欢"
+                            onclick="event.stopPropagation(); removeLibraryAlbum('${item.id}', '${item.source}', true)">
+                        <i class="fas fa-times text-xs"></i>
+                    </button>
+                </div>`}
             </div>
             <span class="text-sm font-bold t-text-main line-clamp-2 h-10 leading-5 mb-1" title="${item.name}">${item.name}</span>
             <div class="flex items-center justify-between mt-1">
@@ -8908,7 +9774,9 @@ function toggleLibArtistBatchSelect(id) {
     updateLibArtistBatchCount();
 }
 function libSelectAllArtists() {
-    window.libraryData.artists.forEach(a => window.libraryBatchSelected.add(String(a.id)));
+    const isDislike = typeof getCurrentActiveListId === 'function' && getCurrentActiveListId() === 'dislike_artists';
+    const list = isDislike ? window.dislikeLibraryData.artists : window.libraryData.artists;
+    list.forEach(a => window.libraryBatchSelected.add(String(a.id)));
     document.querySelectorAll('#lib-artist-grid .lib-batch-check').forEach(el => { el.classList.remove('hidden'); el.classList.add('flex'); });
     updateLibArtistBatchCount();
 }
@@ -8923,25 +9791,44 @@ function updateLibArtistBatchCount() {
 }
 async function libDeleteSelectedArtists() {
     if (window.libraryBatchSelected.size === 0) { showInfo('请先选择要删除的歌手'); return; }
+    const isDislike = getCurrentActiveListId() === 'dislike_artists';
     if (window.isViewingPublicFavorites || !isUserLoggedIn()) {
-        if (!(await requireAdminForOpenWrite('删除公开收藏歌手'))) return;
+        if (!(await requireAdminForOpenWrite(isDislike ? '删除公开不喜欢歌手' : '删除公开收藏歌手'))) return;
     }
-    const confirmed = await showSelect('删除收藏歌手', `确定删除选中的 ${window.libraryBatchSelected.size} 位歌手吗？`, { danger: true });
+    const confirmed = await showSelect(isDislike ? '取消不喜欢歌手' : '删除收藏歌手', `确定${isDislike ? '取消不喜欢' : '删除'}选中的 ${window.libraryBatchSelected.size} 位歌手吗？`, { danger: true });
     if (!confirmed) return;
-    window.libraryData.artists = window.libraryData.artists.filter(a => !window.libraryBatchSelected.has(String(a.id)));
-    await saveLibraryArtists();
-    exitLibraryArtistBatch();
-    renderLibraryArtists(window.libraryData.artists);
-    showSuccess('已删除所选歌手');
-}
-async function removeLibraryArtist(id, source) {
-    if (window.isViewingPublicFavorites || !isUserLoggedIn()) {
-        if (!(await requireAdminForOpenWrite('删除公开收藏歌手'))) return;
+    
+    if (isDislike) {
+        window.dislikeLibraryData.artists = window.dislikeLibraryData.artists.filter(a => !window.libraryBatchSelected.has(String(a.id)));
+        // 立即刷新侧边栏数量，不等 loadLibraryData 的 500ms 回调
+        if (typeof refreshDislikeSidebarCount === 'function') refreshDislikeSidebarCount();
+        await saveDislikeLibraryArtists();
+        exitLibraryArtistBatch();
+        renderLibraryArtists(window.dislikeLibraryData.artists, true);
+        showSuccess('已取消不喜欢所选歌手');
+    } else {
+        window.libraryData.artists = window.libraryData.artists.filter(a => !window.libraryBatchSelected.has(String(a.id)));
+        await saveLibraryArtists();
+        exitLibraryArtistBatch();
+        renderLibraryArtists(window.libraryData.artists);
+        showSuccess('已删除所选歌手');
     }
-    window.libraryData.artists = window.libraryData.artists.filter(a => !(String(a.id) === String(id) && a.source === source));
-    await saveLibraryArtists();
-    renderLibraryArtists(window.libraryData.artists);
-    showInfo('已取消收藏');
+}
+async function removeLibraryArtist(id, source, isDislike = false) {
+    if (window.isViewingPublicFavorites || !isUserLoggedIn()) {
+        if (!(await requireAdminForOpenWrite(isDislike ? '删除公开不喜欢歌手' : '删除公开收藏歌手'))) return;
+    }
+    if (isDislike) {
+        window.dislikeLibraryData.artists = window.dislikeLibraryData.artists.filter(a => !(String(a.id) === String(id) && a.source === source));
+        await saveDislikeLibraryArtists();
+        renderLibraryArtists(window.dislikeLibraryData.artists, true);
+        showInfo('已取消不喜欢');
+    } else {
+        window.libraryData.artists = window.libraryData.artists.filter(a => !(String(a.id) === String(id) && a.source === source));
+        await saveLibraryArtists();
+        renderLibraryArtists(window.libraryData.artists);
+        showInfo('已取消收藏');
+    }
 }
 window.enterLibraryArtistBatch = enterLibraryArtistBatch;
 window.exitLibraryArtistBatch = exitLibraryArtistBatch;
@@ -8984,7 +9871,9 @@ function toggleLibAlbumBatchSelect(id) {
     updateLibAlbumBatchCount();
 }
 function libSelectAllAlbums() {
-    window.libraryData.albums.forEach(a => window.libraryBatchSelected.add(String(a.id)));
+    const isDislike = typeof getCurrentActiveListId === 'function' && getCurrentActiveListId() === 'dislike_albums';
+    const list = isDislike ? window.dislikeLibraryData.albums : window.libraryData.albums;
+    list.forEach(a => window.libraryBatchSelected.add(String(a.id)));
     document.querySelectorAll('#lib-album-grid .lib-batch-check').forEach(el => { el.classList.remove('hidden'); el.classList.add('flex'); });
     updateLibAlbumBatchCount();
 }
@@ -8999,25 +9888,44 @@ function updateLibAlbumBatchCount() {
 }
 async function libDeleteSelectedAlbums() {
     if (window.libraryBatchSelected.size === 0) { showInfo('请先选择要删除的专辑'); return; }
+    const isDislike = getCurrentActiveListId() === 'dislike_albums';
     if (window.isViewingPublicFavorites || !isUserLoggedIn()) {
-        if (!(await requireAdminForOpenWrite('删除公开收藏专辑'))) return;
+        if (!(await requireAdminForOpenWrite(isDislike ? '删除公开不喜欢专辑' : '删除公开收藏专辑'))) return;
     }
-    const confirmed = await showSelect('删除收藏专辑', `确定删除选中的 ${window.libraryBatchSelected.size} 张专辑吗？`, { danger: true });
+    const confirmed = await showSelect(isDislike ? '取消不喜欢专辑' : '删除收藏专辑', `确定${isDislike ? '取消不喜欢' : '删除'}选中的 ${window.libraryBatchSelected.size} 张专辑吗？`, { danger: true });
     if (!confirmed) return;
-    window.libraryData.albums = window.libraryData.albums.filter(a => !window.libraryBatchSelected.has(String(a.id)));
-    await saveLibraryAlbums();
-    exitLibraryAlbumBatch();
-    renderLibraryAlbums(window.libraryData.albums);
-    showSuccess('已删除所选专辑');
-}
-async function removeLibraryAlbum(id, source) {
-    if (window.isViewingPublicFavorites || !isUserLoggedIn()) {
-        if (!(await requireAdminForOpenWrite('删除公开收藏专辑'))) return;
+    
+    if (isDislike) {
+        window.dislikeLibraryData.albums = window.dislikeLibraryData.albums.filter(a => !window.libraryBatchSelected.has(String(a.id)));
+        // 立即刷新侧边栏数量，不等 loadLibraryData 的 500ms 回调
+        if (typeof refreshDislikeSidebarCount === 'function') refreshDislikeSidebarCount();
+        await saveDislikeLibraryAlbums();
+        exitLibraryAlbumBatch();
+        renderLibraryAlbums(window.dislikeLibraryData.albums, true);
+        showSuccess('已取消不喜欢所选专辑');
+    } else {
+        window.libraryData.albums = window.libraryData.albums.filter(a => !window.libraryBatchSelected.has(String(a.id)));
+        await saveLibraryAlbums();
+        exitLibraryAlbumBatch();
+        renderLibraryAlbums(window.libraryData.albums);
+        showSuccess('已删除所选专辑');
     }
-    window.libraryData.albums = window.libraryData.albums.filter(a => !(String(a.id) === String(id) && a.source === source));
-    await saveLibraryAlbums();
-    renderLibraryAlbums(window.libraryData.albums);
-    showInfo('已取消收藏');
+}
+async function removeLibraryAlbum(id, source, isDislike = false) {
+    if (window.isViewingPublicFavorites || !isUserLoggedIn()) {
+        if (!(await requireAdminForOpenWrite(isDislike ? '删除公开不喜欢专辑' : '删除公开收藏专辑'))) return;
+    }
+    if (isDislike) {
+        window.dislikeLibraryData.albums = window.dislikeLibraryData.albums.filter(a => !(String(a.id) === String(id) && a.source === source));
+        await saveDislikeLibraryAlbums();
+        renderLibraryAlbums(window.dislikeLibraryData.albums, true);
+        showInfo('已取消不喜欢');
+    } else {
+        window.libraryData.albums = window.libraryData.albums.filter(a => !(String(a.id) === String(id) && a.source === source));
+        await saveLibraryAlbums();
+        renderLibraryAlbums(window.libraryData.albums);
+        showInfo('已取消收藏');
+    }
 }
 
 window.enterLibraryAlbumBatch = enterLibraryAlbumBatch;
@@ -9800,7 +10708,7 @@ function buildPlaylistExport(listId, exportedAt = new Date().toISOString()) {
     if (listId === 'default') {
         playlist = { id: 'default', name: '默认列表', source: 'lxserver', list: currentListData.defaultList || [] };
     } else if (listId === 'love') {
-        playlist = { id: 'love', name: '我的收藏', source: 'lxserver', list: currentListData.loveList || [] };
+        playlist = { id: 'love', name: '我的喜爱', source: 'lxserver', list: currentListData.loveList || [] };
     } else {
         playlist = currentListData.userList?.find(item => item.id === listId);
     }
@@ -9903,6 +10811,7 @@ function initFavoriteSidebarSortable(container) {
     Sortable.create(container, {
         animation: 150,
         handle: '.favorite-sidebar-drag-handle',
+        filter: '.ignore-sort',
         ghostClass: 'opacity-50',
         chosenClass: 'bg-emerald-50',
         onEnd: () => {
@@ -9913,6 +10822,99 @@ function initFavoriteSidebarSortable(container) {
             persistUserListOrderFromSidebar(ids);
         }
     });
+}
+
+// 侧边栏歌单名称跑马灯：悬浮 或 被选中（active-sub-item）且文字溢出时，从右到左匀速滚动
+if (!window._sidebarMarqueeBound) {
+    window._sidebarMarqueeBound = true;
+
+    // 为一个 item 建立/启动跑马灯结构（幂等，全局暴露供选中时直接调用）
+    window._applySidebarMarquee = function(item) {
+        if (!item || item.classList.contains('is-marquee-active')) return;
+        const wrap = item.querySelector('.playlist-name-wrapper');
+        const text = item.querySelector('.playlist-name-text');
+        if (!wrap || !text) return;
+        if (text.scrollWidth <= wrap.clientWidth) return; // 未溢出则跳过
+
+        let track = wrap.querySelector('.playlist-name-track');
+        let copy  = wrap.querySelector('.playlist-name-copy');
+        if (!track) {
+            track = document.createElement('div');
+            track.className = 'playlist-name-track flex items-center min-w-0 w-full';
+            copy = document.createElement('span');
+            copy.className = 'playlist-name-copy select-none flex-shrink-0';
+            copy.textContent = text.textContent;
+            wrap.replaceChildren(track);
+            track.appendChild(text);
+            track.appendChild(copy);
+        } else if (copy && copy.textContent !== text.textContent) {
+            copy.textContent = text.textContent;
+        }
+        const duration = Math.max(4, Math.min(18, (text.scrollWidth + 32) / 28));
+        item.style.setProperty('--sidebar-marquee-duration', `${duration.toFixed(1)}s`);
+        item.classList.add('is-marquee-active');
+    };
+
+    // 停止 marquee 并还原 DOM 结构（移除 copy span，把 text 移回 wrapper）
+    window._resetSidebarMarquee = (item) => {
+        item.classList.remove('is-marquee-active');
+        const wrap = item.querySelector('.playlist-name-wrapper');
+        const track = wrap?.querySelector('.playlist-name-track');
+        if (!track) return;
+        const text = track.querySelector('.playlist-name-text');
+        if (text) {
+            // 恢复 text span 原始样式（被 marquee 改写过的 !important 通过 class 控制，移除 is-marquee-active 即可）
+            wrap.replaceChildren(text);
+        } else {
+            wrap.innerHTML = '';
+        }
+    };
+
+    // 悬浮进入
+    document.addEventListener('mouseover', (e) => {
+        const item = e.target.closest?.('.playlist-sidebar-item');
+        if (!item || (e.relatedTarget && item.contains(e.relatedTarget))) return;
+        requestAnimationFrame(() => {
+            if (!item.matches(':hover')) return;
+            window._applySidebarMarquee(item);
+        });
+    });
+
+    // 悬浮离开：若仍被选中则保持滚动，否则停止并还原 DOM
+    document.addEventListener('mouseout', (e) => {
+        const item = e.target.closest?.('.playlist-sidebar-item');
+        if (!item || (e.relatedTarget && item.contains(e.relatedTarget))) return;
+        if (!item.classList.contains('active-sub-item')) {
+            window._resetSidebarMarquee(item);
+        }
+    });
+
+    // 滚动时浏览器不触发 mouseout，is-marquee-active 会粘住 → 强制清理
+    let _sidebarScrollTimer = null;
+    const _clearStaleMarquee = () => {
+        document.querySelectorAll('.playlist-sidebar-item.is-marquee-active:not(.active-sub-item)').forEach(el => {
+            if (!el.matches(':hover')) window._resetSidebarMarquee(el);
+        });
+    };
+    // 暴露为全局方法，供外部（active-sub-item 切换等）调用
+    window._clearSidebarStaleMarquee = _clearStaleMarquee;
+
+    // 侧边栏点击任意项时清理：点击切换歌单不触发 mouseout，旧 marquee 的 copy DOM 会残留
+    document.addEventListener('click', (e) => {
+        if (e.target.closest?.('[data-sidebar-list-id]')) {
+            setTimeout(_clearStaleMarquee, 0);
+        }
+    }, { capture: true });
+
+    const _sidebarScrollTarget = document.getElementById('my-lists-container')?.closest('[class*="overflow"]') ||
+                                  document.getElementById('my-lists-container')?.parentElement;
+    if (_sidebarScrollTarget) {
+        _sidebarScrollTarget.addEventListener('scroll', () => {
+            clearTimeout(_sidebarScrollTimer);
+            _clearStaleMarquee();
+            _sidebarScrollTimer = setTimeout(_clearStaleMarquee, 150);
+        }, { passive: true });
+    }
 }
 
 function renderMyLists(data) {
@@ -9929,46 +10931,60 @@ function renderMyLists(data) {
     const createItem = (listObj, name, icon, count) => {
         const id = typeof listObj === 'string' ? listObj : listObj.id;
         const displayName = String(name || '未命名歌单');
+        const safeName = escapeHtmlText(displayName);
         const div = document.createElement('div');
-        div.className = "px-6 py-2 text-sm t-text-muted hover:t-bg-main cursor-pointer flex items-center group transition-colors overflow-hidden";
+        div.className = "playlist-sidebar-item text-sm t-text-muted hover:t-bg-main cursor-pointer flex items-center group select-none";
         div.setAttribute('data-sidebar-list-id', id);
         div.setAttribute('data-sidebar-sort-id', id);
         div.onclick = () => handleListClick(id);
 
-        // Use createMarqueeHtml for list name
-        const nameHtml = displayName.length > 8
-            ? createMarqueeHtml(displayName, 'flex-1')
-            : `<span class="ml-2 flex-1 truncate">${escapeHtmlText(displayName)}</span>`;
-
         // Buttons logic (for collected external playlists)
         const showExternalOps = listObj && listObj.sourceListId && listObj.source;
-        let opsHtml = '';
+        let extOpsHtml = '';
+        const updateBadge = showExternalOps && window.networkListUpdateMap && window.networkListUpdateMap.has(id)
+            ? `<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex-shrink-0" title="歌单有更新">!</span>`
+            : '';
         if (showExternalOps) {
-            const updateBadge = window.networkListUpdateMap && window.networkListUpdateMap.has(id)
-                ? `<span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-bold mr-2" title="歌单有更新">!</span>`
-                : '';
-            opsHtml = `
-                <i class="fas fa-sync-alt refresh-btn text-gray-400 hover:text-emerald-500 hidden group-hover:block flex-shrink-0 text-[10px] mr-2 transition-all active:rotate-180" 
+            extOpsHtml = `
+                <button type="button" class="action-btn refresh-btn flex-shrink-0" 
                    title="更新歌单内容" 
-                   onclick="event.stopPropagation(); handleRefreshList('${id}', event)"></i>
-                <i class="fas fa-external-link-alt jump-btn text-gray-400 hover:text-emerald-500 hidden group-hover:block flex-shrink-0 text-[10px] mr-2 transition-all" 
+                   onclick="event.stopPropagation(); handleRefreshList('${id}', event)">
+                    <i class="fas fa-sync-alt text-[10px]"></i>
+                </button>
+                <button type="button" class="action-btn jump-btn flex-shrink-0" 
                    title="打开原始歌单" 
-                   onclick="event.stopPropagation(); handleJumpToOriginalList('${id}', event)"></i>
-                ${updateBadge}
+                   onclick="event.stopPropagation(); handleJumpToOriginalList('${id}', event)">
+                    <i class="fas fa-external-link-alt text-[10px]"></i>
+                </button>
             `;
         }
 
         div.innerHTML = `
-            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/60 hover:text-emerald-500 mr-2 flex-shrink-0 touch-none" title="拖拽排序">
+            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/50 hover:text-emerald-500 mr-1.5 flex-shrink-0 touch-none flex items-center" title="拖拽排序">
                 <i class="fas fa-grip-vertical text-xs"></i>
             </span>
-            ${opsHtml}
-            <i class="fas ${icon} w-5 t-text-muted group-hover:text-emerald-500 transition-colors flex-shrink-0"></i>
-            ${displayName.length > 8 ? `<div class="ml-2 flex-1 overflow-hidden">${nameHtml}</div>` : nameHtml}
-            <span class="text-xs text-gray-300 group-hover:t-text-muted mr-2 flex-shrink-0">${count}</span>
-            <button type="button" class="text-gray-300 hover:text-emerald-500 flex-shrink-0 mr-2 transition-colors" title="导出歌单到本地" aria-label="导出歌单到本地" onclick="exportPlaylistToLocal('${id}', event)"><i class="fas fa-download text-[10px]"></i></button>
-            ${typeof listObj !== 'string' ? `<button type="button" class="text-gray-300 hover:text-emerald-500 flex-shrink-0 mr-2 transition-colors" title="重命名歌单" aria-label="重命名歌单" onclick="handleRenameList('${id}', event)"><i class="fas fa-pen text-[10px]"></i></button>` : ''}
-            ${id !== 'default' && id !== 'love' ? `<i class="fas fa-trash text-gray-300 hover:text-red-500 hidden group-hover:block flex-shrink-0" onclick="handleRemoveList('${id}', event)"></i>` : ''}
+            <i class="fas ${icon} w-5 text-center t-text-muted sidebar-item-icon flex-shrink-0"></i>
+            <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden" title="${safeName}">
+                <span class="playlist-name-text truncate block w-full select-none">${safeName}</span>
+            </div>
+            <div class="flex items-center flex-shrink-0 ml-1">
+                ${updateBadge}
+                <span class="text-xs text-gray-400 group-hover:t-text-muted transition-colors mr-1 sidebar-item-count">${count}</span>
+                <div class="sidebar-item-actions items-center gap-[1px]">
+                    ${extOpsHtml}
+                    <button type="button" class="action-btn flex-shrink-0" title="导出歌单到本地" aria-label="导出歌单到本地" onclick="exportPlaylistToLocal('${id}', event)">
+                        <i class="fas fa-download text-[10px]"></i>
+                    </button>
+                    ${typeof listObj !== 'string' ? `
+                    <button type="button" class="action-btn flex-shrink-0" title="重命名歌单" aria-label="重命名歌单" onclick="handleRenameList('${id}', event)">
+                        <i class="fas fa-pen text-[10px]"></i>
+                    </button>` : ''}
+                    ${id !== 'default' && id !== 'love' ? `
+                    <button type="button" class="action-btn delete-btn flex-shrink-0" title="删除歌单" aria-label="删除歌单" onclick="handleRemoveList('${id}', event)">
+                        <i class="fas fa-trash text-[10px]"></i>
+                    </button>` : ''}
+                </div>
+            </div>
         `;
         return div;
     };
@@ -9976,17 +10992,19 @@ function renderMyLists(data) {
     // ---- 常驻：收藏歌手 / 收藏专辑 ----
     const createLibItem = (id, name, icon, countId, clickFn) => {
         const div = document.createElement('div');
-        div.className = "px-6 py-2 text-sm t-text-muted hover:t-bg-main cursor-pointer flex items-center group transition-colors overflow-hidden";
+        div.className = "playlist-sidebar-item text-sm t-text-muted hover:t-bg-main cursor-pointer flex items-center group select-none";
         div.setAttribute('data-sidebar-list-id', id);
         div.setAttribute('data-sidebar-sort-id', id);
         div.onclick = clickFn;
         div.innerHTML = `
-            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/60 hover:text-emerald-500 mr-2 flex-shrink-0 touch-none" title="拖拽排序">
+            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/50 hover:text-emerald-500 mr-1.5 flex-shrink-0 touch-none flex items-center" title="拖拽排序">
                 <i class="fas fa-grip-vertical text-xs"></i>
             </span>
-            <i class="fas ${icon} w-5 t-text-muted group-hover:text-emerald-500 transition-colors flex-shrink-0"></i>
-            <span class="ml-2 flex-1 truncate">${name}</span>
-            <span id="${countId}" class="text-xs text-gray-300 group-hover:t-text-muted mr-2 flex-shrink-0">0</span>
+            <i class="fas ${icon} w-5 text-center t-text-muted sidebar-item-icon flex-shrink-0"></i>
+            <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden" title="${name}">
+                <span class="playlist-name-text truncate block w-full select-none">${name}</span>
+            </div>
+            <span id="${countId}" class="text-xs text-gray-400 group-hover:t-text-muted mr-1 flex-shrink-0 transition-colors">0</span>
         `;
         return div;
     };
@@ -9999,17 +11017,19 @@ function renderMyLists(data) {
     if (enablePublicFavorites && isUserLoggedIn) {
         const isPublicActive = window.isViewingPublicFavorites === true;
         const publicFavItem = document.createElement('div');
-        publicFavItem.className = `px-6 py-2 text-sm cursor-pointer flex items-center group transition-colors overflow-hidden ${isPublicActive ? 'text-emerald-500 font-bold bg-emerald-500/10' : 't-text-muted hover:t-bg-main'}`;
+        publicFavItem.className = `playlist-sidebar-item text-sm cursor-pointer flex items-center group select-none ${isPublicActive ? 'text-emerald-500 font-bold bg-emerald-500/10' : 't-text-muted hover:t-bg-main'}`;
         publicFavItem.setAttribute('data-sidebar-list-id', '__public_favorites__');
         publicFavItem.setAttribute('data-sidebar-sort-id', '__public_favorites__');
         publicFavItem.onclick = () => handleTogglePublicFavorites();
         publicFavItem.innerHTML = `
-            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/60 hover:text-emerald-500 mr-2 flex-shrink-0 touch-none" title="拖拽排序">
+            <span class="favorite-sidebar-drag-handle cursor-grab t-text-muted/50 hover:text-emerald-500 mr-1.5 flex-shrink-0 touch-none flex items-center" title="拖拽排序">
                 <i class="fas fa-grip-vertical text-xs"></i>
             </span>
-            <i class="fas fa-globe w-5 ${isPublicActive ? 'text-emerald-500' : 't-text-muted group-hover:text-emerald-500'} transition-colors flex-shrink-0"></i>
-            <span class="ml-2 flex-1 truncate">公开收藏</span>
-            <span class="text-[10px] px-1.5 py-0.5 rounded-full ${isPublicActive ? 'bg-emerald-500 text-white font-bold' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}">${isPublicActive ? '已开启' : '切换'}</span>
+            <i class="fas fa-globe w-5 text-center ${isPublicActive ? 'text-emerald-500' : 't-text-muted'} sidebar-item-icon flex-shrink-0"></i>
+            <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden" title="公开收藏">
+                <span class="playlist-name-text truncate block w-full select-none">公开收藏</span>
+            </div>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full ${isPublicActive ? 'bg-emerald-500 text-white font-bold' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'} flex-shrink-0">${isPublicActive ? '已开启' : '切换'}</span>
         `;
         sidebarItems.push({ id: '__public_favorites__', type: 'system', el: publicFavItem });
     }
@@ -10023,7 +11043,8 @@ function renderMyLists(data) {
         sidebarItems.push({ id: 'default', type: 'system', el: createItem('default', '默认列表', 'fa-list', data.defaultList.length) });
     }
     if (data.loveList) {
-        sidebarItems.push({ id: 'love', type: 'system', el: createItem('love', '我的收藏', 'fa-heart', data.loveList.length) });
+        // 内层 ♥ 喜爱列表，命名为「我的喜爱」以与外层「我的收藏」折叠面板区分
+        sidebarItems.push({ id: 'love', type: 'system', el: createItem('love', '我的喜爱', 'fa-heart', data.loveList.length) });
     }
     if (data.userList) {
         data.userList.forEach(l => {
@@ -10033,6 +11054,8 @@ function renderMyLists(data) {
     }
 
     getOrderedFavoriteSidebarItems(sidebarItems).forEach(item => container.appendChild(item.el));
+
+    // Removed old dislike injection
     refreshLibrarySidebarCount();
     initFavoriteSidebarSortable(container);
     refreshFavoritesChildrenHeight();
@@ -10081,7 +11104,10 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
         title = '默认列表';
     } else if (listId === 'love') {
         list = currentListData.loveList;
-        title = '我的收藏';
+        title = '我的喜爱';
+    } else if (listId === 'dislike_songs') {
+        list = window.DislikeManager?.state.dislikeList || [];
+        title = '不喜欢歌曲';
     } else {
         const uList = currentListData.userList.find(l => l.id === listId);
         if (uList) {
@@ -10119,21 +11145,35 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
         el.classList.remove('active-tab', 'text-emerald-600');
         el.classList.add('t-text-muted');
     });
-    const favTab = document.getElementById('tab-favorites');
-    if (favTab) {
-        favTab.classList.add('active-tab');
-        favTab.classList.remove('t-text-muted');
+    
+    if (listId === 'dislike_songs') {
+        const favTab = document.getElementById('tab-favorites');
+        if (favTab) {
+            favTab.classList.add('active-tab');
+            favTab.classList.remove('t-text-muted');
+        }
+    } else {
+        const favTab = document.getElementById('tab-favorites');
+        if (favTab) {
+            favTab.classList.add('active-tab');
+            favTab.classList.remove('t-text-muted');
+        }
     }
 
     // Highlight Child List
     document.querySelectorAll('[data-sidebar-list-id]').forEach(el => {
         el.classList.remove('active-sub-item');
         el.classList.add('t-text-muted');
+        // 还原 marquee DOM（移除 copy span 和 track 包裹层）
+        window._resetSidebarMarquee?.(el);
     });
+
     const subItem = document.querySelector(`[data-sidebar-list-id="${listId}"]`);
     if (subItem) {
         subItem.classList.add('active-sub-item');
         subItem.classList.remove('t-text-muted');
+        // 选中后等一帧让布局稳定，再检测是否溢出并启动跑马灯
+        requestAnimationFrame(() => window._applySidebarMarquee?.(subItem));
     }
 
     // Render
@@ -10143,15 +11183,129 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
     }
     renderResults(list);
 
+    // 用户已查看该歌单：清除该歌单的红点提示（本地 + 服务端记录）
+    const hadServerUpdate = window.networkListUpdateMap && window.networkListUpdateMap.has(listId);
+    if (hadServerUpdate) {
+        window.networkListUpdateMap.delete(listId);
+        // 通知服务端移除红点
+        fetch(`${API_BASE}/tasks/user-data?task=network_list_autocheck`, {
+            method: 'POST',
+            headers: getUserAuthHeaders(),
+            body: JSON.stringify({ listId })
+        }).catch(e => console.warn('[Scheduler] 清除红点标记失败:', e));
+
+        // 刷新左侧栏红点显示
+        const targetBadge = subItem?.querySelector('span.bg-rose-500');
+        if (targetBadge) {
+            targetBadge.remove();
+        }
+    }
+
     // [New] Auto Update Logic: If it's a network playlist (has sourceListId) and setting is ON, refresh background
+    // 注意：如果服务端已自动更新过（hadServerUpdate），数据已是最新，不再触发客户端拉取
+    // 客户端 handleRefreshList 只拉第 1 页，若本地是多页全量则会覆盖为截断数据，导致下次误判"有更新"
     const uList = currentListData.userList ? currentListData.userList.find(l => l.id === listId) : null;
-    if (!skipAutoUpdate && settings.autoUpdateNetworkList && uList && uList.sourceListId && uList.source) {
+    if (!skipAutoUpdate && settings.autoUpdateNetworkList && !hadServerUpdate && uList && uList.sourceListId && uList.source) {
         console.log('[AutoUpdate] Triggering background refresh for list:', listId);
         handleRefreshList(listId, null, true); // true means silent/no-confirm
+    }
+
+
+}
+
+/**
+ * handleRefreshList: 刷新网络歌单
+ * - 手动模式 (silent=false): 拉取全部页，有变化才覆盖，显示 toast
+ * - 静默自动模式 (silent=true): 拉取全部页，先与本地比较，有变化才覆盖（避免无意义 snapshot）
+ */
+async function handleRefreshList(listId, event, silent = false) {
+    if (event) event.stopPropagation();
+    if (!currentListData) return;
+
+    const list = currentListData.userList.find(l => l.id === listId);
+    if (!list || !list.sourceListId || !list.source) {
+        if (!silent && window.showToast) window.showToast('info', '该歌单不支持在线刷新');
+        return;
+    }
+
+    if (!silent) {
+        const safeListName = escapeHtmlText(list.name || list.id || list.sourceListId || '');
+        const confirmed = await showSelect('更新歌单', `是否更新当前歌单 "${safeListName}"？\n(确认后将重新从服务器拉取歌单并覆盖当前内容)`, {
+            confirmText: '确定更新',
+            confirmColor: 'bg-emerald-500'
+        });
+        if (!confirmed) return;
+        if (window.showToast) window.showToast('info', '正在同步最新歌单内容...');
+    }
+
+    try {
+        const formatItem = (s) => {
+            const item = formatSongToLxMusicStandard(s);
+            if (!item.source) item.source = list.source;
+            return item;
+        };
+
+        // 拉取第 1 页
+        const res = await fetch(`${API_BASE}/songList/detail?source=${encodeURIComponent(list.source)}&id=${encodeURIComponent(list.sourceListId)}&page=1`);
+        const data = await res.json();
+        if (!data || !data.list) throw new Error('数据拉取失败');
+
+        let newList = data.list.map(formatItem);
+
+        // 拉取全部剩余页（修复原来只拉第 1 页导致覆盖截断的问题）
+        const total = data.total ?? data.list.length;
+        const pageSize = data.list.length || 1;
+        const totalPages = Math.ceil(total / pageSize);
+        for (let page = 2; page <= totalPages; page++) {
+            try {
+                const pageRes = await fetch(`${API_BASE}/songList/detail?source=${encodeURIComponent(list.source)}&id=${encodeURIComponent(list.sourceListId)}&page=${page}`);
+                const pageData = await pageRes.json();
+                if (pageData && Array.isArray(pageData.list) && pageData.list.length > 0) {
+                    newList = newList.concat(pageData.list.map(formatItem));
+                } else {
+                    break;
+                }
+            } catch { break; }
+        }
+
+        // 比较本地与远端是否一致（顺序无关）
+        const normalizeIds = (arr) => arr.map(s => String(s.id || s.songmid || '').trim()).sort().join('|');
+        const localList = Array.isArray(list.list) ? list.list : [];
+        const hasChanges = normalizeIds(localList) !== normalizeIds(newList);
+
+        if (!hasChanges) {
+            if (!silent && window.showToast) window.showToast('info', '歌单内容已是最新，无需同步');
+            return;
+        }
+
+        // 有变化：更新列表模型
+        list.list = newList;
+        if (data.info) {
+            if (data.info.name) list.name = data.info.name;
+            if (data.info.img || data.info.pic) list.Album = data.info.img || data.info.pic;
+        }
+
+        // 手动刷新等同于已查看，清除红点
+        if (window.networkListUpdateMap) {
+            window.networkListUpdateMap.delete(listId);
+        }
+
+        await pushDataChange();
+        renderMyLists(currentListData);
+
+        if (window.currentViewingListId === listId) {
+            handleListClick(listId, true); // skipAutoUpdate=true 避免递归
+        }
+
+        if (!silent && window.showToast) window.showToast('success', '歌单内容已同步至最新状态');
+    } catch (e) {
+        console.error('[Refresh] Failed:', e);
+        if (!silent && window.showToast) window.showToast('error', '歌单同步失败: ' + e.message);
     }
 }
 
 function handleFavoritesClick() {
+
     exitListSecondaryModes();
 
     // Highlight Header
@@ -10166,6 +11320,126 @@ function handleFavoritesClick() {
     }
 
     toggleFavorites();
+}
+
+function handleDislikeFolderClick() {
+    exitListSecondaryModes();
+    const children = document.getElementById('dislike-children');
+    const arrow = document.getElementById('dislike-arrow');
+    
+    // Highlight Header
+    document.querySelectorAll('[id^="tab-"]').forEach(el => {
+        el.classList.remove('active-tab', 'text-emerald-600');
+        el.classList.add('t-text-muted');
+    });
+    const favTab = document.getElementById('tab-favorites');
+    if (favTab) {
+        favTab.classList.add('active-tab');
+        favTab.classList.remove('t-text-muted');
+    }
+
+    if (children.classList.contains('hidden') || children.style.height === '0px') {
+        children.classList.remove('hidden');
+        children.style.height = 'auto';
+        const targetHeight = children.scrollHeight;
+        children.style.height = '0px';
+        requestAnimationFrame(() => {
+            children.style.height = targetHeight + 'px';
+            setTimeout(refreshFavoritesChildrenHeight, 300);
+        });
+        arrow.classList.add('rotate-90');
+        // Auto select dislike songs when opening
+        handleDislikeSongsClick();
+    } else {
+        children.style.height = '0px';
+        setTimeout(() => {
+            children.classList.add('hidden');
+            refreshFavoritesChildrenHeight();
+        }, 300);
+        arrow.classList.remove('rotate-90');
+    }
+}
+
+function handleDislikeSongsClick() {
+    handleListClick('dislike_songs');
+}
+
+function handleDislikeArtistsClick() {
+    exitListSecondaryModes();
+    window.currentViewingListId = 'dislike_artists';
+    currentSearchScope = 'local_list';
+    
+    // Highlight Header
+    document.querySelectorAll('[id^="tab-"]').forEach(el => {
+        el.classList.remove('active-tab', 'text-emerald-600');
+        el.classList.add('t-text-muted');
+    });
+    const favTab = document.getElementById('tab-favorites');
+    if (favTab) {
+        favTab.classList.add('active-tab');
+        favTab.classList.remove('t-text-muted');
+    }
+
+    document.querySelectorAll('[data-sidebar-list-id]').forEach(el => {
+        el.classList.remove('active-sub-item', 'is-marquee-active');
+        el.classList.add('t-text-muted');
+    });
+    const item = document.querySelector(`[data-sidebar-list-id="dislike_artists"]`);
+    if (item) {
+        item.classList.add('active-sub-item');
+        item.classList.remove('t-text-muted');
+        requestAnimationFrame(() => window._applySidebarMarquee?.(item));
+    }
+
+    if (window.innerWidth < 1025) {
+        const sidebar = document.getElementById('main-sidebar');
+        if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
+            toggleSidebar();
+        }
+    }
+
+    if (typeof renderLibraryArtists === 'function') {
+        renderLibraryArtists(window.dislikeLibraryData.artists, true); // pass flag for dislike
+    }
+}
+
+function handleDislikeAlbumsClick() {
+    exitListSecondaryModes();
+    window.currentViewingListId = 'dislike_albums';
+    currentSearchScope = 'local_list';
+    
+    // Highlight Header
+    document.querySelectorAll('[id^="tab-"]').forEach(el => {
+        el.classList.remove('active-tab', 'text-emerald-600');
+        el.classList.add('t-text-muted');
+    });
+    const favTab = document.getElementById('tab-favorites');
+    if (favTab) {
+        favTab.classList.add('active-tab');
+        favTab.classList.remove('t-text-muted');
+    }
+
+    document.querySelectorAll('[data-sidebar-list-id]').forEach(el => {
+        el.classList.remove('active-sub-item', 'is-marquee-active');
+        el.classList.add('t-text-muted');
+    });
+    const item = document.querySelector(`[data-sidebar-list-id="dislike_albums"]`);
+    if (item) {
+        item.classList.add('active-sub-item');
+        item.classList.remove('t-text-muted');
+        requestAnimationFrame(() => window._applySidebarMarquee?.(item));
+    }
+
+    if (window.innerWidth < 1025) {
+        const sidebar = document.getElementById('main-sidebar');
+        if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
+            toggleSidebar();
+        }
+    }
+
+    if (typeof renderLibraryAlbums === 'function') {
+        renderLibraryAlbums(window.dislikeLibraryData.albums, true);
+    }
 }
 
 async function handleCreateList() {
@@ -10431,69 +11705,6 @@ async function toggleLove() {
     await pushDataChange(activeListData);
 }
 
-async function handleRefreshList(listId, event, silent = false) {
-    if (event) event.stopPropagation();
-    if (!currentListData) return;
-
-    const list = currentListData.userList.find(l => l.id === listId);
-    if (!list || !list.sourceListId || !list.source) {
-        if (!silent && window.showToast) window.showToast('info', '该歌单不支持在线刷新');
-        return;
-    }
-
-    if (!silent) {
-        const safeListName = escapeHtmlText(list.name || list.id || list.sourceListId || '');
-        const confirmed = await showSelect('更新歌单', `是否更新当前歌单 "${safeListName}"？\n(确认后将重新从服务器拉取歌单并覆盖当前内容)`, {
-            confirmText: '确定更新',
-            confirmColor: 'bg-emerald-500'
-        });
-
-        if (!confirmed) return;
-    }
-
-    if (window.showToast) window.showToast('info', '正在同步最新歌单内容...');
-
-    try {
-        const url = `${API_BASE}/songList/detail?source=${encodeURIComponent(list.source)}&id=${encodeURIComponent(list.sourceListId)}&page=1`;
-        const res = await fetch(url);
-        const data = await res.json();
-
-        if (!data || !data.list) throw new Error('数据拉取失败');
-
-        // 格式化新歌曲列表
-        const newList = data.list.map(s => {
-            const item = formatSongToLxMusicStandard(s);
-            if (!item.source) item.source = list.source;
-            return item;
-        });
-
-        // 更新列表模型
-        list.list = newList;
-        if (data.info) {
-            if (data.info.name) list.name = data.info.name;
-            if (data.info.img || data.info.pic) list.Album = data.info.img || data.info.pic;
-        }
-
-        // 清除该列表的更新标记
-        if (window.networkListUpdateMap) {
-            window.networkListUpdateMap.delete(listId);
-        }
-
-        // 推送同步并重绘 UI
-        await pushDataChange();
-        renderMyLists(currentListData);
-
-        // 如果当前正处于该列表视图，刷新结果列表显示
-        if (window.currentViewingListId === listId) {
-            handleListClick(listId, true); // Skip auto-update to avoid loop
-        }
-
-        if (window.showToast) window.showToast('success', '歌单内容已同步至最新状态');
-    } catch (e) {
-        console.error('[Refresh] Failed:', e);
-        if (window.showToast) window.showToast('error', '歌单同步失败: ' + e.message);
-    }
-}
 
 async function handleJumpToOriginalList(listId, event) {
     if (event) event.stopPropagation();
@@ -11773,7 +12984,7 @@ function renderPlaylistAddGrid() {
     // 1. My Love
     const loveList = activeListData.loveList || [];
     const isLoved = !isBatch && targetId && loveList.some(s => s.id === targetId);
-    listContainer.appendChild(createGridItem('love', '我的收藏', loveList.length, isLoved));
+    listContainer.appendChild(createGridItem('love', '我的喜爱', loveList.length, isLoved));
 
     // 2. User Lists
     if (activeListData.userList) {

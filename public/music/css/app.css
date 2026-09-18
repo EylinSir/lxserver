@@ -35,20 +35,257 @@
     color: var(--c-600) !important;
 }
 
-/* 选中状态下，侧边栏操作按钮（刷新、跳转）始终可见，适配移动端 */
-.active-sub-item .refresh-btn,
-.active-sub-item .jump-btn {
-    display: block !important;
+/* ==========================================================================
+   侧边栏歌单项：丝滑动滑动效（动态放大缩小、悬浮变宽占满bar空间）
+   ========================================================================== */
+.playlist-sidebar-item {
+    position: relative;
+    margin: 2px 4px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    user-select: none;
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                margin 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                padding 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                background-color 0.18s ease,
+                box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    transform-origin: center left;
+    will-change: transform, margin, padding;
+}
+
+/* 鼠标悬浮：丝滑放大、向两侧自然扩展变宽、充分利用侧边栏空间、浮雕微光影 */
+.playlist-sidebar-item:hover {
+    margin-left: 1px;
+    margin-right: 1px;
+    padding-left: 9px;
+    padding-right: 7px;
+    transform: scale(1.02);
+    z-index: 10;
+    box-shadow: 0 4px 14px -2px rgba(0, 0, 0, 0.1), 0 0 0 1px color-mix(in srgb, var(--c-500) 22%, transparent);
+}
+
+:root[data-appearance="dark"] .playlist-sidebar-item:hover {
+    box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.45), 0 0 0 1px color-mix(in srgb, var(--c-500) 28%, transparent);
+}
+
+/* 选中高亮状态 */
+.playlist-sidebar-item.active-sub-item {
+    background-color: color-mix(in srgb, var(--c-500) 14%, transparent) !important;
+    color: var(--c-600) !important;
+    font-weight: 500;
+}
+
+:root[data-appearance="dark"] .playlist-sidebar-item.active-sub-item {
+    background-color: color-mix(in srgb, var(--c-500) 20%, transparent) !important;
+}
+
+/* 拖拽排序时抑制放大，避免动画重叠抖动 */
+.sortable-ghost,
+.sortable-chosen {
+    transform: none !important;
+}
+
+/* 拖拽手柄紧凑微调 */
+.playlist-sidebar-item .favorite-sidebar-drag-handle {
+    margin-right: 5px;
+}
+
+/* 图标微悬浮动效 */
+.playlist-sidebar-item .sidebar-item-icon {
+    width: 1.15rem;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s ease;
+}
+
+.playlist-sidebar-item:hover .sidebar-item-icon {
+    transform: scale(1.12);
+    color: var(--c-500);
+}
+
+/* 侧边栏歌曲数量微调 */
+.playlist-sidebar-item .sidebar-item-count {
+    margin-right: 3px;
+    font-size: 11.5px;
+}
+
+/* 歌单名称无缝从右到左匀速跑马灯：仅在鼠标悬浮且溢出时触发，移出立即停止并复位 */
+.playlist-sidebar-item .playlist-name-track {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    width: 100%;
+}
+
+.playlist-sidebar-item.is-marquee-active .playlist-name-wrapper {
+    mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
+}
+
+.playlist-sidebar-item.is-marquee-active .playlist-name-track {
+    display: inline-flex !important;
+    width: max-content !important;
+    animation: sidebar-name-marquee var(--sidebar-marquee-duration, 8s) linear infinite;
+    animation-delay: 0.35s;
+    will-change: transform;
+}
+
+.playlist-sidebar-item.is-marquee-active .playlist-name-text {
+    display: inline-block !important;
+    width: max-content !important;
+    max-width: none !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+    padding-right: 2rem !important;
+    flex-shrink: 0;
+}
+
+.playlist-sidebar-item.is-marquee-active .playlist-name-copy {
+    display: inline-block !important;
+    width: max-content !important;
+    white-space: nowrap !important;
+    padding-right: 2rem !important;
+    flex-shrink: 0;
+}
+
+@keyframes sidebar-name-marquee {
+    0% {
+        transform: translateX(0);
+    }
+
+    100% {
+        transform: translateX(-50%);
+    }
+}
+
+/* 侧边栏操作按钮组：仅悬浮或选中时展示，紧凑精致 */
+.playlist-sidebar-item .sidebar-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 1.5px;
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: max-width 0.15s ease, opacity 0.12s ease;
+}
+
+.playlist-sidebar-item:hover .sidebar-item-actions,
+.playlist-sidebar-item.active-sub-item .sidebar-item-actions {
+    max-width: 200px;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.playlist-sidebar-item .action-btn {
+    width: 19px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    color: #9ca3af;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.playlist-sidebar-item .action-btn i {
+    font-size: 10px;
+}
+
+.playlist-sidebar-item .action-btn:hover {
+    background-color: color-mix(in srgb, var(--c-500) 18%, transparent);
+    color: var(--c-500) !important;
+    transform: scale(1.15);
+}
+
+.playlist-sidebar-item .action-btn:active {
+    transform: scale(0.95);
+}
+
+.playlist-sidebar-item .action-btn.delete-btn:hover {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #ef4444 !important;
+}
+.playlist-sidebar-item .action-btn.delete-btn:hover i {
+    color: #ef4444 !important;
 }
 
 .active-sub-item i {
     color: var(--c-600) !important;
 }
 
-.active-option {
-    background-color: var(--c-500) !important;
-    color: white !important;
-    box-shadow: 0 4px 12px var(--c-200);
+.active-sub-item .sidebar-item-actions .action-btn i {
+    color: #9ca3af !important;
+}
+
+.active-sub-item .sidebar-item-actions .action-btn:hover i {
+    color: var(--c-500) !important;
+}
+
+.active-sub-item .sidebar-item-actions .action-btn.delete-btn:hover i {
+    color: #ef4444 !important;
+}
+
+/* ==========================================================================
+   移动端专属紧凑布局：图标更靠近、间距缩小，充分留出歌单名称空间
+   ========================================================================== */
+@media (max-width: 767px) {
+    .playlist-sidebar-item {
+        margin: 2px !important;
+        padding: 5px 6px !important;
+    }
+
+    /* 左侧手柄与图标更靠近 */
+    .playlist-sidebar-item .favorite-sidebar-drag-handle {
+        margin-right: 3px !important;
+    }
+
+    .playlist-sidebar-item .favorite-sidebar-drag-handle i {
+        font-size: 10px !important;
+    }
+
+    .playlist-sidebar-item .sidebar-item-icon {
+        width: 1rem !important;
+    }
+
+    .playlist-sidebar-item > div.overflow-hidden {
+        margin-left: 4px !important;
+    }
+
+    /* 右侧歌曲计数紧凑靠拢 */
+    .playlist-sidebar-item .sidebar-item-count {
+        margin-right: 2px !important;
+        font-size: 10.5px !important;
+    }
+
+    /* 右侧操作按钮间距极大缩小、彼此紧密靠近 */
+    .playlist-sidebar-item .sidebar-item-actions {
+        gap: 1px !important;
+        max-width: 0;
+        opacity: 0;
+    }
+
+    .playlist-sidebar-item:hover .sidebar-item-actions,
+    .playlist-sidebar-item.active-sub-item .sidebar-item-actions {
+        max-width: 150px !important;
+        opacity: 1 !important;
+    }
+
+    .playlist-sidebar-item .action-btn {
+        width: 17px !important;
+        height: 20px !important;
+        padding: 0 !important;
+    }
+
+    .playlist-sidebar-item .action-btn i {
+        font-size: 9.5px !important;
+    }
 }
 
 /* Lyric View Styles */
@@ -137,11 +374,11 @@
     transform: translateX(-50%);
     border-width: 6px;
     border-style: solid;
-    border-color: rgba(255, 255, 255, 0.95) transparent transparent transparent;
+    border-color: rgba(255, 255, 255, 0.95) transparent transparent;
 }
 
 .dark .setting-tooltip-content::after {
-    border-color: rgba(31, 41, 55, 0.95) transparent transparent transparent;
+    border-color: rgba(31, 41, 55, 0.95) transparent transparent;
 }
 
 /* Show on hover (Desktop) */
@@ -249,10 +486,6 @@
     filter: drop-shadow(0 4px 12px var(--c-200));
 }
 
-.lyric-line.active .extended {
-    opacity: 0.8;
-    font-weight: 500;
-}
 
 /* 对于不支持逐字的普通歌词及其翻译，直接点亮 (没有平滑动效) */
 .lyric-line.active .plain-lyric {
@@ -360,17 +593,18 @@ aside {
 /* 菜单选中项样式 */
 .active-option {
     background-color: var(--c-500) !important;
-    color: #ffffff !important;
+    color: #fff !important;
+    box-shadow: 0 4px 12px var(--c-200);
 }
 
 [data-appearance="dark"] .active-option {
     background-color: var(--c-600) !important;
-    color: #ffffff !important;
+    color: #fff !important;
 }
 
 .active-option i,
 .active-option span {
-    color: #ffffff !important;
+    color: #fff !important;
 }
 
 /* Sleep Timer Styles */

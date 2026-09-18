@@ -775,11 +775,24 @@ window.LocalMusicManager = {
         };
     },
 
-    syncLocationSelector() {
-        // Let's assume 'data' or 'root' based on the config. 
-        // We might not have async config sync in UI immediately, but we can read from global.
-        // Fallback: we fetch stats or just assume what we get.
-        // Setting it via API is the most robust way.
+    async syncLocationSelector() {
+        try {
+            const headers = window.getUserAuthHeaders ? window.getUserAuthHeaders() : {};
+            if (this.isViewingPublicSongs) headers['x-user-name'] = '_open';
+            const url = '/api/music/cache/directories' + (this.isViewingPublicSongs ? '?user=_open' : '');
+            const res = await fetch(url, { headers, cache: 'no-store' });
+            if (res.ok) {
+                const result = await res.json();
+                if (result.success && result.data && result.data.location) {
+                    const el = document.getElementById('lm-location-select');
+                    if (el && el.value !== result.data.location) {
+                        el.value = result.data.location;
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Failed to sync location selector:', e);
+        }
     },
 
     async changeLocation() {
@@ -797,6 +810,10 @@ window.LocalMusicManager = {
             if (subPathText) subPathText.innerText = '全部';
 
             this.refresh();
+            // 位置切换后刷新同步下载按钮可见状态
+            if (typeof window.updateSyncDownloadBtnVisibility === 'function') {
+                window.updateSyncDownloadBtnVisibility();
+            }
         } catch (e) {
             if (typeof showError === 'function') showError('切换目录失败');
         }
@@ -806,6 +823,10 @@ window.LocalMusicManager = {
         const el = document.getElementById('lm-folder-select');
         this.filterFolder = el.value;
         this.applyFilters();
+        // 位置筛选切换后刷新同步下载按钮可见状态
+        if (typeof window.updateSyncDownloadBtnVisibility === 'function') {
+            window.updateSyncDownloadBtnVisibility();
+        }
     },
 
     toggleUnindexed() {
@@ -1062,7 +1083,7 @@ window.LocalMusicManager = {
 
             // Metadata Status check（多选：任意一个条件命中即显示）
             if (this.filterStatus.size > 0) {
-                const isUnindexed = item.source === 'unknown' || (item.songmid && String(item.songmid).includes(' - '));
+                const isUnindexed = item.source === 'unknown' || item.source === 'local' || (item.songmid && String(item.songmid).includes(' - '));
                 const isNoTag = (n) => !n || n === '未知歌曲' || n === '未知歌手' || n.toLowerCase() === 'unknown';
                 const missingID3 = isNoTag(item.name) || isNoTag(item.singer) || isUnindexed;
                 const missingCover = !item.hasCover;
@@ -1283,13 +1304,13 @@ window.LocalMusicManager = {
             const safeSinger = this.escapeHtml(item.singer || '未知歌手');
             const safeAlbum = this.escapeHtml(item.album || '--');
             const displayedSource = item.downloadSource || item.source;
-            const safeSource = this.escapeHtml(displayedSource === 'unknown' ? '未知' : (displayedSource || ''));
+            const safeSource = this.escapeHtml((displayedSource === 'unknown' || displayedSource === 'local') ? '未知' : (displayedSource || ''));
             const sourceTitle = item.downloadSource && item.downloadSource !== item.source
                 ? `下载来源：${item.downloadSource}；歌曲平台：${item.source || '未知'}`
                 : `歌曲平台：${item.source || '未知'}`;
             const safeSourceTitle = this.escapeAttr(sourceTitle);
             const safeSubPath = this.escapeHtml(item.subPath || '');
-            const isUnindexed = item.source === 'unknown' || (item.songmid && String(item.songmid).includes(' - '));
+            const isUnindexed = item.source === 'unknown' || item.source === 'local' || (item.songmid && String(item.songmid).includes(' - '));
             const isNoTag = (n) => !n || n === '未知歌曲' || n === '未知歌手' || n.toLowerCase() === 'unknown';
             const missingID3 = isNoTag(item.name) || isNoTag(item.singer) || isUnindexed;
             const missingCover = !item.hasCover;
@@ -1737,7 +1758,10 @@ window.LocalMusicManager = {
             url: `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             pic: `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             isLocal: true,
-            folder: item.folder
+            folder: item.folder,
+            _localFilename: item.filename,
+            _localFolder: item.folder || 'cache',
+            _localUsername: username
         };
 
         // If 'app.js' exposes playSong(song), we use it.
@@ -1746,7 +1770,11 @@ window.LocalMusicManager = {
             ...d.songInfo,
             url: `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(d.filename)}?folder=${d.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             pic: `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
-            isLocal: true
+            isLocal: true,
+            // 附加本地文件定位信息，供 fetchLyric 读取内嵌歌词（未关联歌曲时优先使用）
+            _localFilename: d.filename,
+            _localFolder: d.folder || 'cache',
+            _localUsername: username
         }));
 
         if (typeof window.updatePlaylist === 'function') {
@@ -1871,7 +1899,7 @@ window.LocalMusicManager = {
         let fail = 0;
 
         for (const item of targets) {
-            if (!item.songInfo || !item.songInfo.source || item.songInfo.source === 'unknown') {
+            if (!item.songInfo || !item.songInfo.source || item.songInfo.source === 'unknown' || item.songInfo.source === 'local') {
                 fail++;
                 continue;
             }
@@ -2503,7 +2531,7 @@ window.LocalMusicManager = {
 
     async autoLinkAll() {
         const unindexed = this.originalData.filter(item =>
-            item.source === 'unknown' || (item.songmid && String(item.songmid).includes(' - ')) || !item.name || item.name === '未知歌曲'
+            item.source === 'unknown' || item.source === 'local' || (item.songmid && String(item.songmid).includes(' - ')) || !item.name || item.name === '未知歌曲'
         );
 
         if (unindexed.length === 0) {
@@ -2778,6 +2806,10 @@ window.LocalMusicManager = {
         if (text) text.innerText = displayText;
         this.closeSubPathModal();
         this.applyFilters();
+        // 分类文件夹切换后刷新同步下载按钮可见状态
+        if (typeof window.updateSyncDownloadBtnVisibility === 'function') {
+            window.updateSyncDownloadBtnVisibility();
+        }
     },
 
     async batchCategorize(targetSubPath) {

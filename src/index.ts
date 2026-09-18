@@ -249,6 +249,13 @@ if (envParams.BACKUP_INTERVAL) {
   const backupInterval = parseInt(envParams.BACKUP_INTERVAL)
   if (!isNaN(backupInterval)) global.lx.config['sync.backupInterval'] = backupInterval
 }
+if (envParams.WEBDAV_EXCLUDE_CACHE !== undefined) {
+  setBoolConfig('webdav.excludeCache', envParams.WEBDAV_EXCLUDE_CACHE)
+}
+if (envParams.WEBDAV_EXCLUDE_MUSIC !== undefined) {
+  setBoolConfig('webdav.excludeMusic', envParams.WEBDAV_EXCLUDE_MUSIC)
+}
+
 if (envParams.USER_ENABLE_PATH !== undefined) {
   setBoolConfig('user.enablePath', envParams.USER_ENABLE_PATH)
 }
@@ -352,6 +359,25 @@ if (envParams.SUBSONIC_CACHE_ON_PLAY !== undefined) {
 if (envParams.SUBSONIC_PLAY_CACHE_FIRST !== undefined) {
   setBoolConfig('subsonic.playCacheFirst', envParams.SUBSONIC_PLAY_CACHE_FIRST)
 }
+if (envParams.SUBSONIC_QUALITY_ENABLED !== undefined) {
+  setBoolConfig('subsonic.quality.enabled', envParams.SUBSONIC_QUALITY_ENABLED)
+}
+if (envParams.SUBSONIC_QUALITY_PRIORITY) {
+  global.lx.config['subsonic.quality.priority'] = envParams.SUBSONIC_QUALITY_PRIORITY.split(',').map((s: string) => s.trim()).filter(Boolean).join(',')
+}
+if (envParams.SUBSONIC_QUALITY_CLIENT_CAP_MODE) {
+  const mode = envParams.SUBSONIC_QUALITY_CLIENT_CAP_MODE as any
+  if (mode === 'hard' || mode === 'soft') global.lx.config['subsonic.quality.clientCapMode'] = mode
+}
+if (envParams.SUBSONIC_SOURCE_PRIORITY) {
+  global.lx.config['subsonic.source.priority'] = envParams.SUBSONIC_SOURCE_PRIORITY.split(',').map((s: string) => s.trim()).filter(Boolean).join(',')
+}
+if (envParams.SUBSONIC_SOURCE_CROSS_PLATFORM !== undefined) {
+  setBoolConfig('subsonic.source.crossPlatform', envParams.SUBSONIC_SOURCE_CROSS_PLATFORM)
+}
+if (envParams.SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM !== undefined) {
+  setBoolConfig('subsonic.source.autoSwitchCustom', envParams.SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM)
+}
 if (envParams.ARTIST_MAX_FETCH_PAGES) {
   const pages = parseInt(envParams.ARTIST_MAX_FETCH_PAGES, 10)
   if (!isNaN(pages) && pages > 0) global.lx.config['artist.maxFetchPages'] = pages
@@ -451,6 +477,10 @@ if (fs.existsSync(usersJsonPath)) {
       password: u.password,
       maxSnapshotNum: u.maxSnapshotNum,
       'list.addMusicLocationType': u['list.addMusicLocationType'],
+      enableCustomMusicDir: u.enableCustomMusicDir,
+      customMusicDir: u.customMusicDir,
+      allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
+      allowWriteCustomMusicDir: u.allowWriteCustomMusicDir,
     })), null, 2))
   } catch (err) {
     console.error('Failed to save users.json', err)
@@ -555,7 +585,13 @@ const webdavSync = new WebDAVSync({
   backupPath: global.lx.config['webdav.backupPath'],
   interval: global.lx.config['sync.interval'],
   backupInterval: global.lx.config['sync.backupInterval'],
+  excludeCache: global.lx.config['webdav.excludeCache'],
+  excludeMusic: global.lx.config['webdav.excludeMusic'],
 }, global.lx.dataPath)
+
+
+// 导出 webdavSync 实例供全局使用
+global.lx.webdavSync = webdavSync
 
 // 如果配置了 WebDAV，在启动时尝试从远程恢复
 if (webdavSync.isConfigured()) {
@@ -612,9 +648,6 @@ if (webdavSync.isConfigured()) {
 } else {
   console.log('WebDAV not configured, skipping remote restore')
 }
-
-// 导出 webdavSync 实例供 API 使用
-global.lx.webdavSync = webdavSync
 
 // [新增] 确保数据目录下的 _open 及 _open/library 目录存在 (用于公共受限资源 & 公开收藏)
 const openDir = path.join(global.lx.userPath, '_open')

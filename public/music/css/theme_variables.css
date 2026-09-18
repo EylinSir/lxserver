@@ -11,26 +11,23 @@
     /* Light Mode Grays (Default) */
     --bg-main: #f9fafb;
     /* gray-50 */
-    --bg-panel: #ffffff;
+    --bg-panel: #fff;
     /* white */
     --bg-item-hover: #f3f4f6;
     /* gray-100 */
     --bg-header: rgba(255, 255, 255, 0.8);
     --bg-glass: rgba(255, 255, 255, 0.7);
-
     --text-main: #1f2937;
     /* gray-800 */
     --text-muted: #4b5563;
     /* gray-600 */
     --text-dim: #9ca3af;
     /* gray-400 */
-
     --border-main: #f1f1f1;
     /* gray-100 */
     --border-dim: #e5e7eb;
     /* gray-200 */
-
-    --shadow-main: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    --shadow-main: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
 }
 
 /* Dark Mode Overrides */
@@ -43,20 +40,17 @@
     /* gray-700 */
     --bg-header: rgba(17, 24, 39, 0.8);
     --bg-glass: rgba(31, 41, 55, 0.7);
-
     --text-main: #f9fafb;
     /* gray-50 */
     --text-muted: #d1d5db;
     /* gray-300 */
     --text-dim: #6b7280;
     /* gray-500 */
-
     --border-main: #374151;
     /* gray-700 */
     --border-dim: #4b5563;
     /* gray-600 */
-
-    --shadow-main: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+    --shadow-main: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
 }
 
 /* System Preference (Default if no data-appearance is set) */
@@ -67,15 +61,12 @@
         --bg-item-hover: #374151;
         --bg-header: rgba(17, 24, 39, 0.8);
         --bg-glass: rgba(31, 41, 55, 0.7);
-
         --text-main: #f9fafb;
         --text-muted: #d1d5db;
         --text-dim: #6b7280;
-
         --border-main: #374151;
         --border-dim: #4b5563;
-
-        --shadow-main: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+        --shadow-main: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
     }
 }
 
@@ -243,7 +234,7 @@ i {
 }
 
 /* 强制适配文本类输入元素 (支持模式切换与自动跟随系统) */
-:root[data-appearance="dark"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]),
+:root[data-appearance="dark"] input:not([type="range"], [type="checkbox"], [type="radio"], [type="button"], [type="submit"]),
 :root[data-appearance="dark"] select,
 :root[data-appearance="dark"] textarea {
     background-color: var(--bg-panel) !important;
@@ -253,7 +244,7 @@ i {
 
 @media (prefers-color-scheme: dark) {
 
-    :root:not([data-appearance="light"]) input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]),
+    :root:not([data-appearance="light"]) input:not([type="range"], [type="checkbox"], [type="radio"], [type="button"], [type="submit"]),
     :root:not([data-appearance="light"]) select,
     :root:not([data-appearance="light"]) textarea {
         background-color: var(--bg-panel) !important;

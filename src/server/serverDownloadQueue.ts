@@ -56,7 +56,13 @@ let processing = false
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 const taskMapKey = (username: string, id: string) => `${username}:${id}`
-const getQueueFile = () => path.join(global.lx.dataPath, 'server-download-queue.json')
+const getRuntimeDir = () => {
+  const dir = path.join(global.lx.dataPath, 'runtime')
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+const getQueueFile = () => path.join(getRuntimeDir(), 'server-download-queue.json')
 const validStatuses = new Set<ServerDownloadStatus>(['waiting', 'downloading', 'tagging', 'paused', 'finished', 'exists', 'error'])
 
 const normalizeConcurrency = (value: unknown) => {

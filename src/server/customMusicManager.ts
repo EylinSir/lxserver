@@ -204,12 +204,66 @@ const resolveSafePath = (baseDir: string, relativePath: string): string | null =
     return resolved
 }
 
+// 递归扫描 rootDir 及所有子目录中的索引文件（music_index.json / cache_index.json / custom_index.json）
+// 将各索引文件中的 filename 字段重映射为相对于 rootDir 的路径，构建统一的「相对路径 → 关联信息」查找表
+// 这样当父目录用户（B）的 customDir 包含子目录用户（A）的 customDir 时，
+// A 手动关联写入 custom_index.json 的信息也能被 B 正确读取并路径对齐
+const buildLinkedInfoMap = (rootDir: string): Map<string, any> => {
+    const map = new Map<string, any>()
+
+    const scanDir = (dir: string) => {
+        // dir 相对于 rootDir 的前缀，用于路径重映射
+        const prefix = path.relative(rootDir, dir).replace(/\\/g, '/')
+        const addPrefix = (filename: string) =>
+            prefix && prefix !== '.' ? `${prefix}/${filename}` : filename
+
+        // 读取当前目录下的索引文件
+        const indexFiles = ['music_index.json', 'cache_index.json', 'custom_index.json']
+        for (const fname of indexFiles) {
+            const fp = path.join(dir, fname)
+            if (!fs.existsSync(fp)) continue
+            try {
+                const data: Record<string, any> = JSON.parse(fs.readFileSync(fp, 'utf-8'))
+                for (const item of Object.values(data)) {
+                    if (!item || !item.filename) continue
+                    // 仅收录有真实来源（非 custom）或已手动关联（有 songmid 且 songmid !== id）的条目
+                    const isLinked = item.source && item.source !== 'custom' && item.id
+                    const isManualLinked = item.id && item.songmid && item.songmid !== item.id
+                    if (!isLinked && !isManualLinked) continue
+                    // 将条目的 filename 重映射为相对于 rootDir 的路径
+                    const remappedFilename = addPrefix(item.filename)
+                    // 深层（更靠近文件本身）的索引优先级更高，后扫描的子目录条目覆盖父目录条目
+                    map.set(remappedFilename, { ...item, filename: remappedFilename })
+                }
+            } catch (e) {
+                console.warn(`[CustomMusic] 读取 ${fname} 失败（${dir}）:`, e)
+            }
+        }
+
+        // 递归处理子目录
+        try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true })
+            for (const entry of entries) {
+                if (!entry.isDirectory()) continue
+                if (entry.name.startsWith('.') || entry.name === 'node_modules') continue
+                scanDir(path.join(dir, entry.name))
+            }
+        } catch (e) { /* 无权限或不可读时跳过 */ }
+    }
+
+    scanDir(rootDir)
+    return map
+}
+
 // 同步扫描并更新自定义目录索引
 export const syncCustomIndex = async (username: string) => {
     const customDir = getCustomMusicDir(username)
     if (!customDir || !fs.existsSync(customDir)) {
         throw new Error('用户未开启或未配置自定义音乐目录')
     }
+
+    // 尝试从目录内已有的索引文件中借用关联信息
+    const linkedInfoMap = buildLinkedInfoMap(customDir)
 
     const index = customIndexManager.load(username)
     const extensions = ['.mp3', '.flac', '.m4a', '.ogg', '.wav', '.ape']
@@ -296,25 +350,30 @@ export const syncCustomIndex = async (username: string) => {
 
         const id = existing?.id || `custom_${crypto.createHash('md5').update(relPath).digest('hex')}`
 
+        // 若当前条目尚未关联（source 为 custom 或缺少 songmid），尝试从目录内的索引文件中借用关联信息
+        // relPath 形如 "歌手 - 歌名.mp3" 或 "subdir/歌手 - 歌名.mp3"，与 cache/music 索引中 filename 字段匹配
+        const needLink = !existing || existing.source === 'custom' || !existing.songmid || existing.songmid === existing.id
+        const borrowed = needLink ? (linkedInfoMap.get(relPath) ?? linkedInfoMap.get(path.basename(relPath))) : undefined
+
         const newItem: CustomCacheItem = {
-            id,
-            songmid: existing?.songmid || id,
+            id: borrowed?.id || id,
+            songmid: borrowed?.songmid || borrowed?.id || existing?.songmid || id,
             name: songName,
             singer: singer,
-            album: album,
-            albumId: existing?.albumId,
-            img: existing?.img,
-            interval: duration || existing?.interval || '',
+            album: album || borrowed?.album || existing?.album || '',
+            albumId: borrowed?.albumId || existing?.albumId,
+            img: borrowed?.img || existing?.img,
+            interval: duration || borrowed?.interval || existing?.interval || '',
             quality: quality,
             filename: relPath,
             folder: 'custom',
             subPath,
-            source: existing?.source || 'custom',
+            source: borrowed?.source || existing?.source || 'custom',
             mtime: stats.mtimeMs,
             size: stats.size,
             ext: ext.replace('.', ''),
-            hasCover: hasEmbedCover || !!existing?.hasCover,
-            coverType: hasEmbedCover ? 'embedded' : (existing?.coverType || 'none'),
+            hasCover: hasEmbedCover || !!borrowed?.hasCover || !!existing?.hasCover,
+            coverType: hasEmbedCover ? 'embedded' : (borrowed?.coverType || existing?.coverType || 'none'),
             hasLyric: hasLyricOnDisk,
             hasEmbedLyric,
             lyricFilename: hasLyricOnDisk ? path.basename(lrcFilePath) : undefined,
@@ -658,7 +717,7 @@ export const batchEmbedLyric = async (filenames: string[], username: string) => 
 
             if (fs.existsSync(lrcPath)) {
                 lyricText = fs.readFileSync(lrcPath, 'utf8')
-            } else if (item && item.source && item.source !== 'unknown' && item.source !== 'custom') {
+            } else if (item && item.source && item.source !== 'unknown' && item.source !== 'local' && item.source !== 'custom') {
                 const lyricFetcherFn = getLyricFetcher()
                 if (lyricFetcherFn) {
                     lyricText = await lyricFetcherFn(item)

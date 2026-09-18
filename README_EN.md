@@ -5,7 +5,7 @@
 <div align="center">
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.0.2-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v2.1.0-blue?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
@@ -269,6 +269,8 @@ The configuration file is persisted by default in the data directory at `data/co
 | `WEBDAV_BACKUP_PATH` | `webdav.backupPath` | WebDAV remote backup path | `/lx-sync-backups` |
 | `SYNC_INTERVAL` | `sync.interval` | WebDAV incremental sync interval (min) | `60` |
 | `BACKUP_INTERVAL` | `sync.backupInterval` | WebDAV full backup interval (hours) | `24` |
+| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | Exclude cache dir from sync (`data/<user>/cache`). When enabled, skips incremental sync & full backup (already-synced files are NOT deleted) | `false` |
+| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | Exclude music/download dir from sync (`data/<user>/music`). When enabled, skips incremental sync & full backup (already-synced files are NOT deleted) | `false` |
 | `ENABLE_WEBPLAYER_AUTH` | `player.enableAuth` | Enable Web Player password | `false` |
 | `WEBPLAYER_PASSWORD` | `player.password` | Web Player password | `123456` |
 | `DISABLE_TELEMETRY` | `disableTelemetry` | Disable anonymous telemetry and update notifications | `false` |

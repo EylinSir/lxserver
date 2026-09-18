@@ -92,11 +92,14 @@ module.exports = {
 
   // 用户列表
   // 环境变量: LX_USER_<用户名>=<密码> (例如: LX_USER_user1=123456)
+  // 如果需要通过环境变量设置高级选项，可将值设为JSON格式，例如：
+  // LX_USER_admin={"password":"123","enableCustomMusicDir":true,"customMusicDir":"/data/music"}
   // 也可以在这里为特定用户配置独立的高级选项，例如：
   // "enableCustomMusicDir": false, // 是否启用此用户自定义歌曲目录
   // "customMusicDir": "", // 自定义歌曲目录绝对路径
   // "allowOperateCustomMusicDir": false, // 允许操作目录歌曲（如删除歌曲、洗版）
   // "allowWriteCustomMusicDir": false, // 允许写入歌曲文件（如手动关联、批量更新元数据、批量嵌入歌词）
+  // "enableAutoDownload": false, // 启用此用户自动下载歌曲功能（允许将歌单内容自动同步下载至本地数据目录）
   // "maxSnapshotNum": 10, // 最大备份快照数
   // "list.addMusicLocationType": "top" // 添加歌曲到列表时的位置 (top | bottom)
   "users": [
@@ -138,6 +141,16 @@ module.exports = {
   // 全量备份间隔 (小时)
   // 环境变量: BACKUP_INTERVAL
   "sync.backupInterval": 24,
+
+  // 是否排除缓存目录同步 (data/<用户>/cache)
+  // 开启后，各用户缓存目录将不参与增量同步及全量备份；之前已同步到云端的文件不会被删除，只有开启后新产生的变动才会被跳过
+  // 环境变量: WEBDAV_EXCLUDE_CACHE (true/false)
+  "webdav.excludeCache": false,
+
+  // 是否排除下载/音乐目录同步 (data/<用户>/music)
+  // 开启后，各用户音乐下载目录将不参与增量同步及全量备份；之前已同步到云端的文件不会被删除，只有开启后新产生的变动才会被跳过
+  // 环境变量: WEBDAV_EXCLUDE_MUSIC (true/false)
+  "webdav.excludeMusic": false,
 
   // 是否启用 Web播放器 访问密码
   // 环境变量: ENABLE_WEBPLAYER_AUTH (true/false)

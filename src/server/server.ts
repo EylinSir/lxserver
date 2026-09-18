@@ -14,22 +14,88 @@ import {
   SYNC_CLOSE_CODE,
 } from '@/constants'
 import { getUserSpace, releaseUserSpace, getUserName, getServerId, getUserDirname, getUserConfig, migrateUserData, renameUserSpace, finishRenameUserSpace } from '@/user'
+import { parseDislikeRules, splitSingers } from '@/modules/dislike/match'
+import { encodeAlbumRule } from '@/modules/dislike/utils'
+import { normalizeText } from '@/server/utils/songVersion'
+import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
 import { createMsg2call } from 'message2call'
 import { ElFinderConnector, getSystemRoot } from './elfinderConnector'
 import formidable from 'formidable'
 // @ts-ignore
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
-import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis } from './userApi'
+import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './userApi'
 import * as customSourceHandlers from './customSourceHandlers'
 import * as fileCache from './fileCache'
 import * as customMusicManager from './customMusicManager'
 import * as serverDownloadQueue from './serverDownloadQueue'
 import * as remasterQueue from './remasterQueue'
+import * as scheduler from './scheduler'
+import { getUpdatedListIds, removeUpdatedListId } from './task/networkListTask'
+import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSyncProgress, triggerUserSync, cancelUserSync } from './task/syncDownloadTask'
 import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import needle from 'needle'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
+
+/** 当前生效的 dislike 匹配选项，下发给前端保证前后端判定一致 */
+const dislikeMatchOptions = () => ({
+  crossSource: global.lx.config['subsonic.dislikeCrossSource'] === true,
+  duetMode: (global.lx.config['subsonic.dislikeDuetMode'] || 'any') as 'any' | 'all' | 'primary',
+  normalizeName: global.lx.config['subsonic.dislikeNormalizeName'] !== false,
+  requireSinger: global.lx.config['subsonic.dislikeRequireSinger'] !== false,
+})
+
+/** 把 dislike 规则集转成可 JSON 序列化的结构（Set/Map → Array，同时聚合 dislike/library 下的 albums 和 artists） */
+const serializeDislikeRules = (rules: string, username?: string) => {
+  const parsed = parseDislikeRules(rules)
+  if (username) {
+    try {
+      const uDir = getUserDirname(username)
+      const dLibDir = path.join(global.lx.userPath, uDir, 'dislike', 'library')
+      // Merge disliked albums from library/albums.json
+      const albumsFile = path.join(dLibDir, 'albums.json')
+      if (fs.existsSync(albumsFile)) {
+        const albumsArr = JSON.parse(fs.readFileSync(albumsFile, 'utf8'))
+        if (Array.isArray(albumsArr)) {
+          for (const x of albumsArr) {
+            const albumName = normalizeText(String(x.name || ''))
+            if (!albumName) continue
+            let sSet = parsed.albums.get(albumName)
+            if (!sSet) {
+              sSet = new Set<string>()
+              parsed.albums.set(albumName, sSet)
+            }
+            const singers = splitSingers(x.artistName)
+            for (const s of singers) sSet.add(s)
+          }
+        }
+      }
+      // Merge disliked artists from library/artists.json
+      const artistsFile = path.join(dLibDir, 'artists.json')
+      if (fs.existsSync(artistsFile)) {
+        const artistsArr = JSON.parse(fs.readFileSync(artistsFile, 'utf8'))
+        if (Array.isArray(artistsArr)) {
+          for (const x of artistsArr) {
+            const singerName = normalizeText(String(x.name || ''))
+            if (singerName) parsed.singerNames.add(singerName)
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('[Dislike] Error merging dislike library:', e.message)
+    }
+  }
+  return {
+    exact: Array.from(parsed.exact),
+    musicNames: Array.from(parsed.musicNames),
+    singerNames: Array.from(parsed.singerNames),
+    albums: Array.from(parsed.albums.entries()).map(([albumName, singers]) => ({
+      albumName,
+      singers: Array.from(singers),
+    })),
+  }
+}
 
 // ===== Player Session Store =====
 const playerSessions = new Map<string, { createdAt: number }>()
@@ -598,7 +664,12 @@ const saveUsers = () => {
       enableCustomMusicDir: u.enableCustomMusicDir,
       customMusicDir: u.customMusicDir,
       allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
+      allowWriteCustomMusicDir: u.allowWriteCustomMusicDir,
+      enableAutoDownload: u.enableAutoDownload,
     })), null, 2))
+    if (typeof global.lx.saveConfig === 'function') {
+      global.lx.saveConfig()
+    }
     return true
   } catch (err) {
     console.error('Failed to save users.json', err)
@@ -1316,7 +1387,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           cpus: os.cpus().length,
           cpuModel: os.cpus()[0]?.model || 'Unknown',
           cpuSpeed: os.cpus()[0]?.speed || 0,
-          isWebDAVConfigured: !!(global.lx.config['webdav.url'] && global.lx.config['webdav.url'].trim() !== ''),
+          isWebDAVConfigured: !!(global.lx.config['webdav.url'] && global.lx.config['webdav.url'].trim() !== '' && global.lx.config['webdav.enable']),
+          sourcesCount: getLoadedApisCount ? getLoadedApisCount() : 0,
+          nodeVersion: process.version,
+          platform: `${os.type()} ${os.arch()}`,
         }
 
         res.writeHead(200, {
@@ -1345,9 +1419,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             customMusicDir: u.customMusicDir || '',
             allowOperateCustomMusicDir: u.allowOperateCustomMusicDir ?? false,
             allowWriteCustomMusicDir: u.allowWriteCustomMusicDir ?? false,
+            enableAutoDownload: u.enableAutoDownload ?? false,
           }))
           if (global.lx.config['user.enablePublicFavorites']) {
-            users.unshift({ name: '_open', password: '', enableCustomMusicDir: false, customMusicDir: '', allowOperateCustomMusicDir: false, allowWriteCustomMusicDir: false })
+            users.unshift({ name: '_open', password: '', enableCustomMusicDir: false, customMusicDir: '', allowOperateCustomMusicDir: false, allowWriteCustomMusicDir: false, enableAutoDownload: false })
           }
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -1395,7 +1470,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         if (req.method === 'PUT') {
           void readBody(req).then(body => {
             try {
-              const { name, newName, password, enableCustomMusicDir, customMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir } = JSON.parse(body)
+              const { name, newName, password, enableCustomMusicDir, customMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir, enableAutoDownload } = JSON.parse(body)
               if (!name) {
                 res.writeHead(400)
                 res.end('Missing required fields')
@@ -1416,6 +1491,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 if (customMusicDir !== undefined) user.customMusicDir = String(customMusicDir).trim()
                 if (allowOperateCustomMusicDir !== undefined) user.allowOperateCustomMusicDir = !!allowOperateCustomMusicDir
                 if (allowWriteCustomMusicDir !== undefined) user.allowWriteCustomMusicDir = !!allowWriteCustomMusicDir
+                if (enableAutoDownload !== undefined) user.enableAutoDownload = !!enableAutoDownload
                 saveUsers()
                 res.writeHead(200)
                 res.end(JSON.stringify({ success: true }))
@@ -1580,27 +1656,31 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         void userSpace.listManage.getListData().then(async data => {
           let albums = []
           let artists = []
+          let dislikeAlbums = []
+          let dislikeArtists = []
           try {
             const userDirname = getUserDirname(verifiedUser)
             const libraryPath = path.join(global.lx.userPath, userDirname, 'library')
             const albumsPath = path.join(libraryPath, 'albums.json')
             const artistsPath = path.join(libraryPath, 'artists.json')
-            
-            if (await fs.promises.stat(albumsPath).then(()=>true).catch(()=>false)) {
-              albums = JSON.parse(await fs.promises.readFile(albumsPath, 'utf8'))
-            }
-            if (await fs.promises.stat(artistsPath).then(()=>true).catch(()=>false)) {
-              artists = JSON.parse(await fs.promises.readFile(artistsPath, 'utf8'))
-            }
-          } catch(err) {
-             console.error(err)
+
+            const dislikeLibraryPath = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+            const dislikeAlbumsPath = path.join(dislikeLibraryPath, 'albums.json')
+            const dislikeArtistsPath = path.join(dislikeLibraryPath, 'artists.json')
+
+            if (await fs.promises.stat(albumsPath).then(() => true).catch(() => false)) albums = JSON.parse(await fs.promises.readFile(albumsPath, 'utf8'))
+            if (await fs.promises.stat(artistsPath).then(() => true).catch(() => false)) artists = JSON.parse(await fs.promises.readFile(artistsPath, 'utf8'))
+            if (await fs.promises.stat(dislikeAlbumsPath).then(() => true).catch(() => false)) dislikeAlbums = JSON.parse(await fs.promises.readFile(dislikeAlbumsPath, 'utf8'))
+            if (await fs.promises.stat(dislikeArtistsPath).then(() => true).catch(() => false)) dislikeArtists = JSON.parse(await fs.promises.readFile(dislikeArtistsPath, 'utf8'))
+          } catch (err) {
+            console.error(err)
           }
 
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate'
           })
-          res.end(JSON.stringify({ ...data, albums, artists }))
+          res.end(JSON.stringify({ ...data, albums, artists, dislikeAlbums, dislikeArtists }))
         }).catch(err => {
           res.writeHead(500)
           res.end(err.message)
@@ -2044,6 +2124,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         const valid = !!username
         let enableCustomMusicDir = false
         let allowOperateCustomMusicDir = false
+        let enableAutoDownload = false
         if (username) {
           const user = global.lx.config.users.find(u => u.name === username)
           // 全局总开关 user.enableCustomMusicDir 必须为 true，才读取用户自身配置
@@ -2052,9 +2133,12 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             enableCustomMusicDir = !!user.enableCustomMusicDir
             allowOperateCustomMusicDir = !!user.allowOperateCustomMusicDir
           }
+          if (user) {
+            enableAutoDownload = !!user.enableAutoDownload
+          }
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ valid, username: username || null, enableCustomMusicDir, allowOperateCustomMusicDir }))
+        res.end(JSON.stringify({ valid, username: username || null, enableCustomMusicDir, allowOperateCustomMusicDir, enableAutoDownload }))
         return
       }
 
@@ -2239,6 +2323,24 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             const added = parsed.filter((x: any) => !oldKeys.has(keyOf(x)))
             const removed = oldArr.filter((x: any) => !newKeys.has(keyOf(x)))
             fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8')
+
+            // [Mutual Exclusivity] Remove newly liked artists from the dislike list
+            const dislikeLibDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+            const dislikeFilePath = path.join(dislikeLibDir, 'artists.json')
+            if (added.length > 0 && fs.existsSync(dislikeFilePath)) {
+              try {
+                let dislikeArr: any[] = JSON.parse(fs.readFileSync(dislikeFilePath, 'utf8'))
+                if (Array.isArray(dislikeArr)) {
+                  const addedKeys = new Set(added.map(keyOf))
+                  const newDislikeArr = dislikeArr.filter(x => !addedKeys.has(keyOf(x)))
+                  if (newDislikeArr.length !== dislikeArr.length) {
+                    fs.writeFileSync(dislikeFilePath, JSON.stringify(newDislikeArr, null, 2), 'utf-8')
+                  }
+                }
+              } catch { /* ignore */ }
+            }
+
+
             try {
               const { syncNativeLibraryToSubsonic } = require('./subsonic')
               syncNativeLibraryToSubsonic(username, 'artists',
@@ -2308,6 +2410,23 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             const added = parsed.filter((x: any) => !oldKeys.has(keyOf(x)))
             const removed = oldArr.filter((x: any) => !newKeys.has(keyOf(x)))
             fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8')
+
+            // [Mutual Exclusivity] Remove newly liked albums from the dislike list
+            const dislikeLibDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+            const dislikeFilePath = path.join(dislikeLibDir, 'albums.json')
+            if (added.length > 0 && fs.existsSync(dislikeFilePath)) {
+              try {
+                let dislikeArr: any[] = JSON.parse(fs.readFileSync(dislikeFilePath, 'utf8'))
+                if (Array.isArray(dislikeArr)) {
+                  const addedKeys = new Set(added.map(keyOf))
+                  const newDislikeArr = dislikeArr.filter(x => !addedKeys.has(keyOf(x)))
+                  if (newDislikeArr.length !== dislikeArr.length) {
+                    fs.writeFileSync(dislikeFilePath, JSON.stringify(newDislikeArr, null, 2), 'utf-8')
+                  }
+                }
+              } catch { /* ignore */ }
+            }
+
             try {
               const { syncNativeLibraryToSubsonic } = require('./subsonic')
               syncNativeLibraryToSubsonic(username, 'albums',
@@ -2319,6 +2438,357 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         })
         return
       }
+
+      // --- DISLIKE LIBRARY ENDPOINTS ---
+
+      // GET /api/user/dislike/library/artists
+      if (pathname === '/api/user/dislike/library/artists' && req.method === 'GET') {
+        const username = getLibUsername(req)
+        if (!username) { res.writeHead(401); res.end('Unauthorized'); return }
+        const userDirname = getUserDirname(username)
+        const libDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+        if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true })
+        const filePath = path.join(libDir, 'artists.json')
+        try {
+          if (!fs.existsSync(filePath)) {
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('[]'); return
+          }
+          let arr: any[] = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+          if (!Array.isArray(arr)) arr = []
+          res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(arr))
+        } catch (e: any) { res.writeHead(500); res.end(e.message) }
+        return
+      }
+
+      // POST /api/user/dislike/library/artists
+      if (pathname === '/api/user/dislike/library/artists' && req.method === 'POST') {
+        const username = getLibUsername(req)
+        if (!username) { res.writeHead(401); res.end('Unauthorized'); return }
+        void readBody(req).then(async (body) => {
+          try {
+            const parsed = JSON.parse(body)
+            if (!Array.isArray(parsed)) throw new Error('Expected an array')
+            const userDirname = getUserDirname(username)
+            const libDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+            if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true })
+            const filePath = path.join(libDir, 'artists.json')
+
+            // Add dislikeRule if missing
+            parsed.forEach((x: any) => {
+              if (!x.dislikeRule) x.dislikeRule = `@${String(x.name)}`
+            })
+
+            let oldArr: any[] = []
+            try { if (fs.existsSync(filePath)) oldArr = JSON.parse(fs.readFileSync(filePath, 'utf8')) } catch { /* ignore */ }
+            const keyOf = (x: any) => `${x.source}::${String(x.id)}`
+            const oldKeys = new Set(oldArr.map(keyOf))
+            const newKeys = new Set(parsed.map(keyOf))
+            const added = parsed.filter((x: any) => !oldKeys.has(keyOf(x)))
+            const removed = oldArr.filter((x: any) => !newKeys.has(keyOf(x)))
+
+            fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8')
+
+            // [Mutual Exclusivity] Remove newly disliked artists from the liked list
+            const likeLibDir = path.join(global.lx.userPath, userDirname, 'library')
+            const likeFilePath = path.join(likeLibDir, 'artists.json')
+            if (added.length > 0 && fs.existsSync(likeFilePath)) {
+              try {
+                let likeArr: any[] = JSON.parse(fs.readFileSync(likeFilePath, 'utf8'))
+                if (Array.isArray(likeArr)) {
+                  const addedKeys = new Set(added.map(keyOf))
+                  const newLikeArr = likeArr.filter(x => !addedKeys.has(keyOf(x)))
+                  if (newLikeArr.length !== likeArr.length) {
+                    fs.writeFileSync(likeFilePath, JSON.stringify(newLikeArr, null, 2), 'utf-8')
+                  }
+                }
+              } catch { /* ignore */ }
+            }
+
+            const { invalidateDislikeCache } = require('./utils/dislikeCache')
+            invalidateDislikeCache(username)
+
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true }))
+          } catch (e: any) { res.writeHead(400); res.end(e.message) }
+        })
+        return
+      }
+
+      // GET /api/user/dislike/library/albums
+      if (pathname === '/api/user/dislike/library/albums' && req.method === 'GET') {
+        const username = getLibUsername(req)
+        if (!username) { res.writeHead(401); res.end('Unauthorized'); return }
+        const userDirname = getUserDirname(username)
+        const libDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+        if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true })
+        const filePath = path.join(libDir, 'albums.json')
+        try {
+          if (!fs.existsSync(filePath)) {
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('[]'); return
+          }
+          let arr: any[] = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+          if (!Array.isArray(arr)) arr = []
+          res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(arr))
+        } catch (e: any) { res.writeHead(500); res.end(e.message) }
+        return
+      }
+
+      // POST /api/user/dislike/library/albums
+      if (pathname === '/api/user/dislike/library/albums' && req.method === 'POST') {
+        const username = getLibUsername(req)
+        if (!username) { res.writeHead(401); res.end('Unauthorized'); return }
+        void readBody(req).then(async (body) => {
+          try {
+            const parsed = JSON.parse(body)
+            if (!Array.isArray(parsed)) throw new Error('Expected an array')
+            const userDirname = getUserDirname(username)
+            const libDir = path.join(global.lx.userPath, userDirname, 'dislike', 'library')
+            if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true })
+            const filePath = path.join(libDir, 'albums.json')
+
+            // Add dislikeRule if missing
+            parsed.forEach((x: any) => {
+              if (!x.dislikeRule) x.dislikeRule = `!${String(x.name)}@${String(x.artistName || '')}`
+            })
+
+            let oldArr: any[] = []
+            try { if (fs.existsSync(filePath)) oldArr = JSON.parse(fs.readFileSync(filePath, 'utf8')) } catch { /* ignore */ }
+            const keyOf = (x: any) => `${x.source}::${String(x.id)}`
+            const oldKeys = new Set(oldArr.map(keyOf))
+            const newKeys = new Set(parsed.map(keyOf))
+            const added = parsed.filter((x: any) => !oldKeys.has(keyOf(x)))
+            const removed = oldArr.filter((x: any) => !newKeys.has(keyOf(x)))
+
+            fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8')
+
+            // [Mutual Exclusivity] Remove newly disliked albums from the liked list
+            const likeLibDir = path.join(global.lx.userPath, userDirname, 'library')
+            const likeFilePath = path.join(likeLibDir, 'albums.json')
+            if (added.length > 0 && fs.existsSync(likeFilePath)) {
+              try {
+                let likeArr: any[] = JSON.parse(fs.readFileSync(likeFilePath, 'utf8'))
+                if (Array.isArray(likeArr)) {
+                  const addedKeys = new Set(added.map(keyOf))
+                  const newLikeArr = likeArr.filter(x => !addedKeys.has(keyOf(x)))
+                  if (newLikeArr.length !== likeArr.length) {
+                    fs.writeFileSync(likeFilePath, JSON.stringify(newLikeArr, null, 2), 'utf-8')
+                  }
+                }
+              } catch { /* ignore */ }
+            }
+
+            const { invalidateDislikeCache } = require('./utils/dislikeCache')
+            invalidateDislikeCache(username)
+
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true }))
+          } catch (e: any) { res.writeHead(400); res.end(e.message) }
+        })
+        return
+      }
+
+      // ─── 同步下载 API ─────────────────────────────────────────────────────
+      // GET /api/user/sync-download/status  查询当前用户同步下载配置 + 歌单列表 + 进度
+      if (pathname === '/api/user/sync-download/status' && req.method === 'GET') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        try {
+          const userSpace = getUserSpace(username)
+          const listData = await userSpace.listManage.getListData()
+          const syncData = getSyncDownloadData(username)
+          const progress = getUserSyncProgress(username)
+          // 检查是否开启了自动更新网络歌单
+          const settingsPath = path.join(userSpace.dataManage.userDir, File.userSettingsJSON)
+          let autoUpdateNetworkList = false
+          if (fs.existsSync(settingsPath)) {
+            try { autoUpdateNetworkList = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')).autoUpdateNetworkList === true } catch { }
+          }
+          // 获取调度器网络歌单任务状态，以便提供准确的下次触发时间
+          const taskStatus = scheduler.getSchedulerStatus()
+          const networkTask = taskStatus.find(t => t.id === 'network_list_autocheck')
+          const nextSyncTime = (autoUpdateNetworkList && networkTask?.enabled) ? (networkTask.nextRunTime || null) : null
+
+          const getSongCoverUrl = (song: any): string => {
+            if (!song) return ''
+            return song.img ||
+              song.pic ||
+              song.picUrl ||
+              song.meta?.picUrl ||
+              song.meta?.pic ||
+              song.meta?.albumPic ||
+              song.meta?.cover ||
+              song.album?.picUrl ||
+              song.album?.pic ||
+              song.album?.img ||
+              song.otherSource?.meta?.picUrl ||
+              ''
+          }
+
+          const playlists = (listData?.userList ?? []).map((l: any) => {
+            let cover = l.Album || l.album || l.cover || l.pic || l.picUrl || ''
+            if (!cover && Array.isArray(l.list) && l.list.length > 0) {
+              for (const song of l.list) {
+                const sCover = getSongCoverUrl(song)
+                if (sCover) {
+                  cover = sCover
+                  break
+                }
+              }
+            }
+            return {
+              id: l.id,
+              name: l.name,
+              cover: cover || null,
+              source: l.source || null,
+              songCount: Array.isArray(l.list) ? l.list.length : 0,
+              isNetwork: !!l.sourceListId,
+              syncConfig: syncData.playlists[l.id] ?? { enabled: false, lastSyncTime: null, failedSongs: [] },
+            }
+          })
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: true,
+            data: {
+              autoUpdateNetworkList,
+              nextSyncTime,
+              syncDownload: {
+                enabled: syncData.enabled,
+                lastSyncTime: syncData.lastSyncTime,
+                lastSyncResult: syncData.lastSyncResult,
+              },
+              playlists,
+              progress,
+            }
+          }))
+        } catch (e: any) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, message: e.message })) }
+        return
+      }
+
+      // PUT /api/user/sync-download/settings  保存同步下载配置
+      if (pathname === '/api/user/sync-download/settings' && req.method === 'PUT') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          if (global.lx.config['user.enablePublicRestriction']) {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['frontend.password']) {
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '权限不足：公共用户受限模式下需要管理员权限' }))
+              return
+            }
+          }
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async body => {
+          try {
+            const payload = JSON.parse(body)
+            const syncData = getSyncDownloadData(username!)
+            if (typeof payload.enabled === 'boolean') syncData.enabled = payload.enabled
+            if (payload.playlists && typeof payload.playlists === 'object') {
+              for (const [id, cfg] of Object.entries(payload.playlists) as any) {
+                if (!syncData.playlists[id]) {
+                  syncData.playlists[id] = { enabled: false, lastSyncTime: null, failedSongs: [] }
+                }
+                if (typeof cfg.enabled === 'boolean') syncData.playlists[id].enabled = cfg.enabled
+              }
+            }
+            saveSyncDownloadData(username!, syncData)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true }))
+          } catch (e: any) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, message: e.message })) }
+        })
+        return
+      }
+
+      // POST /api/user/sync-download/trigger  手动触发同步
+      if (pathname === '/api/user/sync-download/trigger' && req.method === 'POST') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          if (global.lx.config['user.enablePublicRestriction']) {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['frontend.password']) {
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '权限不足：公共用户受限模式下需要管理员权限' }))
+              return
+            }
+          }
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        try {
+          const result = await triggerUserSync(username)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, ...result }))
+        } catch (e: any) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, message: e.message })) }
+        return
+      }
+
+      // POST /api/user/sync-download/cancel  取消/暂停当前同步
+      if ((pathname === '/api/user/sync-download/cancel' || pathname === '/api/user/sync-download/pause') && req.method === 'POST') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const cancelled = cancelUserSync(username)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, cancelled, message: cancelled ? '已暂停同步' : '当前无正在进行的同步' }))
+        return
+      }
+
+      // GET /api/user/sync-download/progress  轮询实时进度
+      if (pathname === '/api/user/sync-download/progress' && req.method === 'GET') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, data: getUserSyncProgress(username) }))
+        return
+      }
+      // ─────────────────────────────────────────────────────────────────────
 
       // [新增] Get User Settings (User Auth)
       if (pathname === '/api/user/settings' && req.method === 'GET') {
@@ -2396,6 +2866,20 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             }
 
             fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
+
+            // 如果更新了网络歌单自动检测设置，同步更新后台任务调度器
+            if (settings.networkListAutoCheckInterval !== undefined || settings.autoUpdateNetworkList !== undefined) {
+              const taskConfig: { intervalMs?: number; enabled?: boolean } = {}
+              if (settings.networkListAutoCheckInterval !== undefined) {
+                const ms = scheduler.parseIntervalMs(settings.networkListAutoCheckInterval)
+                if (ms) taskConfig.intervalMs = ms
+              }
+              if (settings.autoUpdateNetworkList !== undefined) {
+                taskConfig.enabled = !!settings.autoUpdateNetworkList
+              }
+              scheduler.updateTaskConfig('network_list_autocheck', taskConfig)
+            }
+
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true }))
           } catch (err: any) {
@@ -2674,6 +3158,143 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // [后台任务] 获取所有后台定时任务状态
+      if ((pathname === '/api/tasks/status' || pathname === '/api/music/tasks/status') && req.method === 'GET') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default'
+        
+        if (!isPublic && !verifyUserAuth(req)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+
+        const tasks = scheduler.getSchedulerStatus()
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, tasks }))
+        return
+      }
+
+      // [后台任务] 手动触发后台定时任务执行
+      if ((pathname === '/api/tasks/trigger' || pathname === '/api/music/tasks/trigger') && req.method === 'POST') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default'
+        
+        if (isPublic) {
+          if (global.lx.config['user.enablePublicRestriction']) {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['frontend.password']) {
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '权限不足：受限模式下需要管理员权限' }))
+              return
+            }
+          }
+        } else {
+          if (!verifyUserAuth(req)) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+        }
+
+        let taskId = urlObj.searchParams.get('id') || 'network_list_autocheck'
+        if (taskId === 'sync_download') taskId = 'sync_download_task'
+        void scheduler.executeTask(taskId).then(result => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        }).catch(err => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [后台任务] 通用任务用户数据接口（内存临时，重启后自动清除）
+      // GET  /api/tasks/user-data?task=<taskId>  → 返回当前用户该任务的状态数据
+      // POST /api/tasks/user-data?task=<taskId>  → 更新（如清除红点）
+      if ((pathname === '/api/tasks/user-data' || pathname === '/api/music/tasks/user-data') &&
+          (req.method === 'GET' || req.method === 'POST')) {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default'
+        let targetUser = '_open'
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (verified) targetUser = verified
+        }
+
+        const taskId = urlObj.searchParams.get('task') || ''
+
+        // 目前支持的任务类型：network_list_autocheck, sync_download_task
+        if (taskId === 'network_list_autocheck') {
+          if (req.method === 'GET') {
+            const updatedListIds = getUpdatedListIds(targetUser)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, updatedListIds }))
+            return
+          }
+
+          if (req.method === 'POST') {
+            void readBody(req).then(body => {
+              try {
+                let clearId = ''
+                if (typeof body === 'string') {
+                  try { clearId = JSON.parse(body).listId || JSON.parse(body).id || '' } catch { clearId = body.trim() }
+                } else if (body && typeof body === 'object') {
+                  clearId = (body as any).listId || (body as any).id || ''
+                }
+                if (clearId) removeUpdatedListId(targetUser, clearId)
+                const updatedListIds = getUpdatedListIds(targetUser)
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: true, updatedListIds }))
+              } catch (err: any) {
+                res.writeHead(500, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: err.message }))
+              }
+            })
+            return
+          }
+        }
+
+        if (taskId === 'sync_download_task' || taskId === 'sync_download') {
+          if (req.method === 'GET') {
+            const syncData = getSyncDownloadData(targetUser)
+            const progress = getUserSyncProgress(targetUser)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, syncData, progress }))
+            return
+          }
+
+          if (req.method === 'POST') {
+            void readBody(req).then(async body => {
+              try {
+                let action = ''
+                if (typeof body === 'string') {
+                  try { action = JSON.parse(body).action || '' } catch { }
+                } else if (body && typeof body === 'object') {
+                  action = (body as any).action || ''
+                }
+                if (action === 'trigger') {
+                  const result = await triggerUserSync(targetUser)
+                  res.writeHead(200, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ success: true, ...result }))
+                } else {
+                  res.writeHead(200, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ success: true }))
+                }
+              } catch (err: any) {
+                res.writeHead(500, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: err.message }))
+              }
+            })
+            return
+          }
+        }
+
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, message: '未知任务或不支持的操作' }))
+        return
+      }
+
       // [新增] Update User Sound Effects (User Auth)
       if (pathname === '/api/user/sound-effects' && req.method === 'POST') {
         const username = verifyUserAuth(req)
@@ -2714,7 +3335,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           try {
             const body = JSON.parse(await readBody(req))
             const explicitIsCustomDir = body?.isCustomDir === undefined ? undefined : Boolean(body?.isCustomDir)
-            
+
             if (explicitIsCustomDir) {
               const userCfg = getUserConfig(username)
               if (!userCfg?.allowOperateCustomMusicDir) {
@@ -3919,6 +4540,45 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // H-GET. 读取自定义目录音频文件内嵌歌词（供播放时使用）
+      if (pathname === '/api/music/custom/embedLyric' && req.method === 'GET') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const filename = urlObj.searchParams.get('filename') || ''
+        if (!filename) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Missing filename' }))
+          return
+        }
+        try {
+          const customDir = customMusicManager.getCustomMusicDir(verified)
+          if (!customDir) throw new Error('未配置自定义目录')
+          const filePath = path.resolve(customDir, filename)
+          // 安全检查：防止路径穿越
+          if (!filePath.startsWith(path.resolve(customDir))) throw new Error('非法路径')
+          if (!fs.existsSync(filePath)) {
+            res.writeHead(404, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '文件不存在' }))
+            return
+          }
+          const { MusicTagger: MT } = require('music-tag-native')
+          const tagger = new MT()
+          tagger.loadPath(filePath)
+          const lrc = tagger.lyrics || ''
+          tagger.dispose()
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, lrc }))
+        } catch (e: any) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message || '读取内嵌歌词失败' }))
+        }
+        return
+      }
+
       // H. 批量将歌词嵌入自定义目录音频标签 (USLT)
       if (pathname === '/api/music/custom/embedLyric' && req.method === 'POST') {
         const verified = verifyUserAuth(req)
@@ -4054,6 +4714,49 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // [新增-GET] 读取本地缓存音频文件内嵌歌词（供播放时使用）
+      if (pathname === '/api/music/cache/embedLyric' && req.method === 'GET') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === 'default'
+        let username = '_open'
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+        const filename = urlObj.searchParams.get('filename') || ''
+        const folder = (urlObj.searchParams.get('folder') || 'cache') as 'cache' | 'music'
+        if (!filename) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Missing filename' }))
+          return
+        }
+        try {
+          const dir = fileCache.getCacheDir(username, folder === 'music')
+          const filePath = path.join(dir, filename)
+          if (!fs.existsSync(filePath)) {
+            res.writeHead(404, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '文件不存在' }))
+            return
+          }
+          const { MusicTagger: MT } = require('music-tag-native')
+          const tagger = new MT()
+          tagger.loadPath(filePath)
+          const lrc = tagger.lyrics || ''
+          tagger.dispose()
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, lrc }))
+        } catch (e: any) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message || '读取内嵌歌词失败' }))
+        }
+        return
+      }
+
       // [新增] Embed Lyric into Audio File Tags (USLT)
       if (pathname === '/api/music/cache/embedLyric' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
@@ -4153,7 +4856,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 if (fs.existsSync(lrcPath)) {
                   lyricText = fs.readFileSync(lrcPath, 'utf8')
                   console.log(`[EmbedLyric] Using local .lrc for: ${filename}`)
-                } else if (songInfo && songInfo.source && songInfo.source !== 'unknown') {
+                } else if (songInfo && songInfo.source && songInfo.source !== 'unknown' && songInfo.source !== 'local') {
                   // 没有 .lrc 文件，尝试通过 SDK 获取
                   const lyricFetcherFn = fileCache.getLyricFetcher()
                   if (lyricFetcherFn) {
@@ -4545,7 +5248,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 const rangeHeader = req.headers['range']
                 const isFullRange = rangeHeader === 'bytes=0-'
 
-                  if (isTaggingMode && (!rangeHeader || isFullRange)) {
+                if (isTaggingMode && (!rangeHeader || isFullRange)) {
                   const songName = urlObj.searchParams.get('name') || ''
                   const artist = urlObj.searchParams.get('singer') || ''
                   const album = urlObj.searchParams.get('album') || ''
@@ -5645,6 +6348,139 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // [新增] dislike 规则 API
+      // 与 Subsonic 评分联动共用同一份 lx-music 原生规则，保证各端一致：
+      //   GET  /api/music/dislike        返回已解析的规则集（歌曲 / 歌手 / 专辑）
+      //   POST /api/music/dislike/add     body: { type, name?, singer?, source?, albumId? }
+      //   POST /api/music/dislike/remove  body: 同上
+      if (pathname === '/api/music/dislike' && req.method === 'GET') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void getUserSpace(verified).dislikeManage.getDislikeRules().then(rules => {
+          const dm = getUserSpace(verified).dislikeManage
+          const rulesString = dm.dislikeDataManage.getDislikeRulesString()
+          const data: any = serializeDislikeRules(rulesString, verified)
+          data.dislikeList = dm.dislikeDataManage.dislikeRules.dislikeList || []
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+          res.end(JSON.stringify({ success: true, data, options: dislikeMatchOptions() }))
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      if ((pathname === '/api/music/dislike/add' || pathname === '/api/music/dislike/remove') && req.method === 'POST') {
+        void readBody(req).then(async body => {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          try {
+            const isAdd = pathname === '/api/music/dislike/add'
+            const payload = JSON.parse(body || '{}')
+            const type = String(payload.type || 'song')
+            const name = String(payload.name || '')
+            const singer = String(payload.singer || '')
+            const source = String(payload.source || '')
+            const id = String(payload.id || '')
+            const albumId = String(payload.albumId || '')
+            const pic = String(payload.pic || '')
+            const interval = String(payload.interval || '')
+            const meta = payload.meta || {}
+
+            const dm = getUserSpace(verified).dislikeManage
+
+            let removeKeys: Set<string> = new Set()
+            if (type === 'album') {
+              const albumName = String(payload.albumName || '')
+              if (!albumName) {
+                res.writeHead(400, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Missing albumName' }))
+                return
+              }
+              const singers = splitSingers(singer)
+              if (isAdd) await dm.dislikeDataManage.addDislikeAlbums(singers.map(s => ({ albumName, singer: s })))
+              else for (const s of singers) {
+                removeKeys.add(encodeAlbumRule(normalizeText(albumName), s))
+                removeKeys.add(normalizeText(encodeAlbumRule(albumName, s)))
+              }
+            } else if (type === 'singer') {
+              if (!singer) {
+                res.writeHead(400, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Missing singer' }))
+                return
+              }
+              if (isAdd) await dm.dislikeDataManage.addDislikeInfo([{ name: '', singer, dislikeRule: '' }])
+              else removeKeys.add(`@${normalizeText(singer)}`)
+            } else {
+              if (!name) {
+                res.writeHead(400, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Missing name' }))
+                return
+              }
+              if (isAdd) {
+                const { type, ...songData } = payload
+                songData.dislikeRule = ''
+                await dm.dislikeDataManage.addDislikeInfo([songData])
+              } else {
+                if (singer) {
+                  removeKeys.add(`${name}@${singer}`.toLowerCase())
+                  removeKeys.add(`${normalizeText(name)}@${normalizeText(singer)}`.toLowerCase())
+                }
+                removeKeys.add(name.toLowerCase())
+                removeKeys.add(normalizeText(name).toLowerCase())
+              }
+            }
+
+            const dislikeRatingThreshold = global.lx.config['subsonic.dislikeRating'] ?? 1
+            if (global.lx.config['subsonic.linkDislikeToRating'] && dislikeRatingThreshold > 0 && id && source) {
+              const subId = id.startsWith(`${source}_`) ? id : `${source}_${id}`
+              try {
+                const { syncDislikeToRating } = require('./subsonic')
+                await syncDislikeToRating(verified, subId, isAdd ? 1 : 0)
+              } catch (e) {
+                console.error('[Dislike API] 评分回写失败:', e)
+              }
+            }
+
+            if (!isAdd && removeKeys.size > 0) {
+              const rulesString = dm.dislikeDataManage.getDislikeRulesString()
+              const lines = rulesString.split('\n').filter((l: string) => l.trim())
+              const remain = lines.filter((l: string) => {
+                const trimmed = l.trim().toLowerCase()
+                if (removeKeys.has(trimmed)) return false
+                // Also check without spaces or with alias
+                return true
+              })
+              if (remain.length !== lines.length) {
+                await dm.dislikeDataManage.overwirteDislikeInfo(remain.join('\n'))
+              }
+            }
+
+            await dm.createSnapshot()
+            invalidateDislikeCache(verified)
+            const rules = await dm.getDislikeRules()
+            const finalRulesString = dm.dislikeDataManage.getDislikeRulesString()
+            const data: any = serializeDislikeRules(finalRulesString, verified)
+            data.dislikeList = dm.dislikeDataManage.dislikeRules.dislikeList || []
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+            res.end(JSON.stringify({ success: true, data, options: dislikeMatchOptions() }))
+          } catch (err: any) {
+            console.error('[Dislike API] Error:', err?.message)
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: err.message }))
+          }
+        })
+        return
+      }
+
       // [新增] 封面 API (备用)
 
       // [新增] 自定义源管理 API
@@ -5918,6 +6754,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'webdav.backupPath': global.lx.config['webdav.backupPath'] || '/lx-sync-backups',
             'sync.interval': global.lx.config['sync.interval'] || 60,
             'sync.backupInterval': global.lx.config['sync.backupInterval'] || 24,
+            'webdav.excludeCache': global.lx.config['webdav.excludeCache'] ?? false,
+            'webdav.excludeMusic': global.lx.config['webdav.excludeMusic'] ?? false,
             'proxy.all.enabled': global.lx.config['proxy.all.enabled'] || false,
             'proxy.all.address': global.lx.config['proxy.all.address'] || '',
             'admin.path': global.lx.config['admin.path'] ?? '/music',
@@ -5930,9 +6768,24 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
             'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'] ?? false,
             'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'] ?? 'tx',
+            'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'] ?? 1,
+            'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'] ?? false,
+            'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'] ?? false,
+            'subsonic.hideDisliked': global.lx.config['subsonic.hideDisliked'] ?? true,
+            'subsonic.dislikeCrossSource': global.lx.config['subsonic.dislikeCrossSource'] ?? false,
+            'subsonic.dislikeNoRecommend': global.lx.config['subsonic.dislikeNoRecommend'] ?? true,
+            'subsonic.dislikeDuetMode': global.lx.config['subsonic.dislikeDuetMode'] ?? 'any',
+            'subsonic.dislikeNormalizeName': global.lx.config['subsonic.dislikeNormalizeName'] ?? true,
+            'subsonic.dislikeRequireSinger': global.lx.config['subsonic.dislikeRequireSinger'] ?? true,
             'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'] ?? true,
             'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'] ?? false,
             'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'] ?? true,
+            'subsonic.quality.enabled': global.lx.config['subsonic.quality.enabled'] ?? true,
+            'subsonic.quality.priority': global.lx.config['subsonic.quality.priority'] ?? 'flac,320k,128k',
+            'subsonic.quality.clientCapMode': global.lx.config['subsonic.quality.clientCapMode'] ?? 'soft',
+            'subsonic.source.priority': global.lx.config['subsonic.source.priority'] ?? 'kw,tx,wy,mg,kg',
+            'subsonic.source.crossPlatform': global.lx.config['subsonic.source.crossPlatform'] ?? true,
+            'subsonic.source.autoSwitchCustom': global.lx.config['subsonic.source.autoSwitchCustom'] ?? true,
             'singer.sourcePriority': (global.lx.config['singer.sourcePriority'] || ['tx', 'wy']).join(','),
             'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'] ?? 20,
             'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
@@ -6002,6 +6855,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['webdav.backupPath'] !== undefined) global.lx.config['webdav.backupPath'] = newConfig['webdav.backupPath']
               if (newConfig['sync.interval'] !== undefined) global.lx.config['sync.interval'] = parseInt(newConfig['sync.interval'])
               if (newConfig['sync.backupInterval'] !== undefined) global.lx.config['sync.backupInterval'] = parseInt(newConfig['sync.backupInterval']) || 24
+              if (newConfig['webdav.excludeCache'] !== undefined) global.lx.config['webdav.excludeCache'] = !!newConfig['webdav.excludeCache']
+              if (newConfig['webdav.excludeMusic'] !== undefined) global.lx.config['webdav.excludeMusic'] = !!newConfig['webdav.excludeMusic']
               if (newConfig['proxy.all.enabled'] !== undefined) global.lx.config['proxy.all.enabled'] = newConfig['proxy.all.enabled']
               if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = newConfig['proxy.all.address']
 
@@ -6049,9 +6904,28 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 const s = String(newConfig['subsonic.leaderboardSource']).trim().toLowerCase()
                 if (['tx', 'wy', 'kg', 'kw', 'mg'].includes(s)) global.lx.config['subsonic.leaderboardSource'] = s
               }
+              if (newConfig['subsonic.dislikeRating'] !== undefined) global.lx.config['subsonic.dislikeRating'] = Number(newConfig['subsonic.dislikeRating'])
+              if (newConfig['subsonic.hideDisliked'] !== undefined) global.lx.config['subsonic.hideDisliked'] = !!newConfig['subsonic.hideDisliked']
+              if (newConfig['subsonic.dislikeCrossSource'] !== undefined) global.lx.config['subsonic.dislikeCrossSource'] = !!newConfig['subsonic.dislikeCrossSource']
+              if (newConfig['subsonic.dislikeNoRecommend'] !== undefined) global.lx.config['subsonic.dislikeNoRecommend'] = !!newConfig['subsonic.dislikeNoRecommend']
+              if (newConfig['subsonic.dislikeDuetMode'] !== undefined) {
+                const dm = String(newConfig['subsonic.dislikeDuetMode']).trim().toLowerCase()
+                if (['any', 'all', 'primary'].includes(dm)) global.lx.config['subsonic.dislikeDuetMode'] = dm as any
+              }
+              if (newConfig['subsonic.dislikeNormalizeName'] !== undefined) global.lx.config['subsonic.dislikeNormalizeName'] = !!newConfig['subsonic.dislikeNormalizeName']
+              if (newConfig['subsonic.dislikeRequireSinger'] !== undefined) global.lx.config['subsonic.dislikeRequireSinger'] = !!newConfig['subsonic.dislikeRequireSinger']
+              if (newConfig['subsonic.linkRatingToDislike'] !== undefined) global.lx.config['subsonic.linkRatingToDislike'] = !!newConfig['subsonic.linkRatingToDislike']
+              if (newConfig['subsonic.linkDislikeToRating'] !== undefined) global.lx.config['subsonic.linkDislikeToRating'] = !!newConfig['subsonic.linkDislikeToRating']
+              if (newConfig['subsonic.recommendPoolSize'] !== undefined) global.lx.config['subsonic.recommendPoolSize'] = Number(newConfig['subsonic.recommendPoolSize'])
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
+              if (newConfig['subsonic.quality.enabled'] !== undefined) global.lx.config['subsonic.quality.enabled'] = !!newConfig['subsonic.quality.enabled']
+              if (newConfig['subsonic.quality.priority'] !== undefined) global.lx.config['subsonic.quality.priority'] = String(newConfig['subsonic.quality.priority'])
+              if (newConfig['subsonic.quality.clientCapMode'] !== undefined && ['hard', 'soft'].includes(newConfig['subsonic.quality.clientCapMode'])) global.lx.config['subsonic.quality.clientCapMode'] = newConfig['subsonic.quality.clientCapMode']
+              if (newConfig['subsonic.source.priority'] !== undefined) global.lx.config['subsonic.source.priority'] = String(newConfig['subsonic.source.priority'])
+              if (newConfig['subsonic.source.crossPlatform'] !== undefined) global.lx.config['subsonic.source.crossPlatform'] = !!newConfig['subsonic.source.crossPlatform']
+              if (newConfig['subsonic.source.autoSwitchCustom'] !== undefined) global.lx.config['subsonic.source.autoSwitchCustom'] = !!newConfig['subsonic.source.autoSwitchCustom']
               if (newConfig['singer.sourcePriority'] !== undefined) {
                 const priority = String(newConfig['singer.sourcePriority']).split(',').filter(s => s === 'tx' || s === 'wy') as Array<'tx' | 'wy'>
                 if (priority.length > 0) global.lx.config['singer.sourcePriority'] = priority
@@ -6064,7 +6938,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               }
 
               // 更新 WebDAVSync 配置
-              if (global.lx.webdavSync && (newConfig['webdav.enable'] !== undefined || newConfig['webdav.url'] || newConfig['webdav.username'] || newConfig['webdav.password'] || newConfig['webdav.syncPath'] || newConfig['webdav.backupPath'] || newConfig['sync.interval'] || newConfig['sync.backupInterval'])) {
+              if (global.lx.webdavSync && (newConfig['webdav.enable'] !== undefined || newConfig['webdav.url'] || newConfig['webdav.username'] || newConfig['webdav.password'] || newConfig['webdav.syncPath'] || newConfig['webdav.backupPath'] || newConfig['sync.interval'] || newConfig['sync.backupInterval'] || newConfig['webdav.excludeCache'] !== undefined || newConfig['webdav.excludeMusic'] !== undefined)) {
                 global.lx.webdavSync.updateConfig({
                   enable: global.lx.config['webdav.enable'],
                   url: global.lx.config['webdav.url'],
@@ -6074,6 +6948,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                   backupPath: global.lx.config['webdav.backupPath'],
                   interval: global.lx.config['sync.interval'],
                   backupInterval: global.lx.config['sync.backupInterval'],
+                  excludeCache: global.lx.config['webdav.excludeCache'],
+                  excludeMusic: global.lx.config['webdav.excludeMusic'],
                 })
               }
 
@@ -6110,6 +6986,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'webdav.backupPath': global.lx.config['webdav.backupPath'],
                 'sync.interval': global.lx.config['sync.interval'],
                 'sync.backupInterval': global.lx.config['sync.backupInterval'],
+                'webdav.excludeCache': global.lx.config['webdav.excludeCache'],
+                'webdav.excludeMusic': global.lx.config['webdav.excludeMusic'],
                 'proxy.all.enabled': global.lx.config['proxy.all.enabled'],
                 'proxy.all.address': global.lx.config['proxy.all.address'],
                 'admin.path': global.lx.config['admin.path'] ?? '/admin',
@@ -6122,9 +7000,25 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'],
                 'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'],
                 'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'],
+                'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'],
+                'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'],
+                'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'],
+                'subsonic.hideDisliked': global.lx.config['subsonic.hideDisliked'],
+                'subsonic.dislikeCrossSource': global.lx.config['subsonic.dislikeCrossSource'],
+                'subsonic.dislikeNoRecommend': global.lx.config['subsonic.dislikeNoRecommend'],
+                'subsonic.dislikeDuetMode': global.lx.config['subsonic.dislikeDuetMode'],
+                'subsonic.dislikeNormalizeName': global.lx.config['subsonic.dislikeNormalizeName'],
+                'subsonic.dislikeRequireSinger': global.lx.config['subsonic.dislikeRequireSinger'],
+                'subsonic.recommendPoolSize': global.lx.config['subsonic.recommendPoolSize'],
                 'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'],
                 'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'],
                 'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'],
+                'subsonic.quality.enabled': global.lx.config['subsonic.quality.enabled'],
+                'subsonic.quality.priority': global.lx.config['subsonic.quality.priority'],
+                'subsonic.quality.clientCapMode': global.lx.config['subsonic.quality.clientCapMode'],
+                'subsonic.source.priority': global.lx.config['subsonic.source.priority'],
+                'subsonic.source.crossPlatform': global.lx.config['subsonic.source.crossPlatform'],
+                'subsonic.source.autoSwitchCustom': global.lx.config['subsonic.source.autoSwitchCustom'],
                 'singer.sourcePriority': global.lx.config['singer.sourcePriority'],
                 'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'],
                 'cache.namingPattern': global.lx.config['cache.namingPattern'],
@@ -6374,6 +7268,80 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // WebDAV Backups List API
+      if (pathname === '/api/webdav/backups' && req.method === 'GET') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['frontend.password']) {
+          res.writeHead(401)
+          res.end('Unauthorized')
+          return
+        }
+
+        const webdavSync = global.lx.webdavSync
+        if (!webdavSync) {
+          res.writeHead(500)
+          res.end(JSON.stringify({ success: false, message: 'WebDAV not initialized', backups: [] }))
+          return
+        }
+
+        void webdavSync.getBackupList().then((backups: any[]) => {
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          })
+          res.end(JSON.stringify({ success: true, backups }))
+        }).catch((err: any) => {
+          res.writeHead(500)
+          res.end(JSON.stringify({ success: false, message: err.message, backups: [] }))
+        })
+        return
+      }
+
+      // WebDAV Delete Backup API
+      if (pathname === '/api/webdav/backup' && req.method === 'DELETE') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['frontend.password']) {
+          res.writeHead(401)
+          res.end('Unauthorized')
+          return
+        }
+
+        const webdavSync = global.lx.webdavSync
+        if (!webdavSync) {
+          res.writeHead(500)
+          res.end(JSON.stringify({ success: false, message: 'WebDAV not initialized' }))
+          return
+        }
+
+        let body = ''
+        req.on('data', chunk => {
+          body += chunk.toString()
+        })
+        req.on('end', () => {
+          try {
+            const data = body ? JSON.parse(body) : {}
+            const filename = data.filename
+            if (!filename) {
+              res.writeHead(400)
+              res.end(JSON.stringify({ success: false, message: 'Filename is required' }))
+              return
+            }
+
+            void webdavSync.deleteBackupFile(filename).then((success: boolean) => {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success }))
+            }).catch((err: any) => {
+              res.writeHead(500)
+              res.end(JSON.stringify({ success: false, message: err.message }))
+            })
+          } catch (err: any) {
+            res.writeHead(400)
+            res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }))
+          }
+        })
+        return
+      }
+
       // WebDAV Restore API
       if (pathname === '/api/webdav/restore' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
@@ -6390,12 +7358,25 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           return
         }
 
-        void webdavSync.restoreFromRemote().then(async (success: boolean) => {
-          if (success) {
-            await reloadServerData()
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success }))
+        void readBody(req).then((body) => {
+          let payload: any = {}
+          try {
+            payload = JSON.parse(body || '{}')
+          } catch (e) { }
+
+          const mode = payload.mode || 'auto'
+          const targetFilename = payload.targetFilename
+
+          void webdavSync.restoreFromRemote({ mode, targetFilename }).then(async (success: boolean) => {
+            if (success) {
+              await reloadServerData()
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success }))
+          }).catch((err: any) => {
+            res.writeHead(500)
+            res.end(JSON.stringify({ success: false, message: err.message }))
+          })
         })
         return
       }
@@ -6438,12 +7419,22 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           'Cache-Control': 'no-cache',
           'Connection': 'keep-alive',
         })
-        res.write('retry: 10000\\n\\n')
+        res.write('retry: 5000\n\n')
 
         const client = res
         sseClients.add(client)
 
+        // 定时发送 SSE 心跳保活
+        const heartbeatTimer = setInterval(() => {
+          try {
+            client.write(': heartbeat\n\n')
+          } catch {
+            clearInterval(heartbeatTimer)
+          }
+        }, 15000)
+
         req.on('close', () => {
+          clearInterval(heartbeatTimer)
           sseClients.delete(client)
         })
         return
@@ -6824,10 +7815,12 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
     perMessageDeflate: false,
   }) as unknown as LX.SocketServer
 
-  // WebDAV Sync Progress Broadcast
+  // WebDAV Sync Progress & Log Broadcast
   if (global.lx.webdavSync) {
     // 移除旧的监听器以防重复添加
     global.lx.webdavSync.removeAllListeners('progress')
+    global.lx.webdavSync.removeAllListeners('log')
+
     global.lx.webdavSync.on('progress', (data: any) => {
       // Broadcast to WebSocket clients
       if (wss) {
@@ -6839,6 +7832,22 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         }
       }
       // Broadcast to SSE clients
+      const sseMsg = `data: ${JSON.stringify(data)}\n\n`
+      for (const client of sseClients) {
+        client.write(sseMsg)
+      }
+    })
+
+    global.lx.webdavSync.on('log', (log: any) => {
+      const data = { type: 'sync_log', log }
+      if (wss) {
+        const msg = JSON.stringify({ type: 'webdav_log', data })
+        for (const client of wss.clients) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(msg)
+          }
+        }
+      }
       const sseMsg = `data: ${JSON.stringify(data)}\n\n`
       for (const client of sseClients) {
         client.write(sseMsg)
@@ -7157,6 +8166,17 @@ export const startServer = async (port: number, ip: string) => {
     }
   })
 
+  // 注入同步下载引擎的 resolver（低耦合：由此处唯一注入）
+  setSongResolver(async (songInfo, quality, username) => {
+    const apiUsername = username === '_open' ? 'open' : username
+    const resolved = await resolveServerSong(normalizeSongInfo(songInfo), quality, apiUsername, true)
+    return {
+      url: resolved.url,
+      quality: resolved.quality,
+      songInfo: resolved.songInfo,
+    }
+  })
+
   remasterQueue.initialize(async (songInfo, requestedQuality, username) => {
     const apiUsername = username === '_open' ? 'open' : username
     const resolved = await resolveServerSong(songInfo, requestedQuality, apiUsername, true)
@@ -7166,11 +8186,14 @@ export const startServer = async (port: number, ip: string) => {
     }
   })
 
-  await handleStartServer(port, ip).then(() => {
+  await handleStartServer(port, ip).then(async () => {
     // console.log('sync server started')
     status.status = true
     status.message = ''
+    scheduler.startScheduler()
     status.address = ip == '0.0.0.0' ? getAddress() : [ip]
+
+
 
     // void generateCode()
     // codeTools.start()

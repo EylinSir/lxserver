@@ -657,7 +657,7 @@ window.CustomDirManager = {
             const isSelected = this.selectedItems.has(item.filename);
 
             // 未索引判断：source 为 custom/unknown 或包含未解析 mid
-            const isUnindexed = !item.source || item.source === 'custom' || item.source === 'unknown' || (item.songmid && String(item.songmid).includes('custom_'));
+            const isUnindexed = !item.source || item.source === 'custom' || item.source === 'unknown' || item.source === 'local' || (item.songmid && String(item.songmid).includes('custom_'));
             const isNoTag = (n) => !n || n === '未知歌曲' || n === '未知歌手' || n.toLowerCase() === 'unknown';
             const missingID3 = isNoTag(item.name) || isNoTag(item.singer) || isUnindexed;
             const missingCover = !item.hasCover;
@@ -695,7 +695,7 @@ window.CustomDirManager = {
 
             const folderIcon = '<i class="fas fa-download text-blue-500 mr-1" title="自定义目录"></i>';
             const displayedSource = item.downloadSource || item.source;
-            const safeSource = this.escapeHtml((displayedSource === 'unknown' || displayedSource === 'custom' || !displayedSource) ? '未知' : displayedSource);
+            const safeSource = this.escapeHtml((displayedSource === 'unknown' || displayedSource === 'local' || displayedSource === 'custom' || !displayedSource) ? '未知' : displayedSource);
             const sourceTitle = item.downloadSource && item.downloadSource !== item.source
                 ? `下载来源：${item.downloadSource}；歌曲平台：${(!item.source || item.source === 'custom') ? '未知' : item.source}`
                 : `歌曲平台：${(!item.source || item.source === 'custom') ? '未知' : item.source}`;
@@ -968,7 +968,11 @@ window.CustomDirManager = {
             url: `/api/music/custom/file?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             pic: `/api/music/custom/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             isLocal: true,
-            folder: 'custom'
+            folder: 'custom',
+            // 附加本地文件定位信息，供 fetchLyric 读取内嵌歌词（未关联歌曲时优先使用）
+            _localFilename: d.filename,
+            _localUsername: username,
+            _isCustomDir: true
         }));
 
         if (typeof window.updatePlaylist === 'function') {
@@ -1197,7 +1201,7 @@ window.CustomDirManager = {
                 folder: 'custom'
             };
 
-            if (!songData.source || songData.source === 'unknown' || songData.source === 'custom') {
+            if (!songData.source || songData.source === 'unknown' || songData.source === 'local' || songData.source === 'custom') {
                 fail++;
                 continue;
             }

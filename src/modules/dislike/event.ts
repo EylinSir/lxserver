@@ -38,7 +38,9 @@ export class DislikeEvent extends EventEmitter {
    */
   async dislike_data_overwrite(userName: string, dislikeData: LX.Dislike.DislikeRules, isRemote: boolean = false) {
     const userSpace = getUserSpace(userName)
-    await userSpace.dislikeManage.dislikeDataManage.overwirteDislikeInfo(dislikeData)
+    // Convert structured DislikeListData back to rule-string for the overwrite filter
+    const rulesString = dislikeData.dislikeList.map(s => s.dislikeRule ?? '').filter(Boolean).join('\n')
+    await userSpace.dislikeManage.dislikeDataManage.overwirteDislikeInfo(rulesString)
     this.emit('dislike_data_overwrite', userName, dislikeData, isRemote)
     dislikeUpdated()
   }
@@ -50,7 +52,7 @@ export class DislikeEvent extends EventEmitter {
    * @param addMusicLocationType 添加在到列表的位置
    * @param isRemote 是否属于远程操作
    */
-  async dislike_music_add(userName: string, musicInfo: LX.Dislike.DislikeMusicInfo[], isRemote: boolean = false) {
+  async dislike_music_add(userName: string, musicInfo: LX.Dislike.DislikeSongInfo[], isRemote: boolean = false) {
     const userSpace = getUserSpace(userName)
     // const changedIds =
     await userSpace.dislikeManage.dislikeDataManage.addDislikeInfo(musicInfo)
