@@ -3135,8 +3135,12 @@ class SubsonicHandler {
                     picked.set(key, { item: it, rank })
                 }
             }
-            if (order.length !== matchedSongs.length) {
+            const beforeCount = matchedSongs.length
+            if (order.length !== beforeCount) {
                 matchedSongs = order.map(k => picked.get(k)!.item)
+                subsonicLog.debug(`[Subsonic] 跨源去重: ${beforeCount} → ${matchedSongs.length} (query=${cleanQuery})`)
+            } else {
+                subsonicLog.debug(`[Subsonic] 跨源去重: 无重复 ${beforeCount} 条 (query=${cleanQuery}) 样例key=${Array.from(picked.keys()).slice(0, 3).join(' | ')}`)
             }
         }
 
