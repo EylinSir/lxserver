@@ -27,6 +27,7 @@ import wyMusicInfo from '@/modules/utils/musicSdk/wy/musicInfo.js'
 import { getMusicInfo as kgGetMusicInfo } from '@/modules/utils/musicSdk/kg/musicInfo.js'
 import { getMusicInfo as mgGetMusicInfo } from '@/modules/utils/musicSdk/mg/musicInfo.js'
 import bdMusicInfo from '@/modules/utils/musicSdk/bd/musicInfo.js'
+import { spawn } from 'child_process'
 const musicSdk = musicSdkRaw as any
 
 // ─────────────────────────────────────────────
@@ -5276,7 +5277,33 @@ class SubsonicHandler {
                 }
             }
 
-            const result = await this.resolveStreamUrl(source, songmid, id, musicInfo, quality, maxBitrate, username)
+            const transcodeEnabled = global.lx.config['subsonic.transcode.enabled']
+            const onQualityMiss = global.lx.config['subsonic.transcode.onQualityMiss'] !== false
+            // 仅当客户端设了上限(maxBitrate>0)且音源缺对应低音质时,才走服务端转码兜底(默认关,需手动开启)
+            const wantTranscode = !!transcodeEnabled && onQualityMiss && maxBitrate > 0
+
+            let result: { url: string, quality: string, selected?: string } | null = null
+            let needTranscode = false
+            try {
+                result = await this.resolveStreamUrl(source, songmid, id, musicInfo, quality, maxBitrate, username)
+                // soft 模式可能突破上限返回高音质；若实际音质超出客户端上限且要转码,则转码兜底
+                if (wantTranscode && this.isQualityOverCap(result.quality, maxBitrate)) {
+                    needTranscode = true
+                }
+            } catch (e: any) {
+                // 所有候选失败(hard 模式无低音质 / 音源无此曲):尝试取最高可用音质转码兜底
+                if (wantTranscode) {
+                    const hi = await this.resolveHighestQuality(source, songmid, id, musicInfo, username)
+                    if (hi && hi.url) {
+                        result = hi
+                        needTranscode = true
+                    } else {
+                        throw e
+                    }
+                } else {
+                    throw e
+                }
+            }
 
             if (result && result.url) {
                 // [诊断] 打印缓存触发决策，便于排查 Subsonic 播放不缓存问题
