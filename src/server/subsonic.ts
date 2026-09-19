@@ -31,30 +31,12 @@ import { spawn } from 'child_process'
 const musicSdk = musicSdkRaw as any
 
 // ─────────────────────────────────────────────
-// 电台流「短期票据」
+// 服务端签名票据密钥
 // ─────────────────────────────────────────────
-// 实测：客户端(Musiver/音流)播放网络电台时，会把 internetRadioStation.streamUrl 当作
-// 「可直接播放的外部地址」原样请求，不会自行附加 Subsonic 凭据（日志中请求参数与下发 URL 完全一致，无 c/v/f）。
-// 而该 URL 会被客户端展示、也可能被复制/分享；若把用户凭据(u+t+s 或 u+p)拼进去，等于泄露长期令牌。
-// 因此改签服务端票据：URL 只带 u(用户名) + rtexp(过期) + rtsig(HMAC)，不含任何用户凭据。
-const RADIO_TICKET_TTL = 12 * 60 * 60 * 1000 // 12 小时
-const RADIO_TICKET_EXP = 'rtexp'
-const RADIO_TICKET_SIG = 'rtsig'
-
-function radioTicketSecret(): string {
-    return String((global.lx.config as any)?.['frontend.password'] || 'lxserver-radio-ticket')
-}
-
-function signRadioTicket(id: string, user: string, exp: number): string {
-    return crypto.createHmac('sha256', radioTicketSecret())
-        .update(`${id}|${user}|${exp}`)
-        .digest('hex')
-        .slice(0, 40)
-}
-
-/** 配置的 Subsonic 访问路径（默认 /rest）。自产 URL 与票据判定统一用它，避免写死 /rest。 */
-function subsonicBasePath(): string {
-    return String((global.lx.config as any)?.['subsonic.path'] || '/rest').replace(/\/+$/, '') || '/rest'
+// 需要下发给客户端、随后由客户端原样回传的「服务器内部值」用签名令牌承载（防篡改 + 可过期）。
+// 密钥取自前端访问密码，不落 URL。
+function serverTicketSecret(): string {
+    return String((global.lx.config as any)?.['frontend.password'] || 'lxserver-ticket')
 }
 
 /** 把错误原因压成可安全回传给客户端的一小段文本（截断 + 打码常见密钥参数） */
@@ -73,14 +55,14 @@ const TRANSCODE_PARAM_TTL = 30 * 60 * 1000
 
 function signTranscodeParams(payload: Record<string, any>): string {
     const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
-    const sig = crypto.createHmac('sha256', radioTicketSecret()).update(body).digest('hex').slice(0, 16)
+    const sig = crypto.createHmac('sha256', serverTicketSecret()).update(body).digest('hex').slice(0, 16)
     return `${body}.${sig}`
 }
 
 function verifyTranscodeParams(token: string): Record<string, any> | null {
     const [body, sig] = String(token || '').split('.')
     if (!body || !sig) return null
-    const expect = crypto.createHmac('sha256', radioTicketSecret()).update(body).digest('hex').slice(0, 16)
+    const expect = crypto.createHmac('sha256', serverTicketSecret()).update(body).digest('hex').slice(0, 16)
     if (expect.length !== sig.length) return null
     try {
         if (!crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(sig))) return null
@@ -705,30 +687,6 @@ class SubsonicHandler {
         return null
     }
 
-    /**
-     * 校验「电台流短期票据」(rtexp + rtsig)。仅对 stream/download 且 id 为 radio_* 的请求生效。
-     * 通过则返回票据中的用户名，否则返回 null。
-     */
-    private verifyRadioTicket(params: URLSearchParams, method: string): string | null {
-        if (method !== 'stream' && method !== 'download') return null
-        const id = params.get('id') || ''
-        if (!id.startsWith('radio_')) return null
-        const user = params.get('u') || ''
-        const exp = Number(params.get(RADIO_TICKET_EXP) || 0)
-        const sig = params.get(RADIO_TICKET_SIG) || ''
-        if (!user || !exp || !sig) return null
-        if (!Number.isFinite(exp) || Date.now() > exp) return null
-        // 票据用户名必须是真实用户
-        if (!global.lx.config.users?.some((x: any) => x.name === user)) return null
-        const expect = signRadioTicket(id, user, exp)
-        if (expect.length !== sig.length) return null
-        try {
-            return crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(sig)) ? user : null
-        } catch {
-            return null
-        }
-    }
-
     // ─────────────────────────────────────────────
     // 响应序列化
     // ─────────────────────────────────────────────
@@ -870,20 +828,15 @@ class SubsonicHandler {
         }
 
         const format = params.get('f') === 'json' ? 'json' : 'xml'
-        const { pathname } = urlObj
-        const method = pathname.split('/').pop()?.split('.')[0] || ''
+        const username = this.verifyAuth(params)
 
-        // 常规鉴权：u + (t&s) 或 u + p
-        let username = this.verifyAuth(params)
-        // [电台流] 客户端把自产电台 streamUrl 当外部地址原样请求、不带用户凭据，
-        // 这里接受服务端签发的短期票据（u + rtexp + rtsig），避免用户凭据出现在 URL 中。
-        if (!username) {
-            username = this.verifyRadioTicket(params, method)
-        }
         if (!username) {
             return this.sendError(res, 40, 'Wrong username or password', format)
         }
         this.currentUsername = username
+
+        const { pathname } = urlObj
+        const method = pathname.split('/').pop()?.split('.')[0] || ''
 
         // [starred] 预先计算当前用户 love 列表歌曲 id 集合，供歌曲序列化标记 starred（排除热路径方法）
         if (!['ping', 'getLicense', 'stream', 'download', 'getCoverArt'].includes(method)) {
