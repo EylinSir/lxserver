@@ -6763,7 +6763,6 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'subsonic.enable': global.lx.config['subsonic.enable'] ?? true,
             'subsonic.path': global.lx.config['subsonic.path'] ?? '/rest',
             'subsonic.port': global.lx.config['subsonic.port'] ?? 0,
-            'subsonic.bindIP': global.lx.config['subsonic.bindIP'] ?? '',
             'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'] ?? false,
             'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'] ?? true,
             'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'] ?? 'fallback',
