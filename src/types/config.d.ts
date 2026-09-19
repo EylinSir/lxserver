@@ -206,6 +206,21 @@ declare namespace LX {
     'webdav.excludeMusic'?: boolean
 
     /**
+     * 是否启用本地配置备份（每日一份 config.js 副本，保留指定天数）
+     */
+    'configBackup.enable'?: boolean
+
+    /**
+     * 本地配置备份保留天数（默认 7）
+     */
+    'configBackup.retentionDays'?: number
+
+    /**
+     * 本地配置备份目录，留空则使用 <data>/backups；相对路径基于 data 目录，绝对路径直接使用
+     */
+    'configBackup.dir'?: string
+
+    /**
      * 是否开启Web播放器访问密码
      */
     'player.enableAuth'?: boolean
