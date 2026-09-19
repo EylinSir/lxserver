@@ -19,6 +19,14 @@ import { listRadioStations, getRadioStation, addRadioStation, updateRadioStation
 // 音乐源歌单 → 电台 列表缓存（避免每次 getInternetRadioStations 都枚举全部音源实拉）
 let playlistRadioCache: { ts: number; stations: any[] } | null = null
 const PLAYLIST_RADIO_TTL = 10 * 60 * 1000
+
+// QQ 官方电台(radio_tx_*)可用性探测缓存：
+// QQ 的 GetRadioSong 接口已返回 500003、旧接口直接 404（上游失效），官方电台点了必然失败。
+// 与其把一堆「点了没反应」的电台暴露给客户端，不如在上游恢复前不返回它们；
+// 每 OFFICIAL_RADIO_TTL 用一首歌探测一次，上游恢复后自动重新出现（自愈）。
+let officialRadioAvailability: { ts: number; available: boolean } | null = null
+const OFFICIAL_RADIO_TTL = 10 * 60 * 1000
+const OFFICIAL_RADIO_PROBE_TIMEOUT = 6000
 import fs from 'fs'
 import path from 'path'
 // @ts-ignore
@@ -2482,9 +2490,43 @@ class SubsonicHandler {
         return stations
     }
 
+    /**
+     * 官方电台(QQ radio_tx_*)可用性探测：上游 GetRadioSong 若取不到歌（接口已废弃，返回 500003 / 旧接口 404），
+     * 则官方电台整体判定为不可用、暂不返回给客户端；结果缓存 OFFICIAL_RADIO_TTL，上游恢复后自动重新出现。
+     * 带超时，避免拖慢电台列表请求。
+     */
+    private async isOfficialRadioAvailable(radios: any[]): Promise<boolean> {
+        if (!radios || radios.length === 0) return false
+        const now = Date.now()
+        if (officialRadioAvailability && now - officialRadioAvailability.ts < OFFICIAL_RADIO_TTL) {
+            return officialRadioAvailability.available
+        }
+        let available = false
+        try {
+            const probeId = String(radios[0].id).replace('radio_tx_', '')
+            const songs = await Promise.race([
+                fetchRadioSongs(probeId),
+                new Promise<any[]>((resolve) => {
+                    const t = setTimeout(() => resolve([]), OFFICIAL_RADIO_PROBE_TIMEOUT)
+                    // 探测计时器不应阻碍进程退出
+                    if (typeof (t as any).unref === 'function') (t as any).unref()
+                }),
+            ])
+            available = Array.isArray(songs) && songs.length > 0
+        } catch {
+            available = false
+        }
+        officialRadioAvailability = { ts: now, available }
+        if (!available) {
+            subsonicLog.warn('[Subsonic] 官方电台上游取歌接口不可用，已暂时从电台列表隐藏（上游恢复后自动出现）')
+        }
+        return available
+    }
+
     private async handleGetInternetRadioStations(res: http.ServerResponse, params: URLSearchParams, format: string) {
         try {
             const official = await fetchRadios()           // QQ 官方电台：streamUrl 指向本服 /rest/stream?id=radio_tx_*
+            const officialUsable = await this.isOfficialRadioAvailable(official) // 上游取歌接口失效时隐藏，避免「点了没反应」
             const userStations = listRadioStations()        // 用户自建电台：落盘持久化
             const playlistStations = await this.getPlaylistRadioStations() // 音乐源歌单：本服随机取歌
             // [修复] 本服生成的电台 streamUrl 是相对路径（/rest/stream?id=radio_tx_99），
@@ -2519,7 +2561,7 @@ class SubsonicHandler {
             }
 
             const stations = [
-                ...official.map((r: any) => ({
+                ...(officialUsable ? official : []).map((r: any) => ({
                     id: r.id,
                     name: r.name,
                     streamUrl: r.streamUrl,
