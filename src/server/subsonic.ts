@@ -38,6 +38,28 @@ import { getMusicInfo as mgGetMusicInfo } from '@/modules/utils/musicSdk/mg/musi
 import bdMusicInfo from '@/modules/utils/musicSdk/bd/musicInfo.js'
 const musicSdk = musicSdkRaw as any
 
+// ─────────────────────────────────────────────
+// 电台流「短期票据」
+// ─────────────────────────────────────────────
+// 实测：客户端播放网络电台时，会把 internetRadioStation.streamUrl 当作「可直接播放的外部地址」
+// 原样请求，不会自行附加 Subsonic 凭据；而该 URL 会被客户端展示，也可能被复制/分享，
+// 若把用户凭据(u+t+s 或 u+p)拼进去，等于泄露长期令牌。
+// 因此改签服务端票据：URL 只带 u(用户名) + rtexp(过期) + rtsig(HMAC)，不含任何用户凭据。
+const RADIO_TICKET_TTL = 12 * 60 * 60 * 1000 // 12 小时
+const RADIO_TICKET_EXP = 'rtexp'
+const RADIO_TICKET_SIG = 'rtsig'
+
+function radioTicketSecret(): string {
+    return String((global.lx.config as any)?.['frontend.password'] || 'lxserver-radio-ticket')
+}
+
+function signRadioTicket(id: string, user: string, exp: number): string {
+    return crypto.createHmac('sha256', radioTicketSecret())
+        .update(`${id}|${user}|${exp}`)
+        .digest('hex')
+        .slice(0, 40)
+}
+
 // 推荐结果缓存：同一类型短时间内共享一次 QQ 抓取结果，避免客户端并发请求（启动瞬间
 // newest/recent/random 同时打来）重复访问。缓存成功后保留较长时间，并在 QQ 失败时
 // 回退到上次成功结果，确保刷新/限流时每日推荐不消失。
@@ -380,6 +402,30 @@ class SubsonicHandler {
         return null
     }
 
+    /**
+     * 校验「电台流短期票据」(rtexp + rtsig)。仅对 stream/download 且 id 为 radio_* 的请求生效。
+     * 通过则返回票据中的用户名，否则返回 null。
+     */
+    private verifyRadioTicket(params: URLSearchParams, method: string): string | null {
+        if (method !== 'stream' && method !== 'download') return null
+        const id = params.get('id') || ''
+        if (!id.startsWith('radio_')) return null
+        const user = params.get('u') || ''
+        const exp = Number(params.get(RADIO_TICKET_EXP) || 0)
+        const sig = params.get(RADIO_TICKET_SIG) || ''
+        if (!user || !exp || !sig) return null
+        if (!Number.isFinite(exp) || Date.now() > exp) return null
+        // 票据用户名必须是真实用户
+        if (!global.lx.config.users?.some((x: any) => x.name === user)) return null
+        const expect = signRadioTicket(id, user, exp)
+        if (expect.length !== sig.length) return null
+        try {
+            return crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(sig)) ? user : null
+        } catch {
+            return null
+        }
+    }
+
     // ─────────────────────────────────────────────
     // 响应序列化
     // ─────────────────────────────────────────────
@@ -521,15 +567,20 @@ class SubsonicHandler {
         }
 
         const format = params.get('f') === 'json' ? 'json' : 'xml'
-        const username = this.verifyAuth(params)
+        const { pathname } = urlObj
+        const method = pathname.split('/').pop()?.split('.')[0] || ''
 
+        // 常规鉴权：u + (t&s) 或 u + p
+        let username = this.verifyAuth(params)
+        // [电台流] 客户端把自产电台 streamUrl 当外部地址原样请求、不带用户凭据，
+        // 这里接受服务端签发的短期票据（u + rtexp + rtsig），避免用户凭据出现在 URL 中。
+        if (!username) {
+            username = this.verifyRadioTicket(params, method)
+        }
         if (!username) {
             return this.sendError(res, 40, 'Wrong username or password', format)
         }
         this.currentUsername = username
-
-        const { pathname } = urlObj
-        const method = pathname.split('/').pop()?.split('.')[0] || ''
 
         // [starred] 预先计算当前用户 love 列表歌曲 id 集合，供歌曲序列化标记 starred（排除热路径方法）
         if (!['ping', 'getLicense', 'stream', 'download', 'getCoverArt'].includes(method)) {
@@ -2540,24 +2591,28 @@ class SubsonicHandler {
                 || ((radioReq as any)?.socket?.encrypted ? 'https' : 'http')
 
             // [修复] 客户端播放「网络电台」时，会把 internetRadioStation.streamUrl 当作
-            // 可直接播放的音频地址「裸请求」，不会（也无法）自动附加 Subsonic 鉴权参数；
-            // 而本服为官方电台/歌单电台生成的 streamUrl 指回 /rest/stream，该端点强制 verifyAuth，
-            // 缺少 u + (t&s) 或 u + p 会直接返回错误 40 —— 客户端便表现为「地址能显示，但点了播不了」。
-            // 这里把本次列表请求携带的凭据透传到本服自产的 streamUrl 上；
-            // 外部地址（用户自建电台）原样返回，不附加凭据，避免泄露。
-            const authParams = new URLSearchParams()
-            for (const key of ['u', 't', 's', 'p'] as const) {
-                const val = params.get(key)
-                if (val) authParams.set(key, val)
-            }
-            const authQuery = authParams.toString()
-
+            // 可直接播放的音频地址「原样请求」，不会自行附加 Subsonic 凭据；
+            // 而本服为官方电台/歌单电台生成的 streamUrl 指回 /rest/stream，该端点强制鉴权，
+            // 缺少凭据会直接返回错误 40 —— 客户端便表现为「地址能显示，但点了播不了」。
+            // 但把用户凭据(u+t+s / u+p)拼进去会随 URL 一起被展示、复制，等于泄露长期令牌；
+            // 因此改为签发服务端短期票据（u + rtexp + rtsig），不含任何用户凭据。
+            // 外部地址（用户自建电台）原样返回，不做任何改动。
+            const radioUser = params.get('u') || ''
             const absolutize = (u: string) => {
                 if (!u || /^https?:\/\//i.test(u) || !host) return u
                 const abs = `${scheme}://${host}${u.startsWith('/') ? '' : '/'}${u}`
-                // 仅对本服自产的 /rest/ 端点补全鉴权参数，外部电台地址保持原样
-                if (!u.startsWith('/rest/') || !authQuery) return abs
-                return `${abs}${abs.includes('?') ? '&' : '?'}${authQuery}`
+                // 仅对本服自产的 /rest/ 端点签发短期票据，外部电台地址保持原样
+                if (!u.startsWith('/rest/') || !radioUser) return abs
+                const idMatch = /[?&]id=([^&#]+)/.exec(u)
+                const id = idMatch ? decodeURIComponent(idMatch[1]) : ''
+                if (!id) return abs
+                const exp = Date.now() + RADIO_TICKET_TTL
+                const ticket = new URLSearchParams({
+                    u: radioUser,
+                    [RADIO_TICKET_EXP]: String(exp),
+                    [RADIO_TICKET_SIG]: signRadioTicket(id, radioUser, exp),
+                }).toString()
+                return `${abs}${abs.includes('?') ? '&' : '?'}${ticket}`
             }
 
             const stations = [
