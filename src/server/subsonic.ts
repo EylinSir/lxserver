@@ -63,6 +63,34 @@ function briefErrorText(err: any, max = 200): string {
     return s.length > max ? s.slice(0, max) + '…' : s
 }
 
+// ─────────────────────────────────────────────
+// [transcoding] 转码决策票据
+// ─────────────────────────────────────────────
+// getTranscodeDecision 下发 transcodeParams，客户端原样回传给 getTranscodeStream。
+// 规范要求该值是「服务器内部值、已正确转义」，因此这里做成签名令牌（防篡改 + 可过期）。
+const TRANSCODE_PARAM_TTL = 30 * 60 * 1000
+
+function signTranscodeParams(payload: Record<string, any>): string {
+    const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
+    const sig = crypto.createHmac('sha256', radioTicketSecret()).update(body).digest('hex').slice(0, 16)
+    return `${body}.${sig}`
+}
+
+function verifyTranscodeParams(token: string): Record<string, any> | null {
+    const [body, sig] = String(token || '').split('.')
+    if (!body || !sig) return null
+    const expect = crypto.createHmac('sha256', radioTicketSecret()).update(body).digest('hex').slice(0, 16)
+    if (expect.length !== sig.length) return null
+    try {
+        if (!crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(sig))) return null
+    } catch { return null }
+    try {
+        const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'))
+        if (!payload || typeof payload.exp !== 'number' || Date.now() > payload.exp) return null
+        return payload
+    } catch { return null }
+}
+
 // 排行榜列表封面缓存：getBoards 接口不带封面，按需抓取榜单首歌封面并按榜单缓存，避免每次 getPlaylists 都实拉
 const leaderboardCoverCache = new Map<string, { ts: number; url: string }>()
 const leaderboardCoverInflight = new Map<string, Promise<string>>()
@@ -257,9 +285,20 @@ export interface ScrobbleEntry {
 export interface PlayQueueState {
     ids: string[]
     current?: string
+    /** [indexBasedQueue] 当前曲目的 0 基索引（按索引保存/读取队列时使用） */
+    currentIndex?: number
     position?: number
     changed: number
     changedBy?: string
+}
+
+/** 书签条目（getBookmarks / createBookmark / deleteBookmark）：某首歌 + 播放位置 */
+export interface BookmarkEntry {
+    id: string
+    /** 播放位置（毫秒） */
+    position: number
+    comment: string
+    created: number
 }
 
 const MAX_SCROBBLES = 2000
@@ -322,6 +361,57 @@ export function writePlayQueue(username: string, state: PlayQueueState) {
         subsonicLog.error('[Subsonic] Failed to write subsonic-playqueue.json:', e)
     }
 }
+
+function getBookmarkFilePath(username: string): string {
+    return path.join(global.lx.userPath, getUserDirname(username), 'subsonic-bookmarks.json')
+}
+
+export function readBookmarks(username: string): BookmarkEntry[] {
+    try {
+        const filePath = getBookmarkFilePath(username)
+        if (fs.existsSync(filePath)) {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+            if (Array.isArray(data)) {
+                return data
+                    .filter(it => it && typeof it.id === 'string')
+                    .map(it => ({
+                        id: it.id,
+                        position: Math.max(0, Math.floor(Number(it.position) || 0)),
+                        comment: typeof it.comment === 'string' ? it.comment : '',
+                        created: Number(it.created) || Date.now(),
+                    }))
+            }
+        }
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to read subsonic-bookmarks.json:', e)
+    }
+    return []
+}
+
+export function writeBookmarks(username: string, list: BookmarkEntry[]) {
+    try {
+        const filePath = getBookmarkFilePath(username)
+        const dirPath = path.dirname(filePath)
+        if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
+        fs.writeFileSync(filePath, JSON.stringify(list), 'utf8')
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to write subsonic-bookmarks.json:', e)
+    }
+}
+
+/**
+ * [playbackReport] 客户端实时播放状态（只存内存，重启即清空）。
+ * 与写盘的 scrobble 历史不同：这里保存「正在播什么 + 精确位置」，
+ * 仅当 state=stopped 且 ignoreScrobble≠true 时才额外落一条播放历史。
+ */
+interface PlaybackReportState {
+    id: string
+    positionMs: number
+    state: string
+    playbackRate: number
+    updatedAt: number
+}
+const playbackReportState = new Map<string, PlaybackReportState>()
 
 // 拼音首字母边界字：每个字母取汉语拼音中最靠前的那个汉字。
 // 拼音没有 I / U / V 开头，故不在表内——与主流音乐客户端的索引一致。
@@ -869,6 +959,10 @@ class SubsonicHandler {
                 case 'getMusicDirectory':
                     return this.handleGetMusicDirectory(res, username, params, format)
 
+                case 'getAlbumInfo':
+                case 'getAlbumInfo2':
+                    return this.handleGetAlbumInfo(res, username, params, format)
+
                 case 'getGenres':
                     return this.handleGetGenres(res, username, format)
 
@@ -880,6 +974,12 @@ class SubsonicHandler {
 
                 case 'getAlbumList2':
                     return this.handleGetAlbumList(res, username, params, format, true)
+
+                case 'getTranscodeDecision':
+                    return this.handleGetTranscodeDecision(res, username, params, format)
+
+                case 'getTranscodeStream':
+                    return this.handleGetTranscodeStream(req, res, username, params, format)
 
                 case 'getLyrics':
                     return this.handleGetLyrics(res, username, params, format)
@@ -930,6 +1030,9 @@ class SubsonicHandler {
                 case 'getSimilarSongs2':
                     return this.handleGetSimilarSongs(res, username, params, format, method)
 
+                case 'getSonicSimilarTracks':
+                    return this.handleGetSonicSimilarTracks(res, username, params, format)
+
                 case 'getTopSongs':
                     return this.handleGetTopSongs(res, username, params, format)
 
@@ -950,6 +1053,18 @@ class SubsonicHandler {
                 case 'scrobble':
                     return this.handleScrobble(res, username, params, format)
 
+                case 'reportPlayback':
+                    return this.handleReportPlayback(res, username, params, format)
+
+                case 'getBookmarks':
+                    return this.handleGetBookmarks(res, username, format)
+
+                case 'createBookmark':
+                    return this.handleCreateBookmark(res, username, params, format)
+
+                case 'deleteBookmark':
+                    return this.handleDeleteBookmark(res, username, params, format)
+
                 case 'getNowPlaying':
                     return this.handleGetNowPlaying(res, username, format)
 
@@ -958,6 +1073,12 @@ class SubsonicHandler {
 
                 case 'getPlayQueue':
                     return this.handleGetPlayQueue(res, username, format)
+
+                case 'savePlayQueueByIndex':
+                    return this.handleSavePlayQueueByIndex(res, username, params, format)
+
+                case 'getPlayQueueByIndex':
+                    return this.handleGetPlayQueueByIndex(res, username, format)
 
                 case 'getIndexes':
                     return this.handleGetIndexes(res, username, format)
@@ -1803,6 +1924,73 @@ class SubsonicHandler {
             subsonicLog.error('[Subsonic] handleGetSharedPlaylist error:', err)
             return this.sendError(res, 0, '获取歌单失败: ' + (err?.message || err), format)
         }
+    }
+
+    /**
+     * [getAlbumInfo / getAlbumInfo2] 专辑信息（notes + 封面 URL）。
+     * 本服曲库是在线聚合，官方 albumInfo 的 notes 大多没有数据源，因此：
+     *  - 本地收藏专辑（lib-alb_*）取它的描述；
+     *  - 封面用平台 CDN 直链（能构造时，目前仅 tx）；构造不出则留空。
+     */
+    private async handleGetAlbumInfo(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+
+        let notes = ''
+        let coverSource = ''
+        let coverMid = ''
+        // 兜底封面：本地专辑 / 歌曲自带的封面 URL（一般是平台 CDN 直链，客户端可直接取，无需本服鉴权）
+        let directImg = ''
+
+        if (id.startsWith('lib-alb_')) {
+            const realId = id.replace('lib-alb_', '')
+            try {
+                const libAlbums = await this.getLibraryData(username, 'albums')
+                const album: any = libAlbums.find((a: any) =>
+                    String(a.id) === realId || String(a.meta?.albumId) === realId || String(a.meta?.albumMid) === realId)
+                if (album) {
+                    notes = String(album.desc || album.description || '').trim()
+                    coverSource = album.source || ''
+                    coverMid = String(album.meta?.albumId || album.meta?.albumMid || album.id || '')
+                    directImg = String(album.img || album.meta?.picUrl || '').trim()
+                }
+            } catch (e: any) {
+                subsonicLog.error(`[Subsonic] getAlbumInfo 读取本地专辑失败 (${id}):`, e?.message || e)
+            }
+        }
+
+        // 先按「歌曲 id」解析（本地列表 / 在线缓存都能命中）：这样既能拿到它所属专辑的 mid，
+        // 又能拿到歌曲自带的封面直链（非 tx 平台构造不出专辑封面时兜底用）
+        if (!coverMid) {
+            const found = await this.findMusicById(username, id).catch(() => null)
+            const m: any = found?.music
+            if (m) {
+                coverSource = coverSource || m.source || ''
+                coverMid = String(m.meta?.albumMid || m.meta?.albumId || m.albumId || '')
+                directImg = directImg || String(m.img || m.meta?.picUrl || '').trim()
+            }
+        }
+        // 兜底：兼容 <source>_<albumMid> 形式的专辑 id（如 alb_tx_xxx）
+        if (!coverMid) {
+            const us = id.indexOf('_')
+            if (us > 0) {
+                coverSource = coverSource || id.slice(0, us)
+                coverMid = id.slice(us + 1).replace(/^alb[_a-z]*_/, '')
+            }
+        }
+
+        // 优先按平台规则构造专辑封面（目前仅 tx）；构造不出则退用自带的封面直链
+        let imageUrl = (coverSource && coverMid) ? (this.buildAlbumCoverUrl(coverSource, coverMid) || '') : ''
+        if (!imageUrl) imageUrl = directImg
+        const info = {
+            notes,
+            musicBrainzId: '',
+            smallImageUrl: imageUrl,
+            mediumImageUrl: imageUrl,
+            largeImageUrl: imageUrl,
+        }
+        if (format === 'json') return this.sendResponse(res, { albumInfo: info }, format)
+        return this.sendResponse(res, { albumInfo: { attrs: info } }, format)
     }
 
     // getAlbum: 返回 album + song[] 格式（音流等客户端期望的格式）
@@ -4522,16 +4710,11 @@ class SubsonicHandler {
         }
     }
 
-    private async handleGetSimilarSongs(
-        res: http.ServerResponse,
-        username: string,
-        params: URLSearchParams,
-        format: string,
-        method?: string,
-    ) {
-        const id = params.get('id')
-        const count = Math.min(parseInt(params.get('count') || '10'), 50)
-
+    /**
+     * 挑「相似歌曲」候选：同歌手(3 分) + 同专辑(2 分) 分层排序、层内随机；目标歌不在库时退化为随机。
+     * getSimilarSongs/2 与 getSonicSimilarTracks 共用同一套挑选逻辑，避免两处漂移。
+     */
+    private async pickSimilarEntries(username: string, id: string | null, count: number): Promise<Array<{ music: LX.Music.MusicInfo, listId: string }>> {
         const userSpace = getUserSpace(username)
         const listData = await userSpace.listManage.getListData()
 
@@ -4594,6 +4777,49 @@ class SubsonicHandler {
         if (global.lx.config['subsonic.dislikeNoRecommend']) {
             picked = await this.filterDislikedEntries(username, picked)
         }
+        return picked
+    }
+
+    /**
+     * [sonicSimilarity] getSonicSimilarTracks：与目标歌「相似」的曲目（id 必填，count 默认 10）。
+     * 注意：本服没有声学分析（AudioMuse 之类），similarity 是由「同歌手/同专辑」启发式排序
+     * 归一化得到的**排序分**，并非声学相似度；目的只是让客户端拿到排序稳定、可用的相似列表。
+     */
+    private async handleGetSonicSimilarTracks(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+        const count = Math.min(Math.max(1, parseInt(params.get('count') || '10') || 10), 50)
+        const picked = await this.pickSimilarEntries(username, id, count)
+
+        const matched = picked.map(({ music, listId }, i) => ({
+            // 单调递减的排序分：第一位接近 1，末尾不低于 0.1
+            similarity: Math.max(0.1, Number((1 - i * (0.9 / Math.max(1, picked.length))).toFixed(3))),
+            song: format === 'json'
+                ? this.musicToSongFlat(music, listId, undefined, username)
+                : this.musicToSongXml(music, listId, undefined, username),
+        }))
+
+        if (format === 'json') {
+            return this.sendResponse(res, {
+                sonicMatch: matched.map(m => ({ entry: m.song, similarity: m.similarity })),
+            }, format)
+        }
+        return this.sendResponse(res, {
+            sonicMatch: matched.map(m => ({ attrs: { similarity: m.similarity }, children: { entry: m.song } })),
+        }, format)
+    }
+
+    private async handleGetSimilarSongs(
+        res: http.ServerResponse,
+        username: string,
+        params: URLSearchParams,
+        format: string,
+        method?: string,
+    ) {
+        const id = params.get('id')
+        const count = Math.min(parseInt(params.get('count') || '10'), 50)
+
+        const picked = await this.pickSimilarEntries(username, id, count)
 
         // [修复] 根元素此前恒为 similarSongs2，导致 getSimilarSongs(v1) 也返回 v2 的结构
         const wrapKey = method === 'getSimilarSongs2' ? 'similarSongs2' : 'similarSongs'
@@ -4767,6 +4993,114 @@ class SubsonicHandler {
         return true
     }
 
+    /**
+     * [transcoding] getTranscodeDecision：告知客户端「这份媒体能否直放 / 是否需要转码」。
+     * 本服音源是「在线直链 + 可选 ffmpeg 转码」，因此：
+     *  - canDirectPlay 恒为 true：我们总能把音源直链交给客户端（客户端自己 seek）；
+     *  - canTranscode 取决于本机 ffmpeg 是否可用；
+     *  - transcodeParams 是签名令牌，getTranscodeStream 用它拿回本次决策（目标格式/码率）。
+     * 注：本实现不解析请求体里的 ClientInfo（直放恒可行，无需按能力协商）。
+     */
+    private async handleGetTranscodeDecision(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const mediaId = (params.get('mediaId') || '').trim()
+        if (!mediaId) return this.sendError(res, 10, 'Required parameter is missing: mediaId', format)
+        const mediaType = (params.get('mediaType') || 'song').trim() || 'song'
+
+        let ffmpegOk = false
+        try { ffmpegOk = await probeFfmpeg() } catch { ffmpegOk = false }
+
+        const targetFormat = String(global.lx.config['subsonic.transcode.format'] || 'mp3').toLowerCase()
+        const targetBitrate = 320 // kbps
+        const transcodeParams = signTranscodeParams({
+            id: mediaId,
+            type: mediaType,
+            format: targetFormat,
+            bitrate: targetBitrate,
+            exp: Date.now() + TRANSCODE_PARAM_TTL,
+        })
+
+        const sourceStream = { protocol: 'http', container: '', codec: '', audioChannels: 2, audioBitrate: 0, audioProfile: '', audioSamplerate: 0, audioBitdepth: 0 }
+        const transcodeStreamInfo = { protocol: 'http', container: targetFormat, codec: targetFormat, audioChannels: 2, audioBitrate: targetBitrate * 1000, audioProfile: '', audioSamplerate: 48000, audioBitdepth: 16 }
+
+        subsonicLog.debug(`[Subsonic] getTranscodeDecision: ${mediaId} ffmpeg=${ffmpegOk} (user=${username})`)
+
+        if (format === 'json') {
+            return this.sendResponse(res, {
+                transcodeDecision: {
+                    canDirectPlay: true,
+                    canTranscode: ffmpegOk,
+                    transcodeReason: [],
+                    errorReason: '',
+                    transcodeParams,
+                    sourceStream,
+                    transcodeStream: transcodeStreamInfo,
+                },
+            }, format)
+        }
+        return this.sendResponse(res, {
+            transcodeDecision: {
+                attrs: {
+                    canDirectPlay: true,
+                    canTranscode: ffmpegOk,
+                    errorReason: '',
+                    transcodeParams,
+                },
+                children: {
+                    sourceStream: { attrs: sourceStream },
+                    transcodeStream: { attrs: transcodeStreamInfo },
+                },
+            },
+        }, format)
+    }
+
+    /**
+     * [transcoding] getTranscodeStream：按 transcodeParams（决策令牌）返回转码后的媒体流。
+     * ffmpeg 不可用时 transcodeStream 内部会降级为 302 直链。
+     */
+    private async handleGetTranscodeStream(
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        username: string,
+        params: URLSearchParams,
+        format: string,
+    ) {
+        const mediaId = (params.get('mediaId') || '').trim()
+        if (!mediaId) return this.sendError(res, 10, 'Required parameter is missing: mediaId', format)
+        const decision = verifyTranscodeParams(params.get('transcodeParams') || '')
+        if (!decision) return this.sendError(res, 10, 'Invalid or expired transcodeParams', format)
+
+        const offset = Math.max(0, Math.floor(Number(params.get('offset') || 0)) || 0)
+        const targetFormat = String(decision.format || 'mp3').toLowerCase()
+        const bitrate = Math.max(32, Math.min(Number(decision.bitrate) || 320, 999))
+
+        // 解析歌曲信息（本地列表 / 在线缓存 / 回源）
+        let musicInfo: any = null
+        try {
+            const hit = await this.resolveSongMeta(username, mediaId)
+            musicInfo = hit?.music || null
+        } catch { /* 回退到前缀解析 */ }
+        if (!musicInfo) {
+            const us = mediaId.indexOf('_')
+            const src = us > 0 ? mediaId.slice(0, us) : ''
+            const mid = us > 0 ? mediaId.slice(us + 1) : mediaId
+            musicInfo = { source: src, songmid: mid, id: mediaId, meta: { songId: mid } }
+        }
+        const source = musicInfo.source || ''
+        const songmid = String(musicInfo.songmid || musicInfo.meta?.songId || '')
+        if (!source || !songmid) return this.sendError(res, 0, 'Could not resolve media', format)
+
+        let result: { url: string, quality: string } | null = null
+        try {
+            result = await this.resolveStreamUrl(source, songmid, mediaId, musicInfo, 'flac', 0, username)
+        } catch (e: any) {
+            return this.sendError(res, 0, 'Could not resolve music URL: ' + briefErrorText(e), format)
+        }
+        if (!result?.url) return this.sendError(res, 0, 'Could not resolve music URL', format)
+
+        subsonicLog.debug(`[Subsonic] getTranscodeStream: ${mediaId} -> ${targetFormat}@${bitrate}k offset=${offset}s (user=${username})`)
+        await this.transcodeStream(req, res, result.url, bitrate, format, offset, targetFormat)
+    }
+
     private async handleStream(
         req: http.IncomingMessage,
         res: http.ServerResponse,
@@ -4791,6 +5125,9 @@ class SubsonicHandler {
 
         try {
             const maxBitrate = parseInt(params.get('maxBitrate') || '0')
+            // [transcodeOffset] 客户端要求从第 N 秒开始（单位：秒）。
+            // 仅在服务端转码链路上生效；直接 302 到音源直链时无法携带偏移（客户端自行 seek）。
+            const timeOffsetSec = Math.max(0, Math.floor(Number(params.get('timeOffset') || 0)) || 0)
             let quality = '128k'
             if (maxBitrate === 0 || maxBitrate >= 320) {
                 quality = 'flac' // 优先请求最高音质，SDK 会自动降级
@@ -4975,6 +5312,11 @@ class SubsonicHandler {
                         }
                     })
                 }
+                // 转码兜底:服务端拉高音质 -> ffmpeg 降码率 -> 流式发给客户端(节省客户端流量)
+                if (needTranscode) {
+                    await this.transcodeStream(req, res, result.url, maxBitrate, format, timeOffsetSec)
+                    return
+                }
                 res.writeHead(302, { Location: result.url })
                 res.end()
             } else {
@@ -5022,9 +5364,11 @@ class SubsonicHandler {
         url: string,
         maxBitrate: number,
         format: string,
+        timeOffsetSec = 0,
+        formatOverride?: string,
     ): Promise<void> {
         const cfg = global.lx.config
-        const targetFormat = String(cfg['subsonic.transcode.format'] || 'mp3').toLowerCase()
+        const targetFormat = String(formatOverride || cfg['subsonic.transcode.format'] || 'mp3').toLowerCase()
         const maxConcurrent = Math.max(1, Number(cfg['subsonic.transcode.maxConcurrent'] ?? 2) || 2)
 
         // ffmpeg 可用性检测:缺失则降级 302 直链,避免播放失败
@@ -5041,7 +5385,11 @@ class SubsonicHandler {
         await sem.acquire()
         subsonicLog.info(`[Subsonic] transcode start: target=${maxBitrate}k format=${targetFormat} url=${String(url).slice(0, 60)}`)
 
-        const args = ['-i', url, '-b:a', `${maxBitrate}k`, '-ar', '48000', '-f', targetFormat, '-']
+        // [transcodeOffset] 从指定秒数开始转码（-ss 放在 -i 前做快速定位），用于客户端在转码流里跳转
+        const args = [
+            ...(timeOffsetSec > 0 ? ['-ss', String(timeOffsetSec)] : []),
+            '-i', url, '-b:a', `${maxBitrate}k`, '-ar', '48000', '-f', targetFormat, '-',
+        ]
         const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] })
         const contentType = targetFormat === 'mp3' ? 'audio/mpeg'
             : targetFormat === 'opus' ? 'audio/ogg'
@@ -5358,6 +5706,81 @@ class SubsonicHandler {
     }
 
     /**
+     * [playbackReport] reportPlayback：客户端按状态变化上报播放时间线。
+     * 约定（OpenSubsonic）：state ∈ starting|playing|paused|stopped；
+     *  - 服务端不得凭「预计播放结束」自行判定已播完，只有收到 stopped 才算一次播放；
+     *  - ignoreScrobble=true 时只更新 now-playing 状态，不产生 scrobble/播放次数副作用。
+     * 本实现：所有状态都记入内存态 now-playing（含精确位置）；仅 stopped 且未 ignoreScrobble 时落一条播放历史。
+     */
+    private async handleReportPlayback(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const mediaId = (params.get('mediaId') || '').trim().replace(/^(al-|ar-|tr-|sg-|mg-)/, '')
+        if (!mediaId) return this.sendError(res, 10, 'Required parameter is missing: mediaId', format)
+        const state = (params.get('state') || '').trim()
+        if (!state) return this.sendError(res, 10, 'Required parameter is missing: state', format)
+        const mediaType = (params.get('mediaType') || 'song').trim() || 'song'
+        const positionMs = Math.max(0, Math.floor(Number(params.get('positionMs') || 0)) || 0)
+        const playbackRate = Number(params.get('playbackRate') || 1) || 1
+        const ignoreScrobble = params.get('ignoreScrobble') === 'true'
+
+        playbackReportState.set(username, { id: mediaId, positionMs, state, playbackRate, updatedAt: Date.now() })
+
+        if (!ignoreScrobble && state === 'stopped' && mediaType === 'song') {
+            const list = readScrobbles(username)
+            list.push({ id: mediaId, time: Date.now() })
+            writeScrobbles(username, list)
+        }
+
+        subsonicLog.debug(`[Subsonic] reportPlayback: state=${state} mediaId=${mediaId} pos=${positionMs}ms rate=${playbackRate} ignore=${ignoreScrobble} (user=${username})`)
+        return this.sendResponse(res, {}, format)
+    }
+
+    /** [书签] getBookmarks：返回该用户的全部书签（歌 + 位置） */
+    private async handleGetBookmarks(res: http.ServerResponse, username: string, format: string) {
+        const list = readBookmarks(username)
+        if (format === 'json') {
+            const out: any[] = []
+            for (const b of list) {
+                const entry = await this.songEntryById(username, b.id, format)
+                if (!entry) continue
+                out.push({ entry, position: b.position, username, comment: b.comment, created: new Date(b.created).toISOString() })
+            }
+            return this.sendResponse(res, { bookmarks: { bookmark: out } }, format)
+        }
+        const out: any[] = []
+        for (const b of list) {
+            const entry = await this.songEntryById(username, b.id, format)
+            if (!entry) continue
+            out.push({
+                attrs: { position: b.position, username, comment: b.comment, created: new Date(b.created).toISOString() },
+                children: { entry: { attrs: entry.attrs } },
+            })
+        }
+        return this.sendResponse(res, { bookmarks: { children: { bookmark: out } } }, format)
+    }
+
+    /** [书签] createBookmark：新建/覆盖某首歌的书签（id + position 必填，comment 可选） */
+    private async handleCreateBookmark(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+        if (!params.has('position')) return this.sendError(res, 10, 'Required parameter is missing: position', format)
+        const position = Math.max(0, Math.floor(Number(params.get('position')) || 0))
+        const comment = params.get('comment') || ''
+        const list = readBookmarks(username).filter(b => b.id !== id)
+        list.push({ id, position, comment, created: Date.now() })
+        writeBookmarks(username, list)
+        subsonicLog.debug(`[Subsonic] createBookmark: ${id} @${position}ms (user=${username})`)
+        return this.sendResponse(res, {}, format)
+    }
+
+    /** [书签] deleteBookmark：删除某首歌的书签 */
+    private async handleDeleteBookmark(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+        writeBookmarks(username, readBookmarks(username).filter(b => b.id !== id))
+        return this.sendResponse(res, {}, format)
+    }
+
+    /**
      * scrobble：客户端上报播放。
      * [修复] 之前这里直接返回空成功、什么都不记录，服务端无从得知用户听过什么
      * （音流在高频调用，NAS 实例日志里 1853 次）。现在落盘为播放历史。
@@ -5397,6 +5820,10 @@ class SubsonicHandler {
             if (it.time < since) continue
             latest.set(it.id, it.time)
         }
+        // [playbackReport] 实时上报的播放状态优先（含精确位置），15 分钟窗口内有效
+        const reported = playbackReportState.get(username)
+        const reportedActive = !!reported && Date.now() - reported.updatedAt < 15 * 60 * 1000 && reported.state !== 'stopped'
+        if (reportedActive && reported) latest.set(reported.id, reported.updatedAt)
         const entries = Array.from(latest.entries())
             .sort((a, b) => b[1] - a[1])
             .slice(0, 20)
@@ -5405,12 +5832,14 @@ class SubsonicHandler {
         for (const [id, time] of entries) {
             const entry = await this.songEntryById(username, id, format)
             if (!entry) continue
-            const extra = {
+            const extra: any = {
                 userName: username,
                 minutesAgo: Math.max(0, Math.round((Date.now() - time) / 60000)),
                 playerId: 0,
                 playerName: 'lxserver',
             }
+            // [playbackReport] 正在播放的那首附带精确位置（GetNowPlaying 的 timeline 字段）
+            if (reportedActive && reported && reported.id === id) extra.positionMs = reported.positionMs
             songs.push(format === 'json' ? { ...entry, ...extra } : { attrs: { ...entry.attrs, ...extra } })
         }
 
@@ -5432,6 +5861,8 @@ class SubsonicHandler {
         writePlayQueue(username, {
             ids,
             current,
+            // 同时记录索引，供 getPlayQueueByIndex 使用（indexBasedQueue 扩展）
+            currentIndex: Math.max(0, ids.indexOf(current)),
             position,
             changed: Date.now(),
             changedBy: params.get('c') || '',
@@ -5464,6 +5895,75 @@ class SubsonicHandler {
         return this.sendResponse(res, {
             playQueue: {
                 attrs: { current: currentIndex, position, username, changed, changedBy },
+                children: { entry: entries },
+            },
+        }, format)
+    }
+
+    /**
+     * [indexBasedQueue] savePlayQueueByIndex：按「索引」保存播放队列。
+     * 与 savePlayQueue 的区别：用 currentIndex 而不是歌曲 id 表达当前曲目，
+     * 因此允许队列里存在重复曲目。不带任何 id 的调用 = 清空队列（此时不得带 currentIndex）。
+     */
+    private async handleSavePlayQueueByIndex(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const ids = params.getAll('id')
+            .flatMap(v => String(v).split(','))
+            .map(s => s.trim())
+            .filter(Boolean)
+        const changedBy = params.get('c') || ''
+
+        if (!ids.length) {
+            if (params.has('currentIndex')) {
+                return this.sendError(res, 10, 'currentIndex must not be set when clearing the play queue', format)
+            }
+            writePlayQueue(username, { ids: [], current: '', position: 0, changed: Date.now(), changedBy })
+            return this.sendResponse(res, {}, format)
+        }
+
+        const currentIndex = Number(params.get('currentIndex'))
+        if (!Number.isInteger(currentIndex) || currentIndex < 0 || currentIndex > ids.length - 1) {
+            // 规范要求：currentIndex 越界必须返回错误码 10
+            return this.sendError(res, 10, 'Required parameter is missing or invalid: currentIndex', format)
+        }
+        const position = Math.max(0, Math.floor(Number(params.get('position') || 0)) || 0)
+
+        writePlayQueue(username, {
+            ids,
+            current: ids[currentIndex],
+            currentIndex,
+            position,
+            changed: Date.now(),
+            changedBy,
+        })
+        subsonicLog.debug(`[Subsonic] savePlayQueueByIndex: ${ids.length} 首 currentIndex=${currentIndex} position=${position}ms (user=${username})`)
+        return this.sendResponse(res, {}, format)
+    }
+
+    /** [indexBasedQueue] getPlayQueueByIndex：读取播放队列（索引语义，含 currentIndex） */
+    private async handleGetPlayQueueByIndex(res: http.ServerResponse, username: string, format: string) {
+        const state = readPlayQueue(username)
+        const ids = state?.ids || []
+        const entries: any[] = []
+        for (const id of ids) {
+            const entry = await this.songEntryById(username, id, format)
+            if (entry) entries.push(entry)
+        }
+
+        const currentIndex = typeof state?.currentIndex === 'number'
+            ? state.currentIndex
+            : (state?.current ? Math.max(0, ids.indexOf(state.current)) : 0)
+        const position = state?.position || 0
+        const changed = new Date(state?.changed || 0).toISOString()
+        const changedBy = state?.changedBy || ''
+
+        if (format === 'json') {
+            return this.sendResponse(res, {
+                playQueueByIndex: { entry: entries, currentIndex, position, username, changed, changedBy },
+            }, format)
+        }
+        return this.sendResponse(res, {
+            playQueueByIndex: {
+                attrs: { currentIndex, position, username, changed, changedBy },
                 children: { entry: entries },
             },
         }, format)
@@ -5686,7 +6186,17 @@ class SubsonicHandler {
             // [修复] 原先声明的 'lyrics' / 'coverArtScaling' 都不是 OpenSubsonic 官方扩展名。
             // 官方歌词扩展叫 songLyrics，客户端据此决定是否调用 getLyricsBySongId —— 声明错名字等于该接口白做。
             // 封面缩放仍通过 getCoverArt 的 size 参数生效，只是官方没有对应扩展名可声明，故不再虚报。
-            { name: 'songLyrics', versions: [1] }
+            { name: 'songLyrics', versions: [1] },
+            // [新增] 播放时间线上报（reportPlayback / getNowPlaying 附带位置）
+            { name: 'playbackReport', versions: [1] },
+            // [新增] 相似曲目（getSonicSimilarTracks；本服为启发式排序，非声学分析）
+            { name: 'sonicSimilarity', versions: [1] },
+            // [新增] 按索引保存/读取播放队列（savePlayQueueByIndex / getPlayQueueByIndex）
+            { name: 'indexBasedQueue', versions: [1] },
+            // [新增] stream 支持 timeOffset（秒），转码链路可从指定位置开始
+            { name: 'transcodeOffset', versions: [1] },
+            // [新增] 转码决策/转码流（getTranscodeDecision / getTranscodeStream）
+            { name: 'transcoding', versions: [1] }
         ]
         const data = { openSubsonicExtensions: format === 'json' ? extensions : { children: { extension: extensions.map(e => ({ attrs: e })) } } }
         return this.sendResponse(res, data, format)
