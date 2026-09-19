@@ -602,7 +602,7 @@ class SubsonicHandler {
                     return this.handleGetGenres(res, username, format)
 
                 case 'getInternetRadioStations':
-                    return this.handleGetInternetRadioStations(res, format)
+                    return this.handleGetInternetRadioStations(res, params, format)
 
                 case 'createInternetRadioStation':
                     return this.handleCreateInternetRadioStation(res, params, format)
@@ -2482,11 +2482,42 @@ class SubsonicHandler {
         return stations
     }
 
-    private async handleGetInternetRadioStations(res: http.ServerResponse, format: string) {
+    private async handleGetInternetRadioStations(res: http.ServerResponse, params: URLSearchParams, format: string) {
         try {
             const official = await fetchRadios()           // QQ 官方电台：streamUrl 指向本服 /rest/stream?id=radio_tx_*
             const userStations = listRadioStations()        // 用户自建电台：落盘持久化
             const playlistStations = await this.getPlaylistRadioStations() // 音乐源歌单：本服随机取歌
+            // [修复] 本服生成的电台 streamUrl 是相对路径（/rest/stream?id=radio_tx_99），
+            // 但协议里客户端会把它当作可直接播放的绝对地址，相对路径在第三方客户端必然失败。
+            // 这里按当前访问地址补全（尊重反向代理的 X-Forwarded-Proto）。
+            const radioReq = (res as any).req as http.IncomingMessage | undefined
+            const host = radioReq?.headers?.host || ''
+            const fwdProto = radioReq?.headers?.['x-forwarded-proto']
+            const rawProto = Array.isArray(fwdProto) ? fwdProto[0] : (fwdProto || '')
+            const scheme = String(rawProto).split(',')[0].trim()
+                || ((radioReq as any)?.socket?.encrypted ? 'https' : 'http')
+
+            // [修复] 客户端播放「网络电台」时，会把 internetRadioStation.streamUrl 当作
+            // 可直接播放的音频地址「裸请求」，不会（也无法）自动附加 Subsonic 鉴权参数；
+            // 而本服为官方电台/歌单电台生成的 streamUrl 指回 /rest/stream，该端点强制 verifyAuth，
+            // 缺少 u + (t&s) 或 u + p 会直接返回错误 40 —— 客户端便表现为「地址能显示，但点了播不了」。
+            // 这里把本次列表请求携带的凭据透传到本服自产的 streamUrl 上；
+            // 外部地址（用户自建电台）原样返回，不附加凭据，避免泄露。
+            const authParams = new URLSearchParams()
+            for (const key of ['u', 't', 's', 'p'] as const) {
+                const val = params.get(key)
+                if (val) authParams.set(key, val)
+            }
+            const authQuery = authParams.toString()
+
+            const absolutize = (u: string) => {
+                if (!u || /^https?:\/\//i.test(u) || !host) return u
+                const abs = `${scheme}://${host}${u.startsWith('/') ? '' : '/'}${u}`
+                // 仅对本服自产的 /rest/ 端点补全鉴权参数，外部电台地址保持原样
+                if (!u.startsWith('/rest/') || !authQuery) return abs
+                return `${abs}${abs.includes('?') ? '&' : '?'}${authQuery}`
+            }
+
             const stations = [
                 ...official.map((r: any) => ({
                     id: r.id,
