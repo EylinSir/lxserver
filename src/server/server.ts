@@ -1100,10 +1100,14 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
     const normalizePath = (p: string) => (p || '').replace(/\/+$/, '')
     const playerPath = global.lx.config['player.path'] ?? '/'
     const adminPath = global.lx.config['admin.path'] ?? '/admin'
+    // [修复] Subsonic 访问路径可配置；此前这里只排除写死的 /rest/，
+    // 而本段判断先于下方的 Subsonic 路由执行，导致自定义 subsonic.path 会被当成播放器请求、后端接口整个失效。
+    const subsonicPath = normalizePath(global.lx.config['subsonic.path'] || '/rest') || '/rest'
+    const isSubsonicRequest = pathname === subsonicPath || pathname.startsWith(subsonicPath + '/')
 
     // 映射播放器逻辑 (无论是自定义路径还是前端硬编码的 /music/)
     const isPlayerRequest = (playerPath === '/' || playerPath === '')
-      ? (pathname === '/' || (!pathname.startsWith('/api/') && !pathname.startsWith('/rest/') && (adminPath === '' || (pathname !== adminPath && !pathname.startsWith(adminPath + '/')))))
+      ? (pathname === '/' || (!pathname.startsWith('/api/') && !isSubsonicRequest && (adminPath === '' || (pathname !== adminPath && !pathname.startsWith(adminPath + '/')))))
       : (pathname.startsWith(playerPath + '/') || pathname === playerPath)
 
     // [新增] 映射管理后台逻辑
@@ -1297,8 +1301,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
     // [Subsonic API]
     const subsonicEnable = global.lx.config['subsonic.enable']
-    const subsonicPath = normalizePath(global.lx.config['subsonic.path'] || '/rest')
-    if (subsonicEnable && (pathname.startsWith(subsonicPath + '/') || pathname === subsonicPath)) {
+    if (subsonicEnable && isSubsonicRequest) {
       const { subsonicHandler } = require('./subsonic')
       return subsonicHandler.handleRequest(req, res, urlObj)
     }

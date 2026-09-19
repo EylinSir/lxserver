@@ -29,6 +29,40 @@ import { getMusicInfo as mgGetMusicInfo } from '@/modules/utils/musicSdk/mg/musi
 import bdMusicInfo from '@/modules/utils/musicSdk/bd/musicInfo.js'
 const musicSdk = musicSdkRaw as any
 
+// ─────────────────────────────────────────────
+// 电台流「短期票据」
+// ─────────────────────────────────────────────
+// 实测：客户端(Musiver/音流)播放网络电台时，会把 internetRadioStation.streamUrl 当作
+// 「可直接播放的外部地址」原样请求，不会自行附加 Subsonic 凭据（日志中请求参数与下发 URL 完全一致，无 c/v/f）。
+// 而该 URL 会被客户端展示、也可能被复制/分享；若把用户凭据(u+t+s 或 u+p)拼进去，等于泄露长期令牌。
+// 因此改签服务端票据：URL 只带 u(用户名) + rtexp(过期) + rtsig(HMAC)，不含任何用户凭据。
+const RADIO_TICKET_TTL = 12 * 60 * 60 * 1000 // 12 小时
+const RADIO_TICKET_EXP = 'rtexp'
+const RADIO_TICKET_SIG = 'rtsig'
+
+function radioTicketSecret(): string {
+    return String((global.lx.config as any)?.['frontend.password'] || 'lxserver-radio-ticket')
+}
+
+function signRadioTicket(id: string, user: string, exp: number): string {
+    return crypto.createHmac('sha256', radioTicketSecret())
+        .update(`${id}|${user}|${exp}`)
+        .digest('hex')
+        .slice(0, 40)
+}
+
+/** 配置的 Subsonic 访问路径（默认 /rest）。自产 URL 与票据判定统一用它，避免写死 /rest。 */
+function subsonicBasePath(): string {
+    return String((global.lx.config as any)?.['subsonic.path'] || '/rest').replace(/\/+$/, '') || '/rest'
+}
+
+/** 把错误原因压成可安全回传给客户端的一小段文本（截断 + 打码常见密钥参数） */
+function briefErrorText(err: any, max = 200): string {
+    let s = String(err?.message || err || '').replace(/\s+/g, ' ').trim()
+    s = s.replace(/((?:key|token|api[_-]?key|apikey|password|pass|sign)=)[^&\s'"]+/gi, '$1***')
+    return s.length > max ? s.slice(0, max) + '…' : s
+}
+
 // 排行榜列表封面缓存：getBoards 接口不带封面，按需抓取榜单首歌封面并按榜单缓存，避免每次 getPlaylists 都实拉
 const leaderboardCoverCache = new Map<string, { ts: number; url: string }>()
 const leaderboardCoverInflight = new Map<string, Promise<string>>()
@@ -580,6 +614,30 @@ class SubsonicHandler {
         return null
     }
 
+    /**
+     * 校验「电台流短期票据」(rtexp + rtsig)。仅对 stream/download 且 id 为 radio_* 的请求生效。
+     * 通过则返回票据中的用户名，否则返回 null。
+     */
+    private verifyRadioTicket(params: URLSearchParams, method: string): string | null {
+        if (method !== 'stream' && method !== 'download') return null
+        const id = params.get('id') || ''
+        if (!id.startsWith('radio_')) return null
+        const user = params.get('u') || ''
+        const exp = Number(params.get(RADIO_TICKET_EXP) || 0)
+        const sig = params.get(RADIO_TICKET_SIG) || ''
+        if (!user || !exp || !sig) return null
+        if (!Number.isFinite(exp) || Date.now() > exp) return null
+        // 票据用户名必须是真实用户
+        if (!global.lx.config.users?.some((x: any) => x.name === user)) return null
+        const expect = signRadioTicket(id, user, exp)
+        if (expect.length !== sig.length) return null
+        try {
+            return crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(sig)) ? user : null
+        } catch {
+            return null
+        }
+    }
+
     // ─────────────────────────────────────────────
     // 响应序列化
     // ─────────────────────────────────────────────
@@ -721,15 +779,20 @@ class SubsonicHandler {
         }
 
         const format = params.get('f') === 'json' ? 'json' : 'xml'
-        const username = this.verifyAuth(params)
+        const { pathname } = urlObj
+        const method = pathname.split('/').pop()?.split('.')[0] || ''
 
+        // 常规鉴权：u + (t&s) 或 u + p
+        let username = this.verifyAuth(params)
+        // [电台流] 客户端把自产电台 streamUrl 当外部地址原样请求、不带用户凭据，
+        // 这里接受服务端签发的短期票据（u + rtexp + rtsig），避免用户凭据出现在 URL 中。
+        if (!username) {
+            username = this.verifyRadioTicket(params, method)
+        }
         if (!username) {
             return this.sendError(res, 40, 'Wrong username or password', format)
         }
         this.currentUsername = username
-
-        const { pathname } = urlObj
-        const method = pathname.split('/').pop()?.split('.')[0] || ''
 
         // [starred] 预先计算当前用户 love 列表歌曲 id 集合，供歌曲序列化标记 starred（排除热路径方法）
         if (!['ping', 'getLicense', 'stream', 'download', 'getCoverArt'].includes(method)) {
@@ -899,6 +962,9 @@ class SubsonicHandler {
                 case 'getIndexes':
                     return this.handleGetIndexes(res, username, format)
 
+                case 'startScan':
+                    // [新增] 本服曲库是在线聚合、无常驻扫描任务，返回 ok 只是为了不让客户端
+                    // 因 "Method not found" 报错；真实状态由 getScanStatus 统一返回（恒为未扫描）。
                 case 'getScanStatus':
                     return this.sendResponse(res, format === 'json'
                         ? { scanStatus: { scanning: false, count: 0 } }
@@ -4736,6 +4802,7 @@ class SubsonicHandler {
             if (id.startsWith('radio_tx_')) {
                 const radioId = id.replace('radio_tx_', '')
                 // subsonicLog.debug(`[Subsonic] Radio stream requested: ${id}`)
+                let failReason = ''
                 const songs = await fetchRadioSongs(radioId)
                 // subsonicLog.debug(`[Subsonic] Radio ${id} fetched ${songs?.length || 0} songs`)
 
@@ -4777,12 +4844,14 @@ class SubsonicHandler {
                         res.writeHead(302, { Location: result.url })
                         return res.end()
                     } else {
+                        failReason = '音源未能解析出可播放链接'
                         subsonicLog.error(`[Subsonic] Radio ${id} failed to resolve music URL`)
                     }
                 } else {
+                    failReason = '上游取歌接口未返回歌曲（QQ 电台接口可能已失效）'
                     subsonicLog.warn(`[Subsonic] Radio ${id} returned empty song list`)
                 }
-                return this.sendError(res, 0, 'Could not resolve radio track', format)
+                return this.sendError(res, 0, 'Could not resolve radio track' + (failReason ? `: ${failReason}` : ''), format)
             }
 
             // [新增] 本地缓存优先播放：受 subsonic.playCacheFirst 开关控制(默认开启)。
@@ -5614,10 +5683,10 @@ class SubsonicHandler {
     private handleGetOpenSubsonicExtensions(res: http.ServerResponse, format: string) {
         const extensions = [
             { name: 'formPost', versions: [1] },
-            // coverArtScaling：对腾讯/网易图片按请求 size 改写尺寸（无法识别的图源回退原图）
-            { name: 'coverArtScaling', versions: [1] },
-            // thumbnails 需要服务端生成任意尺寸缩略图（依赖 sharp，生产镜像未安装），故不再声明
-            { name: 'lyrics', versions: [1] }
+            // [修复] 原先声明的 'lyrics' / 'coverArtScaling' 都不是 OpenSubsonic 官方扩展名。
+            // 官方歌词扩展叫 songLyrics，客户端据此决定是否调用 getLyricsBySongId —— 声明错名字等于该接口白做。
+            // 封面缩放仍通过 getCoverArt 的 size 参数生效，只是官方没有对应扩展名可声明，故不再虚报。
+            { name: 'songLyrics', versions: [1] }
         ]
         const data = { openSubsonicExtensions: format === 'json' ? extensions : { children: { extension: extensions.map(e => ({ attrs: e })) } } }
         return this.sendResponse(res, data, format)
