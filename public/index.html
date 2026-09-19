@@ -1186,14 +1186,7 @@
                                     <div class="config-field">
                                         <label class="config-label">Subsonic 独立监听端口</label>
                                         <input type="number" name="subsonic.port" class="form-input config-input"
-                                            min="0" max="65535" placeholder="0" />
-                                        <small class="config-hint">0 = 不启用独立端口（走主端口 subsonic.path）；&gt;0 时单独监听该端口，仅暴露 Subsonic API</small>
-                                    </div>
-                                    <div class="config-field">
-                                        <label class="config-label">独立端口绑定地址</label>
-                                        <input type="text" name="subsonic.bindIP" class="form-input config-input"
-                                            placeholder="留空=与主端口一致" />
-                                        <small class="config-hint">独立端口绑定地址，留空则与主端口一致</small>
+                                            min="0" max="65535" placeholder="0-65535" />
                                     </div>
                                 </div>
                                 <div class="config-divider"></div>
