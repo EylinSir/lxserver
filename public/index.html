@@ -921,6 +921,51 @@
                             </div>
                         </div>
 
+                        <!-- 本地配置备份卡片 -->
+                        <div id="config-card-configbackup" class="config-card glass">
+                            <div class="config-card-header">
+                                <div class="config-card-icon"
+                                    style="background: linear-gradient(135deg, #10b981, #059669);">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                        <polyline points="17 21 17 13 7 13 7 21" />
+                                        <polyline points="7 3 7 8 15 8" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="config-card-title">本地配置备份</h3>
+                                    <p class="config-card-desc">每日自动保留一份 config.js 副本</p>
+                                </div>
+                            </div>
+                            <div class="config-card-body">
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">启用本地配置备份</span>
+                                        <span class="config-toggle-desc">每日生成一份 config.js 副本，按保留天数自动清理</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="configBackup.enable" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-divider"></div>
+                                <div class="config-field-row">
+                                    <div class="config-field">
+                                        <label class="config-label">保留天数</label>
+                                        <input type="number" name="configBackup.retentionDays" class="form-input config-input"
+                                            min="1" max="365" placeholder="7" />
+                                        <small class="config-hint">默认 7 天</small>
+                                    </div>
+                                    <div class="config-field">
+                                        <label class="config-label">备份目录</label>
+                                        <input type="text" name="configBackup.dir" class="form-input config-input"
+                                            placeholder="留空= <data>/backups" />
+                                        <small class="config-hint">相对路径基于 data 目录，绝对路径直接使用</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- 用户路径配置卡片 -->
                         <div class="config-card glass">
                             <div class="config-card-header">
