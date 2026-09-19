@@ -1893,6 +1893,18 @@ class SubsonicHandler {
             } else {
                 subsonicLog.warn(`[Subsonic] SDK missing extendDetail.getAlbumSongs for ${source}`)
             }
+
+            // [兜底] 单曲专辑（无专辑信息的歌以 alb_<source>_<songId> 出现在播放历史里）：
+            // SDK 取不到曲目时按单曲解析，避免点进去一片空白
+            if (!musics || musics.length === 0) {
+                const single = await this.findMusicById(username, `${source}_${realId}`).catch(() => null)
+                if (single) {
+                    musics = [single.music]
+                    if (!listName || listName === 'Album Detail') {
+                        listName = String((single.music as any)?.name || '单曲')
+                    }
+                }
+            }
         } else if (id.startsWith('album_')) {
             // 聚合专辑 ID（由 getAlbumList/getAlbumList2 生成）
             const allMusicsMap = new Map<string, { music: LX.Music.MusicInfo, listId: string }[]>()
@@ -2358,7 +2370,28 @@ class SubsonicHandler {
                 }
             }
 
-            albums = libAlbums.slice(offset, offset + size).map(buildAlbum)
+            let pool = libAlbums.map(buildAlbum)
+
+            // [兜底] 用户未必单独收藏过专辑（NAS 实测 library/albums.json 是空的），
+            // 推荐接口又整批失败时，从本地歌曲反推专辑；还不够就用在线歌曲缓存补齐，
+            // 避免「最近发行」这类标签页直接空白
+            if (pool.length < RECOMMEND_POOL_SIZE) {
+                const seen = new Set<string>(pool.map(a => String(a.id)))
+                for (const a of await this.buildLocalAlbums(username, true)) {
+                    if (seen.has(String(a.id))) continue
+                    seen.add(String(a.id))
+                    pool.push(a)
+                }
+            }
+
+            if (type === 'random') {
+                for (let i = pool.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1))
+                    ;[pool[i], pool[j]] = [pool[j], pool[i]]
+                }
+            }
+
+            albums = pool.slice(offset, offset + size)
         }
 
         const wrapKey = isV2 ? 'albumList2' : 'albumList'
@@ -2375,6 +2408,70 @@ class SubsonicHandler {
         }, format)
     }
 
+
+    /**
+     * 从本地数据反推出专辑列表，作为在线推荐失败时的兜底。
+     *
+     * 实测 NAS 上腾讯 musicu 推荐接口会整批失败（日志里 getArtistAlbums、source=tx 搜索批量报错），
+     * 而用户未必单独收藏过专辑（NAS 上该用户的 library/ 目录就是空的），
+     * 原逻辑会一路回退到空列表，客户端「最近发行」直接一片空白。
+     *
+     * 只收录带 albumId 的条目：没有 albumId 的专辑点进去拿不到曲目，宁可不显示。
+     */
+    private async buildLocalAlbums(username: string, includeOnlineCache: boolean): Promise<any[]> {
+        const collect = (songs: any[], out: Map<string, any>) => {
+            for (const m of songs) {
+                if (!m) continue
+                const source = m.source || 'wy'
+                const albumName = String((m as any)?.meta?.albumName || (m as any)?.albumName || '').trim()
+                const albumId = String((m as any)?.meta?.albumId || (m as any)?.albumId || '').trim()
+                if (!albumId || !albumName || albumName === 'Unknown Album') continue
+                const key = `${source}_${albumId}`
+                const exist = out.get(key)
+                if (exist) {
+                    exist.songCount += 1
+                    continue
+                }
+                const primarySinger = String(m.singer || '').split('、')[0] || 'LX Music'
+                out.set(key, {
+                    id: `alb_${source}_${albumId}`,
+                    name: albumName,
+                    title: albumName,
+                    album: albumName,
+                    artist: m.singer || 'LX Music',
+                    artistId: (m as any).singerId ? `art_${source}_${(m as any).singerId}` : `artist_${primarySinger}`,
+                    isDir: true,
+                    coverArt: (m as any)?.meta?.picUrl || (m as any)?.img || `alb_${source}_${albumId}`,
+                    songCount: 1,
+                    duration: this.parseDuration(m.interval),
+                    created: new Date().toISOString(),
+                    playCount: 0,
+                })
+            }
+        }
+
+        const out = new Map<string, any>()
+        try {
+            const userSpace = getUserSpace(username)
+            const listData = await userSpace.listManage.getListData()
+            collect(listData.loveList || [], out)
+            collect(listData.defaultList || [], out)
+            for (const l of (listData.userList || [])) collect((l as any).list || [], out)
+            const libAlbums = await this.getLibraryData(username, 'albums')
+            for (const alb of libAlbums) collect((alb as any).list || [], out)
+        } catch (e) {
+            subsonicLog.error('[Subsonic] 本地歌曲聚合专辑失败:', e)
+        }
+
+        // 最后手段：在线歌曲缓存（持久化的历史搜索结果，NAS 上有数千首）。
+        // 它的内容不是「新发行」，优先级最低，仅用于保证列表非空。
+        if (includeOnlineCache && out.size < 20) {
+            this.loadOnlineSongCache()
+            collect(Array.from(this.onlineSongCache.values()), out)
+        }
+
+        return Array.from(out.values())
+    }
 
     /**
      * 聚合出「歌手维度」目录。
@@ -5197,9 +5294,11 @@ class SubsonicHandler {
      * （音流在高频调用，NAS 实例日志里 1853 次）。现在落盘为播放历史。
      */
     private async handleScrobble(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        // [修复] 必须剥离客户端加的 id 前缀（al-/ar-/tr-/sg-/mg-，与 getCoverArt 一致）：
+        // 带前缀的 id 存进播放历史后会解析不出歌曲，导致「最近播放」漏掉这些歌
         const ids = params.getAll('id')
             .flatMap(v => String(v).split(','))
-            .map(s => s.trim())
+            .map(s => s.trim().replace(/^(al-|ar-|tr-|sg-|mg-)/, ''))
             .filter(Boolean)
         if (!ids.length) return this.sendError(res, 10, 'Required parameter is missing: id', format)
 
@@ -5214,6 +5313,7 @@ class SubsonicHandler {
         for (const id of ids) list.push({ id, time: eventTime })
         writeScrobbles(username, list)
 
+        subsonicLog.debug(`[Subsonic] scrobble: ${ids.length} 首 (${ids.slice(0, 3).join(', ')}) time=${new Date(eventTime).toISOString()} (user=${username})`)
         return this.sendResponse(res, {}, format)
     }
 
@@ -5352,23 +5452,43 @@ class SubsonicHandler {
      * 只回溯最近若干条，避免历史很长时逐首解析过慢。
      */
     private async buildPlayedAlbums(username: string, history: ScrobbleEntry[], type: 'recent' | 'frequent', limit: number) {
-        const stats = new Map<string, { count: number, lastTime: number, song: any }>()
+        const stats = new Map<string, { count: number, lastTime: number, song: any, duration: number, songIds: Set<string> }>()
 
+        let unresolved = 0
+        let noAlbum = 0
         for (const item of history.slice(-400)) {
-            const song = await this.songEntryById(username, item.id, 'json')
-            if (!song) continue
-            const albumId = String(song.albumId || song.parent || '').trim()
-            if (!albumId) continue
+            // 兼容历史脏数据：旧版本写入时未剥离客户端前缀（tr- / ar- 等）
+            const rawId = String(item.id || '').replace(/^(al-|ar-|tr-|sg-|mg-)/, '')
+            const song = await this.songEntryById(username, rawId, 'json')
+            if (!song) { unresolved++; continue }
+            let albumId = String(song.albumId || song.parent || '').trim()
+            // [修复] albumId 退化成列表 id（love / 歌单 id）会产生 id=love 的脏专辑条目。
+            // 这类歌、以及没有专辑信息的单曲，统一表示为「单曲专辑」alb_<source>_<songId>：
+            // 既保证听过的歌都出现在列表里，点进去也至少能播这一首
+            if (!albumId || !albumId.startsWith('alb_')) {
+                const sid = String(song.id || '')
+                const idx = sid.indexOf('_')
+                const src = idx > 0 ? sid.slice(0, idx) : String(song.source || 'wy')
+                const songId = idx > 0 ? sid.slice(idx + 1) : sid
+                if (!songId) { noAlbum++; continue }
+                albumId = `alb_${src}_${songId}`
+                noAlbum++
+            }
             const cur = stats.get(albumId)
             if (!cur) {
-                stats.set(albumId, { count: 1, lastTime: item.time, song })
+                stats.set(albumId, { count: 1, lastTime: item.time, song, duration: Number(song.duration) || 0, songIds: new Set([String(song.id || '')]) })
             } else {
                 cur.count++
+                cur.duration += Number(song.duration) || 0
+                if (song.id) cur.songIds.add(String(song.id))
                 if (item.time > cur.lastTime) {
                     cur.lastTime = item.time
                     cur.song = song
                 }
             }
+        }
+        if (unresolved || noAlbum) {
+            subsonicLog.debug(`[Subsonic] 播放历史构造专辑：解析失败 ${unresolved} 条、无专辑信息 ${noAlbum} 条（已跳过）`)
         }
 
         const list = Array.from(stats.entries()).map(([albumId, s]) => ({
@@ -5380,8 +5500,10 @@ class SubsonicHandler {
             artistId: s.song.artistId || `artist_${s.song.artist || ''}`,
             isDir: true,
             coverArt: s.song.coverArt || albumId,
-            songCount: 0,
-            duration: 0,
+            // [修复] 之前恒为 0：客户端在专辑上显示「0 首」，看起来像数据不对。
+            // songCount 是该专辑里实际播放过的不同曲目数（播放次数放在 playCount）
+            songCount: s.songIds.size,
+            duration: s.duration,
             created: new Date(s.lastTime).toISOString(),
             playCount: s.count,
         }))
