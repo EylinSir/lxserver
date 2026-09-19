@@ -2925,6 +2925,16 @@ class App {
             'proxy.header': formData.get('proxy.header'),
             'proxy.all.enabled': formData.get('proxy.all.enabled') === 'on',
             'proxy.all.address': formData.get('proxy.all.address'),
+            ...(() => {
+                const out = {};
+                ['music', 'customSource', 'app'].forEach(cat => {
+                    const mode = formData.get(`proxy.${cat}.mode`);
+                    // null = 沿用统一代理（服务端写回 undefined）
+                    out[`proxy.${cat}.enabled`] = (mode === 'inherit' || mode == null) ? null : (mode === 'on');
+                    out[`proxy.${cat}.address`] = formData.get(`proxy.${cat}.address`) || '';
+                });
+                return out;
+            })(),
             'user.enablePath': formData.get('user.enablePath') === 'on',
             'user.enableRoot': formData.get('user.enableRoot') === 'on',
             'user.enablePublicRestriction': formData.get('user.enablePublicRestriction') === 'on',
