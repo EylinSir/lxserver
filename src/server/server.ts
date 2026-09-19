@@ -8050,10 +8050,11 @@ const startSubsonicStandaloneServer = () => {
 
       // [路由守卫] 仅允许 /rest/{method} 形式的 Subsonic API 调用，其余路径一律 404。
       // 真正的 Subsonic 客户端请求形如 /rest/ping.view，会正常进入处理方法；
-      // 浏览器裸访问（/、/rest、/rest/ 等）及爬虫请求返回标准 404，避免暴露裸 XML 错误。
+      // 浏览器裸访问（/、/rest、/rest/ 等）及爬虫请求返回「像资源不存在」的 404：
+      // 只给状态码、不附带任何服务器说明文案，避免暴露「这是一个服务器 / 服务在响应」的特征。
       if (!/^\/rest\/.+/.test(urlObj.pathname)) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
-        res.end('404 Not Found')
+        res.writeHead(404)
+        res.end()
         return
       }
 
