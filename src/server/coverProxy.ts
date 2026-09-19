@@ -68,7 +68,7 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
     }
 
     // 封面代理属于「应用」类出站请求，走独立的 app 代理开关
-    const appAgent = await getProxyAgent(finalUrl, 'app')
+    const appAgent = await getProxyAgent(picUrl, 'app')
 
     const doFetch = async (fetchUrl: string): Promise<{ buf: Buffer, ct: string } | null> => {
         if (res.destroyed || res.writableEnded) return null
@@ -96,7 +96,7 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
 
             const controller = new AbortController()
             const timer = setTimeout(() => controller.abort(), 20000)
-            const imgResp = await fetch(picUrl, {
+            const imgResp = await fetch(fetchUrl, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36' },
                 signal: controller.signal,
             })
@@ -121,7 +121,7 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
     for (let attempt = 0; attempt < 3 && !result; attempt++) {
         if (res.destroyed || res.writableEnded) return
         if (attempt > 0) await new Promise(r => setTimeout(r, 800 * attempt))
-        result = await doFetch()
+        result = await doFetch(picUrl)
     }
 
     if (result) {
