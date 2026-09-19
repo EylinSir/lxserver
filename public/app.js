@@ -2471,6 +2471,30 @@ class App {
             if (form.elements['subsonic.enableDebug']) {
                 form.elements['subsonic.enableDebug'].checked = config['subsonic.enableDebug'] === true;
             }
+            if (form.elements['subsonic.port']) {
+                form.elements['subsonic.port'].value = config['subsonic.port'] || 0;
+            }
+            if (form.elements['subsonic.bindIP']) {
+                form.elements['subsonic.bindIP'].value = config['subsonic.bindIP'] || '';
+            }
+            // Subsonic 独立端口开关：port>0 视为开启，切换端口输入框显隐
+            const standaloneToggle = document.getElementById('subsonic-standalone-toggle');
+            const standaloneFields = document.getElementById('subsonic-standalone-fields');
+            if (standaloneToggle && standaloneFields) {
+                const enabled = (parseInt(config['subsonic.port']) || 0) > 0;
+                standaloneToggle.checked = enabled;
+                standaloneFields.classList.toggle('hidden', !enabled);
+                standaloneToggle.onchange = () => {
+                    const on = standaloneToggle.checked;
+                    standaloneFields.classList.toggle('hidden', !on);
+                    const portInput = form.elements['subsonic.port'];
+                    if (on && (!portInput.value || parseInt(portInput.value) === 0)) {
+                        portInput.value = 4050;
+                    } else if (!on) {
+                        portInput.value = 0;
+                    }
+                };
+            }
             if (form.elements['subsonic.onlineSearch']) {
                 form.elements['subsonic.onlineSearch'].checked = config['subsonic.onlineSearch'] !== false;
             }
