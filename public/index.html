@@ -637,11 +637,6 @@
                                         placeholder="LX Sync Server" />
                                 </div>
                                 <div class="config-field">
-                                    <label class="config-label">最大快照数</label>
-                                    <input type="number" name="maxSnapshotNum" class="form-input config-input"
-                                        placeholder="10" />
-                                </div>
-                                <div class="config-field">
                                     <label class="config-label">添加歌曲位置</label>
                                     <select name="list.addMusicLocationType" class="form-input config-input">
                                         <option value="top">顶部</option>
@@ -921,7 +916,7 @@
                             </div>
                         </div>
 
-                        <!-- 本地配置备份卡片 -->
+                        <!-- 备份与恢复卡片 -->
                         <div id="config-card-configbackup" class="config-card glass">
                             <div class="config-card-header">
                                 <div class="config-card-icon"
@@ -933,11 +928,18 @@
                                     </svg>
                                 </div>
                                 <div>
-                                    <h3 class="config-card-title">本地配置备份</h3>
-                                    <p class="config-card-desc">每日自动保留一份 config.js 副本</p>
+                                    <h3 class="config-card-title">备份与恢复</h3>
+                                    <p class="config-card-desc">歌单数据快照与本地配置备份设置</p>
                                 </div>
                             </div>
                             <div class="config-card-body">
+                                <div class="config-field">
+                                    <label class="config-label">最大快照数</label>
+                                    <input type="number" name="maxSnapshotNum" class="form-input config-input"
+                                        placeholder="10" />
+                                    <small class="config-hint">用户歌单数据保留的历史快照份数，超限自动清理</small>
+                                </div>
+                                <div class="config-divider"></div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
                                         <span class="config-toggle-label">启用本地配置备份</span>
@@ -948,7 +950,6 @@
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>
-                                <div class="config-divider"></div>
                                 <div class="config-field-row">
                                     <div class="config-field">
                                         <label class="config-label">保留天数</label>
@@ -957,11 +958,18 @@
                                         <small class="config-hint">默认 7 天</small>
                                     </div>
                                     <div class="config-field">
-                                        <label class="config-label">备份目录</label>
+                                        <label class="config-label">配置备份目录</label>
                                         <input type="text" name="configBackup.dir" class="form-input config-input"
                                             placeholder="留空= <data>/backups" />
                                         <small class="config-hint">相对路径基于 data 目录，绝对路径直接使用</small>
                                     </div>
+                                </div>
+                                <div class="config-divider"></div>
+                                <div class="config-field">
+                                    <label class="config-label">歌单快照备份路径</label>
+                                    <input type="text" name="snapshot.backupPath" class="form-input config-input"
+                                        placeholder="留空= 用户数据目录 list/snapshot" />
+                                    <small class="config-hint">额外快照存储路径，按用户名自动隔离；相对路径基于 data 目录，绝对路径直接使用。修改后重启生效并自动迁移旧快照</small>
                                 </div>
                             </div>
                         </div>

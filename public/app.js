@@ -2458,6 +2458,9 @@ class App {
             if (form.elements['configBackup.dir']) {
                 form.elements['configBackup.dir'].value = config['configBackup.dir'] || '';
             }
+            if (form.elements['snapshot.backupPath']) {
+                form.elements['snapshot.backupPath'].value = config['snapshot.backupPath'] || '';
+            }
 
             // URL路径配置
             if (form.elements['admin.path']) {
@@ -2953,6 +2956,7 @@ class App {
             'configBackup.enable': formData.get('configBackup.enable') === 'on',
             'configBackup.retentionDays': parseInt(formData.get('configBackup.retentionDays')) || 7,
             'configBackup.dir': (formData.get('configBackup.dir') || '').trim(),
+            'snapshot.backupPath': (formData.get('snapshot.backupPath') || '').trim(),
             'admin.path': adminPath,
             'player.path': playerPath,
             'subsonic.enable': formData.get('subsonic.enable') === 'on',

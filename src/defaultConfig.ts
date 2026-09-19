@@ -58,6 +58,9 @@ const config: LX.Config = {
   'configBackup.retentionDays': 7, // 本地备份保留天数
   'configBackup.dir': '', // 备份目录，留空则用 <data>/backups，相对路径基于 data 目录，绝对路径直接使用
 
+  // 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot，相对路径基于 data 目录，绝对路径直接使用）
+  'snapshot.backupPath': '',
+
   // Web播放器配置
   'player.enableAuth': false,
   'player.password': '123456',

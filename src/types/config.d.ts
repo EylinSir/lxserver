@@ -221,6 +221,12 @@ declare namespace LX {
     'configBackup.dir'?: string
 
     /**
+     * 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot）。
+     * 相对路径基于 data 目录，绝对路径直接使用
+     */
+    'snapshot.backupPath'?: string
+
+    /**
      * 是否开启Web播放器访问密码
      */
     'player.enableAuth'?: boolean
