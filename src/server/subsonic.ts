@@ -39,25 +39,142 @@ import bdMusicInfo from '@/modules/utils/musicSdk/bd/musicInfo.js'
 const musicSdk = musicSdkRaw as any
 
 // ─────────────────────────────────────────────
-// 电台流「短期票据」
+// 电台流「无状态短 Token」
 // ─────────────────────────────────────────────
-// 实测：客户端播放网络电台时，会把 internetRadioStation.streamUrl 当作「可直接播放的外部地址」
-// 原样请求，不会自行附加 Subsonic 凭据；而该 URL 会被客户端展示，也可能被复制/分享，
-// 若把用户凭据(u+t+s 或 u+p)拼进去，等于泄露长期令牌。
-// 因此改签服务端票据：URL 只带 u(用户名) + rtexp(过期) + rtsig(HMAC)，不含任何用户凭据。
-const RADIO_TICKET_TTL = 12 * 60 * 60 * 1000 // 12 小时
-const RADIO_TICKET_EXP = 'rtexp'
-const RADIO_TICKET_SIG = 'rtsig'
-
+// 客户端播放网络电台时，会把 internetRadioStation.streamUrl 当作「可直接播放的外部地址」原样请求。
+// 采用 HMAC 对 (id + user) 生成固定紧凑短签名 (tk=<user>_<sig8>)：
+// 1. 无需在内存或数据库额外存储，重启完全有效；
+// 2. 分用户独立隔离，不泄露用户长期密码；
+// 3. 极大缩短 streamUrl 长度，在客户端二级标题展示极为清爽。
 function radioTicketSecret(): string {
     return String((global.lx.config as any)?.['frontend.password'] || 'lxserver-radio-ticket')
 }
 
-function signRadioTicket(id: string, user: string, exp: number): string {
-    return crypto.createHmac('sha256', radioTicketSecret())
-        .update(`${id}|${user}|${exp}`)
+function signRadioToken(id: string, user: string): string {
+    const hash = crypto.createHmac('sha256', radioTicketSecret())
+        .update(`${id}|${user}`)
         .digest('hex')
-        .slice(0, 40)
+        .slice(0, 12)
+    return `${user}_${hash}`
+}
+
+/**
+ * ICY (Shoutcast / Icecast) 流媒体元数据代理。
+ * 当客户端请求电台并携带 `icy-metadata: 1` 时，代理远端音频直链并按周期注入 ICY Metadata 帧，
+ * 将 `StreamTitle='歌手 - 歌名'` 注入到流中，使音流等客户端播放器底部能实时显示当前曲目名。
+ */
+const ICY_META_INTERVAL = 16000 // 标准 ICY 元数据间隔 16KB
+
+function pipeIcyAudioStream(
+    targetUrl: string,
+    streamTitle: string,
+    stationName: string,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    onFinish?: () => void,
+) {
+    const wantsIcy = req.headers['icy-metadata'] === '1' || req.headers['icy-metadata'] === 'true'
+    subsonicLog.info(`[Subsonic] Radio Stream requested: title="${streamTitle}", wantsIcy=${wantsIcy}, ua="${req.headers['user-agent']}"`)
+
+    if (!wantsIcy) {
+        // 如果客户端未要求 ICY 元数据，但请求的是网络电台流，
+        // 尝试发送带 ICY 描述头的 302 或直接直链重定向
+        res.writeHead(302, {
+            Location: targetUrl,
+            'icy-name': encodeURIComponent(stationName || 'LX Radio'),
+            'icy-description': encodeURIComponent(streamTitle || 'LX Radio Track'),
+        })
+        res.end()
+        onFinish?.()
+        return
+    }
+
+    const metaStr = `StreamTitle='${(streamTitle || '').replace(/'/g, ' ')}';`
+    const metaBuf = Buffer.from(metaStr, 'utf8')
+    // ICY 规范：元数据长度字段为 1 字节，值为 ceil(length / 16)
+    const metaLenBlocks = Math.ceil(metaBuf.length / 16)
+    const metaPayload = Buffer.alloc(1 + metaLenBlocks * 16)
+    metaPayload[0] = metaLenBlocks
+    metaBuf.copy(metaPayload, 1)
+
+    // 空元数据块（无歌曲切换时发送）
+    const emptyMeta = Buffer.from([0])
+
+    let firstMetaSent = false
+    let byteCounter = 0
+
+    // 请求远端音频流
+    const parsed = new URL(targetUrl)
+    const client = parsed.protocol === 'https:' ? require('https') : http
+    const upstreamReq = client.get(targetUrl, {
+        headers: {
+            'User-Agent': req.headers['user-agent'] || 'Subsonic-Radio-Proxy/1.0',
+            'Accept': '*/*',
+        }
+    }, (upstreamRes: http.IncomingMessage) => {
+        if (upstreamRes.statusCode && upstreamRes.statusCode >= 300 && upstreamRes.statusCode < 400 && upstreamRes.headers.location) {
+            return pipeIcyAudioStream(upstreamRes.headers.location, streamTitle, stationName, req, res, onFinish)
+        }
+
+        const headers: Record<string, string | number> = {
+            'Content-Type': upstreamRes.headers['content-type'] || 'audio/mpeg',
+            'Connection': 'close',
+            'Pragma': 'no-cache',
+            'Cache-Control': 'no-cache, no-store',
+            'icy-name': encodeURIComponent(stationName || 'LX Radio'),
+            'icy-metaint': ICY_META_INTERVAL,
+            'icy-br': '320',
+        }
+
+        res.writeHead(200, headers)
+
+        upstreamRes.on('data', (chunk: Buffer) => {
+            let offset = 0
+            while (offset < chunk.length) {
+                const remainingToMeta = ICY_META_INTERVAL - byteCounter
+                const toWrite = Math.min(chunk.length - offset, remainingToMeta)
+                res.write(chunk.subarray(offset, offset + toWrite))
+                byteCounter += toWrite
+                offset += toWrite
+
+                if (byteCounter >= ICY_META_INTERVAL) {
+                    if (!firstMetaSent) {
+                        res.write(metaPayload)
+                        firstMetaSent = true
+                    } else {
+                        res.write(emptyMeta)
+                    }
+                    byteCounter = 0
+                }
+            }
+        })
+
+        upstreamRes.on('end', () => {
+            res.end()
+            onFinish?.()
+        })
+
+        upstreamRes.on('error', (err: any) => {
+            subsonicLog.warn('[Subsonic] ICY stream upstream error:', err?.message || err)
+            res.end()
+            onFinish?.()
+        })
+    })
+
+    upstreamReq.on('error', (err: any) => {
+        subsonicLog.warn('[Subsonic] ICY upstream request failed:', err?.message || err)
+        if (!res.headersSent) {
+            res.writeHead(302, { Location: targetUrl })
+            res.end()
+        } else {
+            res.end()
+        }
+        onFinish?.()
+    })
+
+    req.on('close', () => {
+        upstreamReq.destroy()
+    })
 }
 
 // 推荐结果缓存：同一类型短时间内共享一次 QQ 抓取结果，避免客户端并发请求（启动瞬间
@@ -403,24 +520,45 @@ class SubsonicHandler {
     }
 
     /**
-     * 校验「电台流短期票据」(rtexp + rtsig)。仅对 stream/download 且 id 为 radio_* 的请求生效。
-     * 通过则返回票据中的用户名，否则返回 null。
+     * 校验「电台流安全票据」。支持紧凑短 Token (tk=user_sig) 及兼容旧版 (rtexp+rtsig)。
+     * 仅对 stream/download 且 id 为 radio_* 的请求生效。
+     * 校验通过则返回票据中的用户名，否则返回 null。
      */
     private verifyRadioTicket(params: URLSearchParams, method: string): string | null {
         if (method !== 'stream' && method !== 'download') return null
         const id = params.get('id') || ''
         if (!id.startsWith('radio_')) return null
+
+        // 1. 优先校验紧凑短 Token (tk=<user>_<sig>)
+        const tk = params.get('tk') || ''
+        if (tk) {
+            const lastUnderscore = tk.lastIndexOf('_')
+            if (lastUnderscore <= 0) return null
+            const user = tk.slice(0, lastUnderscore)
+            if (!global.lx.config.users?.some((x: any) => x.name === user)) return null
+            const expect = signRadioToken(id, user)
+            if (expect.length !== tk.length) return null
+            try {
+                return crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(tk)) ? user : null
+            } catch {
+                return null
+            }
+        }
+
+        // 2. 兼容旧版长票据 (u + rtexp + rtsig)
         const user = params.get('u') || ''
-        const exp = Number(params.get(RADIO_TICKET_EXP) || 0)
-        const sig = params.get(RADIO_TICKET_SIG) || ''
+        const exp = Number(params.get('rtexp') || 0)
+        const sig = params.get('rtsig') || ''
         if (!user || !exp || !sig) return null
         if (!Number.isFinite(exp) || Date.now() > exp) return null
-        // 票据用户名必须是真实用户
         if (!global.lx.config.users?.some((x: any) => x.name === user)) return null
-        const expect = signRadioTicket(id, user, exp)
-        if (expect.length !== sig.length) return null
+        const legacyHash = crypto.createHmac('sha256', radioTicketSecret())
+            .update(`${id}|${user}|${exp}`)
+            .digest('hex')
+            .slice(0, 40)
+        if (legacyHash.length !== sig.length) return null
         try {
-            return crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(sig)) ? user : null
+            return crypto.timingSafeEqual(Buffer.from(legacyHash), Buffer.from(sig)) ? user : null
         } catch {
             return null
         }
@@ -2522,14 +2660,21 @@ class SubsonicHandler {
                 const res: any = await (musicSdk as any)[source].songList.getList('hot', '', 1)
                 const list: any[] = res?.list || []
                 for (const item of list.slice(0, perSourceCap)) {
-                    const plId = String(item.id ?? item.dissid ?? item.tid ?? item.listId)
-                    if (!plId) continue
-                    const stationId = `radio_pl_${source}_${plId}`
+                    let rawPlId = String(item.id ?? item.dissid ?? item.tid ?? item.listId)
+                    if (!rawPlId) continue
+                    // [优化] 清洗酷我等平台的复合 ID (如 digest-8__3000520107 -> 3000520107 或 5-3000520107)，使 URL 更清爽
+                    let cleanPlId = rawPlId
+                    if (rawPlId.startsWith('digest-')) {
+                        cleanPlId = rawPlId.replace(/^digest-8__/, '').replace(/^digest-/, '').replace('__', '-')
+                    }
+                    const stationId = `radio_pl_${source}_${cleanPlId}`
+                    const cover = item.img || item.pic || item.cover || item.coverUrl || item.picUrl || ''
                     stations.push({
                         id: stationId,
                         name: item.name || `歌单(${source})`,
                         streamUrl: `/rest/stream?id=${stationId}`,
                         homepageUrl: '',
+                        coverArt: cover || undefined,
                     })
                     if (stations.length >= totalCap) break
                 }
@@ -2592,47 +2737,43 @@ class SubsonicHandler {
 
             // [修复] 客户端播放「网络电台」时，会把 internetRadioStation.streamUrl 当作
             // 可直接播放的音频地址「原样请求」，不会自行附加 Subsonic 凭据；
-            // 而本服为官方电台/歌单电台生成的 streamUrl 指回 /rest/stream，该端点强制鉴权，
-            // 缺少凭据会直接返回错误 40 —— 客户端便表现为「地址能显示，但点了播不了」。
-            // 但把用户凭据(u+t+s / u+p)拼进去会随 URL 一起被展示、复制，等于泄露长期令牌；
-            // 因此改为签发服务端短期票据（u + rtexp + rtsig），不含任何用户凭据。
+            // 这里签发紧凑且无状态的短安全 Token（&tk=user_sig12），既不泄露用户长期凭据，
+            // 又保持 URL 简短清爽且重启永久有效。
             // 外部地址（用户自建电台）原样返回，不做任何改动。
             const radioUser = params.get('u') || ''
             const absolutize = (u: string) => {
                 if (!u || /^https?:\/\//i.test(u) || !host) return u
                 const abs = `${scheme}://${host}${u.startsWith('/') ? '' : '/'}${u}`
-                // 仅对本服自产的 /rest/ 端点签发短期票据，外部电台地址保持原样
+                // 仅对本服自产的 /rest/ 端点签发紧凑短 Token，外部电台地址保持原样
                 if (!u.startsWith('/rest/') || !radioUser) return abs
                 const idMatch = /[?&]id=([^&#]+)/.exec(u)
                 const id = idMatch ? decodeURIComponent(idMatch[1]) : ''
                 if (!id) return abs
-                const exp = Date.now() + RADIO_TICKET_TTL
-                const ticket = new URLSearchParams({
-                    u: radioUser,
-                    [RADIO_TICKET_EXP]: String(exp),
-                    [RADIO_TICKET_SIG]: signRadioTicket(id, radioUser, exp),
-                }).toString()
-                return `${abs}${abs.includes('?') ? '&' : '?'}${ticket}`
+                const tk = signRadioToken(id, radioUser)
+                return `${abs}${abs.includes('?') ? '&' : '?'}tk=${tk}`
             }
 
             const stations = [
                 ...(officialUsable ? official : []).map((r: any) => ({
                     id: r.id,
                     name: r.name,
-                    streamUrl: r.streamUrl,
+                    streamUrl: absolutize(r.streamUrl),
                     homepageUrl: '',
+                    coverArt: r.coverArt || r.picUrl || undefined,
                 })),
                 ...userStations.map((s) => ({
                     id: s.id,
                     name: s.name,
-                    streamUrl: s.streamUrl,
+                    streamUrl: absolutize(s.streamUrl),
                     homepageUrl: s.homepageUrl || '',
+                    coverArt: undefined,
                 })),
                 ...playlistStations.map((r) => ({
                     id: r.id,
                     name: r.name,
-                    streamUrl: r.streamUrl,
+                    streamUrl: absolutize(r.streamUrl),
                     homepageUrl: r.homepageUrl || '',
+                    coverArt: r.coverArt || undefined,
                 })),
             ]
             if (format === 'json') {
@@ -4173,6 +4314,7 @@ class SubsonicHandler {
                     const musicInfo: any = { source: 'tx', songmid, id: `tx_${songmid}`, meta: { songId: songmid } }
                     const result = await callUserApiGetMusicUrl('tx', musicInfo, quality, username)
 
+                    const songTitle = `${s.singer || s.artist || 'LX Music'} - ${s.name || s.songname || 'Radio'}`
                     if (result && result.url) {
                         if (global.lx.config['subsonic.cacheOnPlay'] && username) {
                             const songKey = `tx_${songmid}_${quality}`
@@ -4199,8 +4341,7 @@ class SubsonicHandler {
                                 }
                             })
                         }
-                        res.writeHead(302, { Location: result.url })
-                        return res.end()
+                        return pipeIcyAudioStream(result.url, songTitle, 'QQ Official Radio', req, res)
                     } else {
                         subsonicLog.error(`[Subsonic] Radio ${id} failed to resolve music URL`)
                     }
@@ -4227,7 +4368,19 @@ class SubsonicHandler {
                 const us = rest.indexOf('_')
                 if (us <= 0) return this.sendError(res, 70, 'Invalid playlist radio id', format)
                 const plSource = rest.slice(0, us)
-                const plId = rest.slice(us + 1)
+                let plId = rest.slice(us + 1)
+
+                // [兼容还原] 若为酷我等清洗过的精简 ID，自动还原为 SDK 期望的路由格式
+                if (plSource === 'kw' && !plId.startsWith('digest-')) {
+                    if (plId.includes('-')) {
+                        const [digest, realId] = plId.split('-')
+                        plId = `digest-${digest}__${realId}`
+                    } else {
+                        // 纯数字默认按 digest-8 (推荐歌单) 还原
+                        plId = `digest-8__${plId}`
+                    }
+                }
+
                 try {
                     const detail: any = await (musicSdk as any)[plSource]?.songList?.getListDetail?.(plId, 1)
                     const songs: any[] = detail?.list || []
@@ -4242,9 +4395,10 @@ class SubsonicHandler {
                             meta: { ...(s.meta || {}), songId: songmid },
                         }
                         const result = await callUserApiGetMusicUrl(plSource as any, musicInfo, quality, username)
+                        const songTitle = `${s.singer || s.artist || 'LX Music'} - ${s.name || s.songname || 'Radio'}`
+                        const stationName = detail?.info?.name || `${plSource.toUpperCase()} Radio`
                         if (result && result.url) {
-                            res.writeHead(302, { Location: result.url })
-                            return res.end()
+                            return pipeIcyAudioStream(result.url, songTitle, stationName, req, res)
                         }
                     }
                 } catch (err) {

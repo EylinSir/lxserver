@@ -40,6 +40,21 @@
   - **管理后台交互设计**:
     - 代理配置卡片中新增分类代理下拉选择与按需展开的独立代理地址输入框及连通性测试。
     - ![出站代理按类别细分配置](md/log/2.1.1-4.png)
+- **Subsonic 网络电台（Internet Radio）多源接入与精简隔离 (#384 @pyss56)**:
+  - **网络电台完整协议接入 (`getInternetRadioStations` / `createInternetRadioStation` / `updateInternetRadioStation` / `deleteInternetRadioStation`)**:
+    - 全面支持 Subsonic / OpenSubsonic 标准网络电台规范，客户端可浏览、自建、更新与删除电台。
+    - **热门歌单电台 (`radio_pl_*`)**：自动聚合各大音乐平台（网易云、企鹅、酷狗、酷我、咪咕等）的公开热门歌单包装为轮播电台，播放时由服务端自动进行真随机抽取单曲并流式播放。
+    - **QQ 官方电台 (`radio_tx_*`)**：接入官方电台列表，内置智能可用性探测，接口不可用时优雅隐藏避免客户端报错。
+    - **用户自建电台 (`radio_usr_*`)**：支持用户在第三方客户端添加自定义外部流媒体直播源（如 Shoutcast / Icecast / HLS 直播流），请求时 302 秒播直达。
+  - **用户级别数据完全物理隔离**:
+    - 用户自建电台持久化隔离存储至 `data/users/<username>/radioStations.json`，多用户环境互不干扰、独立增删改查。
+  - **无状态紧凑短安全 Token (`tk=<user>_<sig>`)**:
+    - 针对客户端播放网络电台直连 `streamUrl` 时不带 Subsonic 认证凭据的问题，创新采用确定性 HMAC 短 Token 机制，不暴露用户密码，防篡改且服务重启后永久有效，彻底消除了冗长的 URL 参数，显著提升音流（Stream Music）等客户端界面的清爽度与观感。
+  - **各音源歌单 ID 自动清洗与透明还原**:
+    - 智能过滤清洗酷我（kw）等平台复合内部前缀（如 `digest-8__`），呈现干净整洁的数字 ID，播放解析时透明无缝还原，兼顾 URL 美观与底层 SDK 路由精准度。
+  - **OpenSubsonic 电台封面规范 (`coverArt`) 与 ICY 流媒体元数据中继**:
+    - 按 OpenSubsonic 标准扩展规范下发各大热门歌单电台的高清封面 `coverArt`。
+    - 服务端支持 ICY Metadata 代理注入，为支持 ICY 协议的客户端动态注入当前播放的真实歌手与歌名。
 
 ## v2.1.0 (2026-09-19)
 
