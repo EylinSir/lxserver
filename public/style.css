@@ -5714,3 +5714,199 @@ input:-webkit-autofill:active {
     line-height: 1.55;
     margin: 0;
 }
+
+/* =============== 备份管理视图与多Tab设计 =============== */
+.backups-header-wrap {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.backup-segmented-tabs {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px;
+    gap: 4px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+}
+
+.backup-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.backup-tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.backup-tab-btn.active {
+    color: #fff;
+    background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);
+}
+
+.backup-tab-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #64748b;
+    transition: background-color 0.2s ease;
+}
+
+.backup-tab-dot.dot-active {
+    background: #10b981;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.8);
+}
+
+.backup-tab-pane {
+    display: none;
+}
+
+.backup-tab-pane.active {
+    display: block;
+    animation: fadeIn 0.3s ease;
+}
+
+.config-backup-info-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.config-backup-status-grid {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.config-backup-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.config-backup-meta-item .meta-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.config-backup-meta-item .meta-value {
+    font-size: 0.925rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.config-backup-meta-item.meta-item-path {
+    max-width: 320px;
+}
+
+.config-backup-meta-item .meta-value.text-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: #93c5fd;
+}
+
+.config-backup-actions-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.backup-type-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.725rem;
+    font-weight: 500;
+    line-height: 1.2;
+}
+
+.backup-type-tag.tag-auto {
+    background: rgba(59, 130, 246, 0.15);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.backup-type-tag.tag-manual {
+    background: rgba(168, 85, 247, 0.15);
+    color: #d8b4fe;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.badge-dot.dot-purple {
+    background: #a855f7;
+    box-shadow: 0 0 6px rgba(168, 85, 247, 0.6);
+}
+
+.badge-dot.dot-blue {
+    background: #3b82f6;
+    box-shadow: 0 0 6px rgba(59, 130, 246, 0.6);
+}
+
+@media (max-width: 768px) {
+    .backups-header-wrap {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .backup-segmented-tabs {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .backup-tab-btn {
+        flex: 1;
+        justify-content: center;
+    }
+
+    .config-backup-info-card {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .config-backup-status-grid {
+        gap: 1rem;
+    }
+
+    .config-backup-actions-wrap {
+        width: 100%;
+    }
+
+    .config-backup-actions-wrap button {
+        flex: 1;
+    }
+}

@@ -13,7 +13,7 @@ import {
   SYNC_CODE,
   SYNC_CLOSE_CODE,
 } from '@/constants'
-import { getUserSpace, releaseUserSpace, getUserName, getServerId, getUserDirname, getUserConfig, migrateUserData, renameUserSpace, finishRenameUserSpace } from '@/user'
+import { getUserSpace, releaseUserSpace, getUserName, getServerId, getUserDirname, getUserConfig, migrateUserData, renameUserSpace, finishRenameUserSpace, updateAllUserSnapshotDirs } from '@/user'
 import { parseDislikeRules, splitSingers } from '@/modules/dislike/match'
 import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
@@ -36,6 +36,7 @@ import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSync
 import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import needle from 'needle'
+import { getProxyAgent } from '../modules/utils/proxy.js'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
 
 /** 当前生效的 dislike 匹配选项，下发给前端保证前后端判定一致 */
@@ -810,6 +811,8 @@ const getAudioRemoteSize = async (audioUrl: string): Promise<number | null> => {
     response_timeout: 8000,
     read_timeout: 8000,
     headers,
+    // 音质探测抓的是音乐平台的音频地址，归 music 分类
+    agent: await getProxyAgent(audioUrl, 'music'),
   }
 
   try {
@@ -1076,7 +1079,7 @@ const serveStatic = (req: IncomingMessage, res: http.ServerResponse, filePath: s
   }
 }
 
-const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Promise((resolve, reject) => {
+const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promise((resolve, reject) => {
   const httpServer = http.createServer(async (req, res) => {
     // CORS 跨域处理
     res.setHeader('Access-Control-Allow-Origin', '*')
@@ -1488,12 +1491,30 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               const handleFinalUpdate = () => {
                 if (password) user.password = password
                 if (enableCustomMusicDir !== undefined) user.enableCustomMusicDir = !!enableCustomMusicDir
-                if (customMusicDir !== undefined) user.customMusicDir = String(customMusicDir).trim()
+                if (customMusicDir !== undefined) {
+                  const trimmedMusicDir = String(customMusicDir).trim()
+                  if (trimmedMusicDir) {
+                    if (/[<>"|?*]/.test(trimmedMusicDir)) {
+                      res.writeHead(422, { 'Content-Type': 'application/json' })
+                      res.end(JSON.stringify({ success: false, error: '自定义音乐目录包含非法字符 (< > " | ? *)' }))
+                      return
+                    }
+                    try {
+                      fs.mkdirSync(trimmedMusicDir, { recursive: true })
+                      fs.accessSync(trimmedMusicDir, fs.constants.R_OK)
+                    } catch (e: any) {
+                      res.writeHead(422, { 'Content-Type': 'application/json' })
+                      res.end(JSON.stringify({ success: false, error: `自定义音乐目录无效或无法访问 (${trimmedMusicDir}): ${e.message || e}` }))
+                      return
+                    }
+                  }
+                  user.customMusicDir = trimmedMusicDir
+                }
                 if (allowOperateCustomMusicDir !== undefined) user.allowOperateCustomMusicDir = !!allowOperateCustomMusicDir
                 if (allowWriteCustomMusicDir !== undefined) user.allowWriteCustomMusicDir = !!allowWriteCustomMusicDir
                 if (enableAutoDownload !== undefined) user.enableAutoDownload = !!enableAutoDownload
                 saveUsers()
-                res.writeHead(200)
+                res.writeHead(200, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: true }))
               }
 
@@ -5991,6 +6012,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                         follow_max: 0,
                         response_timeout: 4000, // Increase timeout slightly
                         read_timeout: 4000,
+                        // 解析的是音乐平台链接，归 music 分类
+                        agent: await getProxyAgent(u, 'music'),
                         headers: {
                           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                           'Referer': new URL(u).origin
@@ -6758,10 +6781,18 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'webdav.excludeMusic': global.lx.config['webdav.excludeMusic'] ?? false,
             'proxy.all.enabled': global.lx.config['proxy.all.enabled'] || false,
             'proxy.all.address': global.lx.config['proxy.all.address'] || '',
+            // 三类细分代理：enabled 为 undefined 表示「沿用上面的统一开关」
+            'proxy.music.enabled': global.lx.config['proxy.music.enabled'],
+            'proxy.music.address': global.lx.config['proxy.music.address'] || '',
+            'proxy.customSource.enabled': global.lx.config['proxy.customSource.enabled'],
+            'proxy.customSource.address': global.lx.config['proxy.customSource.address'] || '',
+            'proxy.app.enabled': global.lx.config['proxy.app.enabled'],
+            'proxy.app.address': global.lx.config['proxy.app.address'] || '',
             'admin.path': global.lx.config['admin.path'] ?? '/music',
             'player.path': global.lx.config['player.path'] ?? '/',
             'subsonic.enable': global.lx.config['subsonic.enable'] ?? true,
             'subsonic.path': global.lx.config['subsonic.path'] ?? '/rest',
+            'subsonic.port': global.lx.config['subsonic.port'] ?? 0,
             'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'] ?? false,
             'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'] ?? true,
             'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'] ?? 'fallback',
@@ -6789,6 +6820,11 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'singer.sourcePriority': (global.lx.config['singer.sourcePriority'] || ['tx', 'wy']).join(','),
             'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'] ?? 20,
             'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
+            'configBackup.enable': global.lx.config['configBackup.enable'] ?? true,
+            'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'] ?? 7,
+            'configBackup.dir': global.lx.config['configBackup.dir'] ?? '',
+            'snapshot.backupPath': global.lx.config['snapshot.backupPath'] ?? '',
+            subsonicPortConflict: global.lx.subsonicPortConflict || null,
             configFilePath: global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js'),
           }
           res.writeHead(200, {
@@ -6857,8 +6893,33 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['sync.backupInterval'] !== undefined) global.lx.config['sync.backupInterval'] = parseInt(newConfig['sync.backupInterval']) || 24
               if (newConfig['webdav.excludeCache'] !== undefined) global.lx.config['webdav.excludeCache'] = !!newConfig['webdav.excludeCache']
               if (newConfig['webdav.excludeMusic'] !== undefined) global.lx.config['webdav.excludeMusic'] = !!newConfig['webdav.excludeMusic']
+              const validateAndCleanProxy = (addr: any) => {
+                if (!addr || typeof addr !== 'string') return ''
+                const trimmed = addr.trim()
+                if (!trimmed) return ''
+                try {
+                  const parsed = new URL(trimmed)
+                  if (['http:', 'https:', 'socks:', 'socks4:', 'socks5:'].includes(parsed.protocol)) return trimmed
+                  return ''
+                } catch {
+                  return ''
+                }
+              }
+
               if (newConfig['proxy.all.enabled'] !== undefined) global.lx.config['proxy.all.enabled'] = newConfig['proxy.all.enabled']
-              if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = newConfig['proxy.all.address']
+              if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = validateAndCleanProxy(newConfig['proxy.all.address'])
+              // 细分代理：null 表示「沿用统一开关」(写回 undefined，序列化时省略)
+              ;(['music', 'customSource', 'app'] as const).forEach(cat => {
+                const cfg: any = global.lx.config
+                const kEnabled = `proxy.${cat}.enabled`
+                const kAddress = `proxy.${cat}.address`
+                if (newConfig[kEnabled] !== undefined) {
+                  cfg[kEnabled] = newConfig[kEnabled] === null ? undefined : !!newConfig[kEnabled]
+                }
+                if (newConfig[kAddress] !== undefined) {
+                  cfg[kAddress] = newConfig[kAddress] === null ? '' : validateAndCleanProxy(newConfig[kAddress])
+                }
+              })
 
               if (newConfig['admin.path'] !== undefined || newConfig['player.path'] !== undefined) {
                 const adminPath = (newConfig['admin.path'] !== undefined ? newConfig['admin.path'] : (global.lx.config['admin.path'] ?? '/admin'))
@@ -6890,12 +6951,61 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 global.lx.config['player.path'] = normalizedPlayer
               }
 
+              // [路径合法性校验] 校验配置备份目录与歌单快照路径
+              const validateDirectoryPath = (rawPath: string, fieldName: string): string => {
+                const trimmed = rawPath.trim()
+                if (!trimmed) return ''
+                // 检查系统非法字符 (如 < > " | ? *)
+                if (/[<>"|?*]/.test(trimmed)) {
+                  throw new Error(`${fieldName} 包含非法字符 (< > " | ? *)`)
+                }
+                const resolved = path.isAbsolute(trimmed) ? trimmed : path.join(global.lx.dataPath, trimmed)
+                // 尝试创建目录检测有效性与写入权限
+                try {
+                  fs.mkdirSync(resolved, { recursive: true })
+                  fs.accessSync(resolved, fs.constants.W_OK)
+                } catch (e: any) {
+                  throw new Error(`${fieldName} 路径无效或无写入权限 (${resolved}): ${e.message || e}`)
+                }
+                return trimmed
+              }
+
+              if (newConfig['configBackup.dir'] !== undefined) {
+                try {
+                  global.lx.config['configBackup.dir'] = validateDirectoryPath(String(newConfig['configBackup.dir']), '配置备份目录')
+                } catch (err: any) {
+                  res.writeHead(422, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ success: false, error: err.message }))
+                  return
+                }
+              }
+
+              if (newConfig['snapshot.backupPath'] !== undefined) {
+                try {
+                  global.lx.config['snapshot.backupPath'] = validateDirectoryPath(String(newConfig['snapshot.backupPath']), '歌单快照备份路径')
+                } catch (err: any) {
+                  res.writeHead(422, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ success: false, error: err.message }))
+                  return
+                }
+              }
+
               // 新增：Subsonic 配置保存逻辑
               if (newConfig['subsonic.enable'] !== undefined) global.lx.config['subsonic.enable'] = newConfig['subsonic.enable']
               if (newConfig['subsonic.path'] !== undefined) {
                 global.lx.config['subsonic.path'] = newConfig['subsonic.path'].replace(/\/+$/, '') || '/rest'
               }
+              if (newConfig['subsonic.port'] !== undefined) {
+                const port = parseInt(newConfig['subsonic.port'], 10)
+                global.lx.config['subsonic.port'] = !isNaN(port) && port >= 0 ? port : 0
+              }
               if (newConfig['subsonic.enableDebug'] !== undefined) global.lx.config['subsonic.enableDebug'] = newConfig['subsonic.enableDebug']
+              // [本地配置备份] configBackup 配置
+              if (newConfig['configBackup.enable'] !== undefined) global.lx.config['configBackup.enable'] = !!newConfig['configBackup.enable']
+              if (newConfig['configBackup.retentionDays'] !== undefined) {
+                const rd = Number(newConfig['configBackup.retentionDays'])
+                global.lx.config['configBackup.retentionDays'] = Number.isFinite(rd) && rd > 0 ? Math.floor(rd) : 7
+              }
               if (newConfig['subsonic.onlineSearch'] !== undefined) global.lx.config['subsonic.onlineSearch'] = newConfig['subsonic.onlineSearch']
               if (newConfig['subsonic.onlineSearchMode'] !== undefined) global.lx.config['subsonic.onlineSearchMode'] = newConfig['subsonic.onlineSearchMode']
               if (newConfig['subsonic.onlineSearchSources'] !== undefined) global.lx.config['subsonic.onlineSearchSources'] = newConfig['subsonic.onlineSearchSources']
@@ -6990,10 +7100,18 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'webdav.excludeMusic': global.lx.config['webdav.excludeMusic'],
                 'proxy.all.enabled': global.lx.config['proxy.all.enabled'],
                 'proxy.all.address': global.lx.config['proxy.all.address'],
+                // undefined 会被序列化省略 -> 下次启动仍为「沿用统一开关」
+                'proxy.music.enabled': global.lx.config['proxy.music.enabled'],
+                'proxy.music.address': global.lx.config['proxy.music.address'] || '',
+                'proxy.customSource.enabled': global.lx.config['proxy.customSource.enabled'],
+                'proxy.customSource.address': global.lx.config['proxy.customSource.address'] || '',
+                'proxy.app.enabled': global.lx.config['proxy.app.enabled'],
+                'proxy.app.address': global.lx.config['proxy.app.address'] || '',
                 'admin.path': global.lx.config['admin.path'] ?? '/admin',
                 'player.path': global.lx.config['player.path'] ?? '/',
                 'subsonic.enable': global.lx.config['subsonic.enable'],
                 'subsonic.path': global.lx.config['subsonic.path'],
+                'subsonic.port': global.lx.config['subsonic.port'] ?? 0,
                 'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'],
                 'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'],
                 'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'],
@@ -7019,6 +7137,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'subsonic.source.priority': global.lx.config['subsonic.source.priority'],
                 'subsonic.source.crossPlatform': global.lx.config['subsonic.source.crossPlatform'],
                 'subsonic.source.autoSwitchCustom': global.lx.config['subsonic.source.autoSwitchCustom'],
+                'configBackup.enable': global.lx.config['configBackup.enable'],
+                'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'],
+                'configBackup.dir': global.lx.config['configBackup.dir'],
+                'snapshot.backupPath': global.lx.config['snapshot.backupPath'] || '',
                 'singer.sourcePriority': global.lx.config['singer.sourcePriority'],
                 'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'],
                 'cache.namingPattern': global.lx.config['cache.namingPattern'],
@@ -7033,9 +7155,13 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                   allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
                 })),
               }, null, 2)}`
-              fs.writeFileSync(configPath, configContent)
               if (typeof global.lx?.saveConfig === 'function') {
                 global.lx.saveConfig()
+              }
+
+              // 动态热迁移所有活跃用户空间的快照目录
+              if (newConfig['snapshot.backupPath'] !== undefined) {
+                updateAllUserSnapshotDirs(global.lx.config['snapshot.backupPath'])
               }
 
               // 触发一次 WebDAV 同步检查（如果已配置）
@@ -7052,6 +7178,236 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           })
           return
         }
+      }
+
+      // [配置备份管理 API] 获取备份列表及状态
+      if (pathname === '/api/config/backups' && req.method === 'GET') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['frontend.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+
+        try {
+          const backupDir = global.lx.getConfigBackupDir ? global.lx.getConfigBackupDir() : path.join(global.lx.dataPath, 'backups')
+          const list: Array<{ name: string, size: number, time: number, type: 'auto' | 'manual' }> = []
+
+          if (fs.existsSync(backupDir)) {
+            const files = fs.readdirSync(backupDir)
+            for (const file of files) {
+              if (!/^config-.*\.js$/.test(file)) continue
+              const fp = path.join(backupDir, file)
+              try {
+                const stat = fs.statSync(fp)
+                const isManual = file.startsWith('config-manual-')
+
+                // 优先从文件名解析精确时间戳
+                let timestamp = 0
+                const manualMatch = file.match(/^config-manual-(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})\.js$/)
+                const autoMatch = file.match(/^config-(\d{4})-(\d{2})-(\d{2})\.js$/)
+
+                if (manualMatch) {
+                  const [, y, m, d, h, min, s] = manualMatch
+                  timestamp = new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min), Number(s)).getTime()
+                } else if (autoMatch) {
+                  // 自动备份若与 mtime/birthtime 在同一天，优先使用文件修改时间以展示具体时刻；否则取日期当天 00:00
+                  timestamp = stat.mtimeMs || stat.birthtimeMs || 0
+                }
+
+                if (!timestamp) {
+                  timestamp = Math.max(stat.birthtimeMs || 0, stat.mtimeMs || 0)
+                }
+
+                list.push({
+                  name: file,
+                  size: stat.size,
+                  time: timestamp,
+                  type: isManual ? 'manual' : 'auto',
+                })
+              } catch { }
+            }
+          }
+
+          // 按时间倒序排序（从新到旧）
+          list.sort((a, b) => b.time - a.time)
+
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          })
+          res.end(JSON.stringify({
+            success: true,
+            backupDir,
+            autoBackupEnabled: global.lx.config['configBackup.enable'] !== false,
+            retentionDays: global.lx.config['configBackup.retentionDays'] || 7,
+            list,
+          }))
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: err.message }))
+        }
+        return
+      }
+
+      // [配置备份管理 API] 手动立即备份
+      if (pathname === '/api/config/backup-now' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['frontend.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+
+        try {
+          if (typeof global.lx.backupConfigNow === 'function') {
+            const result = global.lx.backupConfigNow()
+            if (result.success) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: true, filename: result.filename }))
+            } else {
+              res.writeHead(500, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: result.error || 'Backup failed' }))
+            }
+          } else {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: 'backupConfigNow is not available' }))
+          }
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: err.message }))
+        }
+        return
+      }
+
+      // [配置备份管理 API] 下载指定备份文件
+      if (pathname === '/api/config/backups/download' && req.method === 'GET') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['frontend.password']) {
+          res.writeHead(401)
+          res.end('Unauthorized')
+          return
+        }
+
+        const fileName = urlObj.searchParams.get('file')
+        if (!fileName || !/^config-.*\.js$/.test(fileName) || fileName.includes('/') || fileName.includes('\\')) {
+          res.writeHead(400)
+          res.end('Invalid file name')
+          return
+        }
+
+        const backupDir = global.lx.getConfigBackupDir ? global.lx.getConfigBackupDir() : path.join(global.lx.dataPath, 'backups')
+        const filePath = path.join(backupDir, fileName)
+
+        if (!fs.existsSync(filePath)) {
+          res.writeHead(404)
+          res.end('File not found')
+          return
+        }
+
+        try {
+          const content = fs.readFileSync(filePath)
+          res.writeHead(200, {
+            'Content-Type': 'application/javascript; charset=utf-8',
+            'Content-Disposition': `attachment; filename="${fileName}"`,
+            'Content-Length': content.length,
+          })
+          res.end(content)
+        } catch (err: any) {
+          res.writeHead(500)
+          res.end(err.message)
+        }
+        return
+      }
+
+      // [配置备份管理 API] 删除指定备份文件
+      if (pathname.startsWith('/api/config/backups/') && req.method === 'DELETE') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['frontend.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+
+        const fileName = decodeURIComponent(pathname.replace('/api/config/backups/', '')).trim()
+        if (!fileName || !/^config-.*\.js$/.test(fileName) || fileName.includes('/') || fileName.includes('\\')) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Invalid file name' }))
+          return
+        }
+
+        const backupDir = global.lx.getConfigBackupDir ? global.lx.getConfigBackupDir() : path.join(global.lx.dataPath, 'backups')
+        const filePath = path.join(backupDir, fileName)
+
+        if (!fs.existsSync(filePath)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'File not found' }))
+          return
+        }
+
+        try {
+          fs.unlinkSync(filePath)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true }))
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: err.message }))
+        }
+        return
+      }
+
+      // [配置备份管理 API] 从备份文件还原配置
+      if (pathname === '/api/config/backups/restore' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['frontend.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+
+        void readBody(req).then(async body => {
+          try {
+            const { fileName } = JSON.parse(body)
+            if (!fileName || !/^config-.*\.js$/.test(fileName) || fileName.includes('/') || fileName.includes('\\')) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: 'Invalid file name' }))
+              return
+            }
+
+            const backupDir = global.lx.getConfigBackupDir ? global.lx.getConfigBackupDir() : path.join(global.lx.dataPath, 'backups')
+            const filePath = path.join(backupDir, fileName)
+
+            if (!fs.existsSync(filePath)) {
+              res.writeHead(404, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: 'Backup file not found' }))
+              return
+            }
+
+            // 先自动备份一份当前的 config.js 防止回滚失误
+            if (typeof global.lx.backupConfigNow === 'function') {
+              global.lx.backupConfigNow()
+            }
+
+            // 复制备份文件覆盖当前 config.js
+            const activeConfigPath = global.lx.configPath || path.join(global.lx.dataPath, 'config.js')
+            fs.copyFileSync(filePath, activeConfigPath)
+
+            // 执行服务器热重载数据
+            await reloadServerData()
+
+            // 同步 snapshot 目录更新
+            if (global.lx.config['snapshot.backupPath'] !== undefined) {
+              updateAllUserSnapshotDirs(global.lx.config['snapshot.backupPath'])
+            }
+
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, message: `已成功从 ${fileName} 还原配置并热加载生效！` }))
+          } catch (err: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: err.message }))
+          }
+        })
+        return
       }
 
       // Test Proxy API
@@ -8019,6 +8375,70 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
   httpServer.listen(port, ip)
 })
 
+// [Subsonic 独立端口] 在独立监听端口上只暴露 Subsonic API。
+// 鉴权复用 subsonic 自身 verifyAuth（subsonic.ts 内部实现）——只有携带合法 Subsonic 凭据(用户/密码/token)的请求才会被处理，
+// 未通过鉴权的请求一律返回错误，从而实现「只允许 Subsonic 用户通过」。
+const startSubsonicStandaloneServer = () => {
+  const subEnabled = global.lx.config['subsonic.enable'] !== false
+  const subPort = global.lx.config['subsonic.port']
+  if (!subEnabled || !(typeof subPort === 'number' && subPort > 0)) return
+
+  // 不绑定特定 IP：监听所有网卡，访问控制交由防火墙处理
+  const subBindIP = '0.0.0.0'
+  const subServer = http.createServer(async (req, res) => {
+    // 与主端口一致的 CORS 头，兼容跨域 Subsonic 客户端
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', '*')
+    res.setHeader('Access-Control-Allow-Private-Network', 'true')
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204)
+      res.end()
+      return
+    }
+
+    try {
+      const { subsonicHandler } = require('./subsonic')
+      const urlObj = new URL(req.url ?? '', `http://${req.headers.host}`)
+
+      // [路由守卫] 仅允许 /rest/{method} 形式的 Subsonic API 调用，其余路径一律 404。
+      // 真正的 Subsonic 客户端请求形如 /rest/ping.view，会正常进入处理方法；
+      // 浏览器裸访问（/、/rest、/rest/ 等）及爬虫请求返回「像资源不存在」的 404：
+      // 只给状态码、不附带任何服务器说明文案，避免暴露「这是一个服务器 / 服务在响应」的特征。
+      if (!/^\/rest\/.+/.test(urlObj.pathname)) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+
+      // 直接交给 subsonic 处理；handleRequest 内部 verifyAuth 只会放行通过 Subsonic 鉴权的用户
+      await subsonicHandler.handleRequest(req, res, urlObj)
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('Internal Server Error')
+      }
+    }
+  })
+
+  subServer.on('error', (err: any) => {
+    global.lx.subsonicPortConflict = {
+      port: subPort,
+      error: err.code === 'EADDRINUSE' ? `端口 ${subPort} 已被占用` : (err.message || '端口绑定失败'),
+      time: Date.now(),
+    }
+    startupLog.error(`Subsonic standalone server failed on ${subBindIP}:${subPort}: ${err.message}`)
+    console.error('[Subsonic] standalone server error:', err)
+  })
+
+  subServer.listen(subPort, subBindIP, () => {
+    global.lx.subsonicPortConflict = undefined
+    startupLog.info(`Subsonic standalone server listening on ${subBindIP}:${subPort}`)
+    console.log(`[Subsonic] Standalone API listening on http://${subBindIP}:${subPort}`)
+  })
+}
+
 // const handleStopServer = async() => new Promise<void>((resolve, reject) => {
 //   if (!wss) return
 //   for (const client of wss.clients) client.close(SYNC_CLOSE_CODE.normal)
@@ -8192,6 +8612,9 @@ export const startServer = async (port: number, ip: string) => {
     status.message = ''
     scheduler.startScheduler()
     status.address = ip == '0.0.0.0' ? getAddress() : [ip]
+
+    // [Subsonic 独立端口] 主端口就绪后启动（独立端口失败不影响主服务）
+    startSubsonicStandaloneServer()
 
 
 
