@@ -1,15 +1,17 @@
 /**
- * 用户自建网络电台（Internet Radio Station）持久化。
+ * 用户自建网络电台（Internet Radio Station）分用户隔离持久化。
  *
  * 与「官方电台」(QQ music radio_tx_*，由 discovery.fetchRadios 实时抓取) 不同，
  * 用户自建电台由用户在客户端（如音流）粘贴 streamUrl 添加，需落盘持久化。
  *
- * 存储路径：process.env.DATA_PATH || cwd/data/radioStations.json
- * （与 userApi / customSourceHandlers 等模块保持一致，Docker 下由 DATA_PATH 卷挂载）
+ * 存储路径：data/users/<username>/radioStations.json
+ * 各用户自建电台独立隔离存储，互不干扰。
  */
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { getUserDirname } = require('@/user')
 
 export interface RadioStation {
   id: string
@@ -18,46 +20,52 @@ export interface RadioStation {
   homepageUrl?: string
 }
 
-const DATA_PATH = process.env.DATA_PATH || path.join(process.cwd(), 'data')
-const STORE_FILE = path.join(DATA_PATH, 'radioStations.json')
+const userCaches = new Map<string, RadioStation[]>()
 
-let cache: RadioStation[] | null = null
+function getUserStoreFile(username: string): string {
+  const userPath = (global.lx && global.lx.userPath) || path.join(process.cwd(), 'data', 'users')
+  const userDir = path.join(userPath, getUserDirname(username || 'default'))
+  return path.join(userDir, 'radioStations.json')
+}
 
-function load(): RadioStation[] {
-  if (cache) return cache
+function load(username: string): RadioStation[] {
+  if (userCaches.has(username)) return userCaches.get(username)!
+  const storeFile = getUserStoreFile(username)
+  let stations: RadioStation[] = []
   try {
-    if (fs.existsSync(STORE_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8'))
-      cache = Array.isArray(raw?.stations) ? raw.stations : []
-    } else {
-      cache = []
+    if (fs.existsSync(storeFile)) {
+      const raw = JSON.parse(fs.readFileSync(storeFile, 'utf-8'))
+      stations = Array.isArray(raw?.stations) ? raw.stations : []
     }
   } catch {
-    cache = []
+    stations = []
   }
-  return cache ?? []
+  userCaches.set(username, stations)
+  return stations
 }
 
-function persist(): void {
+function persist(username: string): void {
   try {
-    if (!fs.existsSync(DATA_PATH)) fs.mkdirSync(DATA_PATH, { recursive: true })
-    fs.writeFileSync(STORE_FILE, JSON.stringify({ stations: cache ?? [] }, null, 2), 'utf-8')
+    const storeFile = getUserStoreFile(username)
+    const dir = path.dirname(storeFile)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(storeFile, JSON.stringify({ stations: userCaches.get(username) ?? [] }, null, 2), 'utf-8')
   } catch (err) {
-    console.error('[RadioStations] persist failed:', err)
+    console.error(`[RadioStations] persist failed for user ${username}:`, err)
   }
 }
 
-export function listRadioStations(): RadioStation[] {
-  return load().map(s => ({ ...s }))
+export function listRadioStations(username: string): RadioStation[] {
+  return load(username).map(s => ({ ...s }))
 }
 
-export function getRadioStation(id: string): RadioStation | null {
-  const s = load().find(x => x.id === id)
+export function getRadioStation(username: string, id: string): RadioStation | null {
+  const s = load(username).find(x => x.id === id)
   return s ? { ...s } : null
 }
 
-export function addRadioStation(name: string, streamUrl: string, homepageUrl?: string): RadioStation {
-  const stations = load()
+export function addRadioStation(username: string, name: string, streamUrl: string, homepageUrl?: string): RadioStation {
+  const stations = load(username)
   const station: RadioStation = {
     id: `radio_usr_${crypto.randomUUID()}`,
     name,
@@ -65,31 +73,33 @@ export function addRadioStation(name: string, streamUrl: string, homepageUrl?: s
     homepageUrl,
   }
   stations.push(station)
-  persist()
+  persist(username)
   return { ...station }
 }
 
 export function updateRadioStation(
+  username: string,
   id: string,
   name?: string,
   streamUrl?: string,
   homepageUrl?: string,
 ): RadioStation | null {
-  const stations = load()
+  const stations = load(username)
   const s = stations.find(x => x.id === id)
   if (!s) return null
   if (name !== undefined) s.name = name
   if (streamUrl !== undefined) s.streamUrl = streamUrl
   if (homepageUrl !== undefined) s.homepageUrl = homepageUrl
-  persist()
+  persist(username)
   return { ...s }
 }
 
-export function removeRadioStation(id: string): boolean {
-  const stations = load()
+export function removeRadioStation(username: string, id: string): boolean {
+  const stations = load(username)
   const idx = stations.findIndex(x => x.id === id)
   if (idx < 0) return false
   stations.splice(idx, 1)
-  persist()
+  persist(username)
   return true
 }
+

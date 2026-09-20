@@ -661,16 +661,16 @@ class SubsonicHandler {
                     return this.handleGetGenres(res, username, format)
 
                 case 'getInternetRadioStations':
-                    return this.handleGetInternetRadioStations(res, params, format)
+                    return this.handleGetInternetRadioStations(res, username, params, format)
 
                 case 'createInternetRadioStation':
-                    return this.handleCreateInternetRadioStation(res, params, format)
+                    return this.handleCreateInternetRadioStation(res, username, params, format)
 
                 case 'updateInternetRadioStation':
-                    return this.handleUpdateInternetRadioStation(res, params, format)
+                    return this.handleUpdateInternetRadioStation(res, username, params, format)
 
                 case 'deleteInternetRadioStations':
-                    return this.handleDeleteInternetRadioStations(res, params, format)
+                    return this.handleDeleteInternetRadioStations(res, username, params, format)
 
                 case 'getAlbumList':
                     return this.handleGetAlbumList(res, username, params, format, false)
@@ -2574,11 +2574,11 @@ class SubsonicHandler {
         return available
     }
 
-    private async handleGetInternetRadioStations(res: http.ServerResponse, params: URLSearchParams, format: string) {
+    private async handleGetInternetRadioStations(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
         try {
             const official = await fetchRadios()           // QQ 官方电台：streamUrl 指向本服 /rest/stream?id=radio_tx_*
             const officialUsable = await this.isOfficialRadioAvailable(official) // 上游取歌接口失效时隐藏，避免「点了没反应」
-            const userStations = listRadioStations()        // 用户自建电台：落盘持久化
+            const userStations = listRadioStations(username) // 用户自建电台：分用户独立落盘持久化
             const playlistStations = await this.getPlaylistRadioStations() // 音乐源歌单：本服随机取歌
             // [修复] 本服生成的电台 streamUrl 是相对路径（/rest/stream?id=radio_tx_99），
             // 但协议里客户端会把它当作可直接播放的绝对地址，相对路径在第三方客户端必然失败。
@@ -2651,7 +2651,7 @@ class SubsonicHandler {
         }
     }
 
-    private async handleCreateInternetRadioStation(res: http.ServerResponse, params: URLSearchParams, format: string) {
+    private async handleCreateInternetRadioStation(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
         const name = params.get('name')
         const streamUrl = params.get('streamUrl')
         const homepageUrl = params.get('homepageUrl') || ''
@@ -2659,7 +2659,7 @@ class SubsonicHandler {
             return this.sendError(res, 10, 'Required parameter missing: name, streamUrl', format)
         }
         try {
-            const station = addRadioStation(name, streamUrl, homepageUrl)
+            const station = addRadioStation(username, name, streamUrl, homepageUrl)
             return this.sendResponse(res, this.buildRadioStationAttrs(station, format), format)
         } catch (err) {
             subsonicLog.error('[Subsonic] createInternetRadioStation error:', err)
@@ -2667,14 +2667,14 @@ class SubsonicHandler {
         }
     }
 
-    private async handleUpdateInternetRadioStation(res: http.ServerResponse, params: URLSearchParams, format: string) {
+    private async handleUpdateInternetRadioStation(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
         const id = params.get('id')
         const name = params.get('name')
         const streamUrl = params.get('streamUrl')
         const homepageUrl = params.get('homepageUrl')
         if (!id) return this.sendError(res, 10, 'Required parameter missing: id', format)
         try {
-            const station = updateRadioStation(id, name ?? undefined, streamUrl ?? undefined, homepageUrl ?? undefined)
+            const station = updateRadioStation(username, id, name ?? undefined, streamUrl ?? undefined, homepageUrl ?? undefined)
             if (!station) return this.sendError(res, 70, 'Internet radio station not found', format)
             return this.sendResponse(res, this.buildRadioStationAttrs(station, format), format)
         } catch (err) {
@@ -2683,11 +2683,11 @@ class SubsonicHandler {
         }
     }
 
-    private async handleDeleteInternetRadioStations(res: http.ServerResponse, params: URLSearchParams, format: string) {
+    private async handleDeleteInternetRadioStations(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
         const ids = params.getAll('id')
         if (!ids.length) return this.sendError(res, 10, 'Required parameter missing: id', format)
         try {
-            for (const id of ids) removeRadioStation(id)
+            for (const id of ids) removeRadioStation(username, id)
             return this.sendResponse(res, {}, format)
         } catch (err) {
             subsonicLog.error('[Subsonic] deleteInternetRadioStations error:', err)
@@ -4212,7 +4212,7 @@ class SubsonicHandler {
 
             // [新增] 用户自建电台(radio_usr_*)：直接 302 重定向到用户配置的 streamUrl
             if (id.startsWith('radio_usr_')) {
-                const station = getRadioStation(id)
+                const station = getRadioStation(username, id)
                 if (station && station.streamUrl) {
                     subsonicLog.debug(`[Subsonic] Redirecting user radio ${id} -> ${station.streamUrl}`)
                     res.writeHead(302, { Location: station.streamUrl })
