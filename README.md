@@ -293,6 +293,10 @@ npm start
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | 是否启用登录用户缓存限制 (开启后限非管理员登录用户的缓存设置)      | `false`          |
 | `ENABLE_CACHE_SIZE_LIMIT`             | `user.enableCacheSizeLimit`        | 是否启用缓存空间限制 (开启后超出容量将按 LRU 自动清理)             | `false`          |
 | `CACHE_SIZE_LIMIT`                    | `user.cacheSizeLimit`              | 缓存空间限制大小 (单位: MB)                                        | `2000`           |
+| `CONFIG_BACKUP_ENABLE`                | `configBackup.enable`              | 是否启用配置文件自动备份功能 (每天生成一份历史配置副本)           | `true`           |
+| `CONFIG_BACKUP_RETENTION_DAYS`        | `configBackup.retentionDays`       | 配置文件备份保留天数 (自动清理过期备份)                             | `7`              |
+| `CONFIG_BACKUP_DIR`                   | `configBackup.dir`                 | 配置文件备份存储目录路径 (支持绝对路径或相对 `./data`)              | `backups`        |
+| `SNAPSHOT_BACKUP_PATH`                | `snapshot.backupPath`              | 歌单快照自定义存储路径 (支持绝对路径或相对 `./data`，各用户独立隔离)| -                |
 | `LIST_ADD_MUSIC_LOCATION_TYPE`        | `list.addMusicLocationType`        | 添加歌曲到列表时的位置 (`top` / `bottom`)                      | `top`            |
 | `PROXY_ALL_ENABLED`                   | `proxy.all.enabled`                | 是否启用外发请求代理 (针对 Music SDK)                              | `false`          |
 | `PROXY_ALL_ADDRESS`                   | `proxy.all.address`                | 代理地址 (支持 http:// 或 socks5://)                               | -                  |

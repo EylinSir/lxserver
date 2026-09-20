@@ -88,6 +88,116 @@ const getConfigHash = (filePath: string) => {
 const dataPath = envParams.DATA_PATH ?? path.join(__dirname, '../data')
 const resolvedConfigPath = process.env.CONFIG_PATH || path.join(dataPath, 'config.js')
 
+// [本地配置备份] 每天一份 config-YYYY-MM-DD.js，保留可配置天数（见 configBackup.*）
+let lastBackupDate = ''
+
+const getConfigBackupDir = (): string => {
+  const dir = global.lx?.config['configBackup.dir']
+  if (dir && typeof dir === 'string' && dir.trim()) {
+    const p = dir.trim()
+    return path.isAbsolute(p) ? p : path.join(dataPath, p)
+  }
+  return path.join(dataPath, 'backups')
+}
+
+const getConfigBackupRetention = (): number => {
+  const days = global.lx?.config['configBackup.retentionDays']
+  return typeof days === 'number' && days > 0 ? days : 7
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+const getTodayStr = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+const getTimestampStr = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
+}
+
+// 清理超过保留期的本地配置备份（按文件 mtime 判断）
+const cleanOldConfigBackups = () => {
+  const backupDir = getConfigBackupDir()
+  try {
+    if (!fs.existsSync(backupDir)) return
+    const cutoff = Date.now() - getConfigBackupRetention() * 24 * 60 * 60 * 1000
+    for (const name of fs.readdirSync(backupDir)) {
+      if (!/^config-.*\.js$/.test(name)) continue
+      const fp = path.join(backupDir, name)
+      try {
+        if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp)
+      } catch { /* ignore */ }
+    }
+  } catch (err) {
+    console.error('[Config] Failed to clean old config backups:', err)
+  }
+}
+
+// 迁移旧备份：当配置了自定义备份目录时，自动将默认路径（data/backups）下的历史备份搬迁过来
+const migrateConfigBackups = (targetBackupDir: string) => {
+  const legacyDir = path.join(dataPath, 'backups')
+  if (path.resolve(targetBackupDir) === path.resolve(legacyDir) || !fs.existsSync(legacyDir)) return
+  try {
+    fs.mkdirSync(targetBackupDir, { recursive: true })
+    for (const name of fs.readdirSync(legacyDir)) {
+      if (!/^config-.*\.js$/.test(name)) continue
+      const src = path.join(legacyDir, name)
+      const dst = path.join(targetBackupDir, name)
+      if (!fs.existsSync(dst)) {
+        try {
+          fs.renameSync(src, dst)
+          console.log(`[Config] Migrated backup ${name} -> ${targetBackupDir}`)
+        } catch (e) {
+          console.warn(`[Config] Failed to migrate backup ${name}:`, e)
+        }
+      }
+    }
+    if (fs.readdirSync(legacyDir).length === 0) {
+      try { fs.rmdirSync(legacyDir) } catch { }
+    }
+  } catch (err) {
+    console.warn('[Config] Error during config backup migration:', err)
+  }
+}
+
+// 每天自动备份一次（同日覆盖），备份后顺带清理过期文件
+const backupConfig = () => {
+  if (global.lx?.config['configBackup.enable'] === false) return
+  const backupDir = getConfigBackupDir()
+  migrateConfigBackups(backupDir)
+  const dateStr = getTodayStr()
+  if (dateStr === lastBackupDate) return
+  try {
+    if (!global.lx?.configPath || !fs.existsSync(global.lx.configPath)) return
+    fs.mkdirSync(backupDir, { recursive: true })
+    fs.copyFileSync(global.lx.configPath, path.join(backupDir, `config-${dateStr}.js`))
+    lastBackupDate = dateStr
+    console.log(`[Config] Local backup saved to ${backupDir}/config-${dateStr}.js`)
+  } catch (err) {
+    console.error('[Config] Failed to backup config:', err)
+  }
+  cleanOldConfigBackups()
+}
+
+// 手动立即备份一次（精确到秒时间戳，不覆盖当天的自动备份）
+const backupConfigNow = (): { success: boolean, filename?: string, error?: string } => {
+  const backupDir = getConfigBackupDir()
+  try {
+    if (!global.lx?.configPath || !fs.existsSync(global.lx.configPath)) {
+      return { success: false, error: 'Config file not found' }
+    }
+    fs.mkdirSync(backupDir, { recursive: true })
+    const filename = `config-manual-${getTimestampStr()}.js`
+    fs.copyFileSync(global.lx.configPath, path.join(backupDir, filename))
+    console.log(`[Config] Manual backup saved to ${backupDir}/${filename}`)
+    return { success: true, filename }
+  } catch (err: any) {
+    console.error('[Config] Failed to perform manual backup:', err)
+    return { success: false, error: err.message || String(err) }
+  }
+}
+
 const saveConfigToFile = () => {
   const content = `module.exports = ${JSON.stringify(global.lx.config, null, 2)}`
   try {
@@ -98,6 +208,7 @@ const saveConfigToFile = () => {
     fs.writeFileSync(global.lx.configPath, content)
     lastConfigHash = crypto.createHash('md5').update(content).digest('hex')
     // console.log('Current memory config saved to ' + global.lx.configPath)
+    backupConfig()
   } catch (err) {
     console.error('Failed to save config file:', err)
   }
@@ -111,6 +222,8 @@ global.lx = {
   staticPath: process.env.STATIC_PATH ?? path.join(process.cwd(), 'public'),
   configPath: resolvedConfigPath,
   saveConfig: saveConfigToFile,
+  backupConfigNow,
+  getConfigBackupDir,
 }
 
 const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string>>) => {
@@ -392,6 +505,31 @@ if (envParams.SINGER_SOURCE_PRIORITY !== undefined) {
   const priority = envParams.SINGER_SOURCE_PRIORITY.split(',').filter(s => s === 'tx' || s === 'wy') as Array<'tx' | 'wy'>
   if (priority.length > 0) global.lx.config['singer.sourcePriority'] = priority
 }
+if (envParams.CONFIG_BACKUP_ENABLE !== undefined) {
+  setBoolConfig('configBackup.enable', envParams.CONFIG_BACKUP_ENABLE)
+}
+if (envParams.CONFIG_BACKUP_RETENTION_DAYS) {
+  const days = parseInt(envParams.CONFIG_BACKUP_RETENTION_DAYS, 10)
+  if (!isNaN(days) && days > 0) global.lx.config['configBackup.retentionDays'] = days
+}
+if (envParams.CONFIG_BACKUP_DIR !== undefined) {
+  const dir = String(envParams.CONFIG_BACKUP_DIR).trim()
+  if (/[<>"|?*]/.test(dir)) {
+    console.warn(`[Config] 环境变量 CONFIG_BACKUP_DIR 包含非法字符 ("${dir}")，已忽略并回退到默认目录`)
+    global.lx.config['configBackup.dir'] = ''
+  } else {
+    global.lx.config['configBackup.dir'] = dir
+  }
+}
+if (envParams.SNAPSHOT_BACKUP_PATH !== undefined) {
+  const snapPath = String(envParams.SNAPSHOT_BACKUP_PATH).trim()
+  if (/[<>"|?*]/.test(snapPath)) {
+    console.warn(`[Config] 环境变量 SNAPSHOT_BACKUP_PATH 包含非法字符 ("${snapPath}")，已忽略并回退到默认目录`)
+    global.lx.config['snapshot.backupPath'] = ''
+  } else {
+    global.lx.config['snapshot.backupPath'] = snapPath
+  }
+}
 if (envParams.SERVER_NAME) {
   global.lx.config.serverName = envParams.SERVER_NAME
 }
@@ -661,6 +799,11 @@ if (!fs.existsSync(openLibDir)) {
 
 // 启动前最后保存一次合并后的配置，确保环境变量被固化到 config.js 中
 saveConfigToFile()
+
+// 每日清理过期本地配置备份（保留最近 7 天）
+cleanOldConfigBackups()
+const configBackupTimer = setInterval(cleanOldConfigBackups, 24 * 60 * 60 * 1000)
+if (typeof configBackupTimer.unref === 'function') configBackupTimer.unref()
 
 startServer(global.lx.config.port, global.lx.config.bindIP)
 
