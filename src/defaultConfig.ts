@@ -53,6 +53,14 @@ const config: LX.Config = {
   'webdav.excludeMusic': false, // 是否排除音乐下载目录 (data/<user>/music) 的同步与备份
 
 
+  // 本地配置备份（config.js 每日一份本地副本）
+  'configBackup.enable': true, // 是否启用本地配置备份
+  'configBackup.retentionDays': 7, // 本地备份保留天数
+  'configBackup.dir': '', // 备份目录，留空则用 <data>/backups，相对路径基于 data 目录，绝对路径直接使用
+
+  // 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot，相对路径基于 data 目录，绝对路径直接使用）
+  'snapshot.backupPath': '',
+
   // Web播放器配置
   'player.enableAuth': false,
   'player.password': '123456',
@@ -75,6 +83,7 @@ const config: LX.Config = {
   'player.path': '/', // 播放器路径，默认为根路径 /
   'subsonic.enable': true, // 是否启用 Subsonic 服务
   'subsonic.path': '/rest', // Subsonic 访问路径
+  'subsonic.port': 0, // Subsonic 独立端口: 0=不启用(走主端口 subsonic.path); >0 时单独监听该端口, 只允许通过 Subsonic 鉴权的用户访问
   'subsonic.enableDebug': false, // 是否开启 Subsonic 调试日志模式
   'subsonic.onlineSearch': true, // 是否开启 Subsonic 在线全网搜索
   'subsonic.onlineSearchMode': 'fallback', // 在线搜索模式: fallback | merge | local_only

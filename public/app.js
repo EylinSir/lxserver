@@ -346,8 +346,13 @@ class App {
                     console.error('Failed to check webdav status:', e);
                 }
                 break;
+            case 'backups':
             case 'snapshots':
-                this.loadSnapshots();
+                if (this.currentBackupTab === 'snapshot') {
+                    this.loadSnapshots();
+                } else {
+                    this.loadConfigBackups();
+                }
                 break;
             case 'about':
                 this.loadAbout();
@@ -2351,6 +2356,7 @@ class App {
         try {
             const config = await this.request('/api/config');
             this.configLoaded = true;
+            this.loadedConfig = config; // 保存原始配置，供 saveConfig 对比「需重启」字段是否变更
             const form = document.getElementById('config-form');
 
             form.elements['serverName'].value = config.serverName || '';
@@ -2459,6 +2465,20 @@ class App {
                 form.elements['webdav.excludeMusic'].checked = config['webdav.excludeMusic'] === true;
             }
 
+            // 本地配置备份
+            if (form.elements['configBackup.enable']) {
+                form.elements['configBackup.enable'].checked = config['configBackup.enable'] !== false;
+            }
+            if (form.elements['configBackup.retentionDays']) {
+                form.elements['configBackup.retentionDays'].value = config['configBackup.retentionDays'] || 7;
+            }
+            if (form.elements['configBackup.dir']) {
+                form.elements['configBackup.dir'].value = config['configBackup.dir'] || '';
+            }
+            if (form.elements['snapshot.backupPath']) {
+                form.elements['snapshot.backupPath'].value = config['snapshot.backupPath'] || '';
+            }
+
             // URL路径配置
             if (form.elements['admin.path']) {
                 form.elements['admin.path'].value = config['admin.path'] ?? '';
@@ -2481,6 +2501,40 @@ class App {
             }
             if (form.elements['subsonic.enableDebug']) {
                 form.elements['subsonic.enableDebug'].checked = config['subsonic.enableDebug'] === true;
+            }
+            if (form.elements['subsonic.port']) {
+                form.elements['subsonic.port'].value = config['subsonic.port'] || 0;
+            }
+            // Subsonic 独立端口开关：port>0 视为开启，切换端口输入框显隐
+            const standaloneToggle = document.getElementById('subsonic-standalone-toggle');
+            const standaloneFields = document.getElementById('subsonic-standalone-fields');
+            const portErrEl = document.getElementById('subsonic-port-error');
+            if (standaloneToggle && standaloneFields) {
+                const enabled = (parseInt(config['subsonic.port']) || 0) > 0;
+                standaloneToggle.checked = enabled;
+                standaloneFields.classList.toggle('hidden', !enabled);
+                standaloneToggle.onchange = () => {
+                    const on = standaloneToggle.checked;
+                    standaloneFields.classList.toggle('hidden', !on);
+                    const portInput = form.elements['subsonic.port'];
+                    if (on && (!portInput.value || parseInt(portInput.value) === 0)) {
+                        portInput.value = 4050;
+                    } else if (!on) {
+                        portInput.value = 0;
+                    }
+                    if (portErrEl && !on) {
+                        portErrEl.style.display = 'none';
+                    }
+                };
+            }
+            if (portErrEl) {
+                const currentPort = parseInt(config['subsonic.port']) || 0;
+                if (config.subsonicPortConflict && config.subsonicPortConflict.port === currentPort && currentPort > 0) {
+                    portErrEl.textContent = `⚠️ 独立端口 ${currentPort} 启动失败（${config.subsonicPortConflict.error || '端口已被占用'}），配置未生效，请更换端口后保存并重启服务器。`;
+                    portErrEl.style.display = 'block';
+                } else {
+                    portErrEl.style.display = 'none';
+                }
             }
             if (form.elements['subsonic.onlineSearch']) {
                 form.elements['subsonic.onlineSearch'].checked = config['subsonic.onlineSearch'] !== false;
@@ -2572,6 +2626,10 @@ class App {
             const configJsPathRef = document.getElementById('config-js-path-ref');
             if (configJsPathRef && config.configFilePath) {
                 configJsPathRef.textContent = config.configFilePath;
+            }
+            const configBackupJsPathRef = document.getElementById('config-backup-js-path-ref');
+            if (configBackupJsPathRef && config.configFilePath) {
+                configBackupJsPathRef.textContent = config.configFilePath;
             }
         } catch (err) {
             console.error('Failed to load config:', err);
@@ -2960,11 +3018,16 @@ class App {
             'sync.backupInterval': parseInt(formData.get('sync.backupInterval')) || 24,
             'webdav.excludeCache': formData.get('webdav.excludeCache') === 'on',
             'webdav.excludeMusic': formData.get('webdav.excludeMusic') === 'on',
+            'configBackup.enable': formData.get('configBackup.enable') === 'on',
+            'configBackup.retentionDays': parseInt(formData.get('configBackup.retentionDays')) || 7,
+            'configBackup.dir': (formData.get('configBackup.dir') || '').trim(),
+            'snapshot.backupPath': (formData.get('snapshot.backupPath') || '').trim(),
             'admin.path': adminPath,
             'player.path': playerPath,
             'subsonic.enable': formData.get('subsonic.enable') === 'on',
             'subsonic.path': (formData.get('subsonic.path') || '').trim() || '/rest',
             'subsonic.enableDebug': formData.get('subsonic.enableDebug') === 'on',
+            'subsonic.port': parseInt(formData.get('subsonic.port')) || 0,
             'subsonic.onlineSearch': formData.get('subsonic.onlineSearch') === 'on',
             'subsonic.onlineSearchMode': formData.get('subsonic.onlineSearchMode') || 'fallback',
             'subsonic.onlineSearchSources': (formData.get('subsonic.onlineSearchSources') || '').trim() || 'wy,tx,kw,kg,mg',
@@ -2992,6 +3055,17 @@ class App {
             'system.allowUnsafeVM': formData.get('system.allowUnsafeVM') === 'on',
         };
 
+        // [需要重启] 以下配置仅在进程启动时由 server.ts 读取
+        // （startSubsonicStandaloneServer / handleStartServer），保存后不会即时生效，必须重启服务。
+        // 检测本次保存是否实际修改了它们，若是则提示用户重启。
+        const restartRequiredKeys = ['subsonic.enable', 'subsonic.port'];
+        const prevConfig = this.loadedConfig || {};
+        const changedRestartKeys = restartRequiredKeys.filter(k => {
+            if (k === 'subsonic.port') return Number(config[k]) !== Number(prevConfig[k]);
+            return config[k] !== prevConfig[k];
+        });
+        const needRestart = changedRestartKeys.length > 0;
+
         try {
             const res = await this.request('/api/config', {
                 method: 'POST',
@@ -3008,11 +3082,36 @@ class App {
             const navPlayerLink = document.getElementById('nav-player-link');
             if (navPlayerLink) navPlayerLink.href = playerPath === '' ? '/' : (playerPath ?? '/');
 
+            // 保存成功后同步「已加载配置」，供下次保存对比
+            this.loadedConfig = config;
+
             if (!silent) {
                 if (res.warning) {
                     showInfo('配置保存成功！\n\n⚠️ 警告：' + res.warning);
                 } else {
                     showSuccess('配置保存成功！');
+                }
+                // 若改动了需重启才生效的配置，提醒并支持一键重启
+                if (needRestart) {
+                    const ok = await showSelect(
+                        '需要重启服务器',
+                        `你修改了以下「需重启才能生效」的配置：\n\n• ${changedRestartKeys.join('\n• ')}\n\n` +
+                        `当前修改已保存，但必须重启 lx-server 后才会生效（例如 Subsonic 独立端口）。\n是否立即重启服务器？`,
+                        { danger: true, confirmText: '立即重启', cancelText: '稍后手动重启' }
+                    );
+                    if (ok) {
+                        try {
+                            const r = await this.request('/api/restart', { method: 'POST' });
+                            if (r.success) {
+                                showSuccess('服务器正在重启，新配置（如 Subsonic 独立端口）将在重启后生效。\n\n页面将在 5 秒后自动刷新。');
+                                setTimeout(() => window.location.reload(), 5000);
+                            } else {
+                                showError('重启失败: ' + (r.message || '未知错误'));
+                            }
+                        } catch (e) {
+                            showError('重启请求失败: ' + e.message);
+                        }
+                    }
                 }
             }
         } catch (err) {
@@ -3108,7 +3207,14 @@ class App {
 
         if (!response.ok) {
             const text = await response.text();
-            throw new Error(text || 'Request failed');
+            let errMsg = text || 'Request failed';
+            try {
+                const json = JSON.parse(text);
+                if (json && (json.error || json.message)) {
+                    errMsg = json.error || json.message;
+                }
+            } catch { }
+            throw new Error(errMsg);
         }
 
         return response.json();
@@ -3972,6 +4078,193 @@ class App {
         document.getElementById('new-file-btn')?.addEventListener('click', () => this.createNewFile());
         document.getElementById('new-folder-btn')?.addEventListener('click', () => this.createNewFolder());
         document.getElementById('refresh-files-btn')?.addEventListener('click', () => this.loadFiles(this.currentPath));
+    }
+
+    switchBackupTab(tab) {
+        this.currentBackupTab = tab;
+        const configBtn = document.getElementById('tab-btn-config-backup');
+        const snapshotBtn = document.getElementById('tab-btn-snapshot-backup');
+        const configPane = document.getElementById('backup-pane-config');
+        const snapshotPane = document.getElementById('backup-pane-snapshot');
+
+        if (tab === 'snapshot') {
+            snapshotBtn?.classList.add('active');
+            configBtn?.classList.remove('active');
+            snapshotPane?.classList.add('active');
+            configPane?.classList.remove('active');
+            this.loadSnapshots();
+        } else {
+            configBtn?.classList.add('active');
+            snapshotBtn?.classList.remove('active');
+            configPane?.classList.add('active');
+            snapshotPane?.classList.remove('active');
+            this.loadConfigBackups();
+        }
+    }
+
+    async loadConfigBackups() {
+        const container = document.getElementById('config-backups-list');
+        if (!container) return;
+
+        container.classList.add('content-loading');
+
+        try {
+            const data = await this.request('/api/config/backups');
+            const list = data.list || [];
+
+            // 更新状态卡片与徽标
+            const statusDot = document.getElementById('config-backup-status-dot');
+            const modeBadge = document.getElementById('config-backup-mode-badge');
+            const retentionText = document.getElementById('config-backup-retention-text');
+            const dirText = document.getElementById('config-backup-dir-text');
+
+            if (data.autoBackupEnabled) {
+                statusDot?.classList.add('dot-active');
+                if (modeBadge) {
+                    modeBadge.innerHTML = '<span class="badge-dot dot-emerald"></span><span>已开启 (每日自动)</span>';
+                }
+            } else {
+                statusDot?.classList.remove('dot-active');
+                if (modeBadge) {
+                    modeBadge.innerHTML = '<span class="badge-dot dot-red"></span><span>已停用</span>';
+                }
+            }
+
+            if (retentionText) {
+                retentionText.textContent = `${data.retentionDays || 7} 天`;
+            }
+            if (dirText) {
+                dirText.textContent = data.backupDir || 'backups';
+                dirText.title = data.backupDir || 'backups';
+            }
+
+            if (!list.length) {
+                container.innerHTML = '<div style="padding: 2.5rem; text-align: center; color: var(--text-secondary);">暂无系统配置备份文件。可点击上方【立即备份配置】手动创建第一份备份。</div>';
+                container.classList.remove('content-loading');
+                return;
+            }
+
+            container.innerHTML = list.map(item => {
+                const isManual = item.type === 'manual';
+                const typeTag = isManual
+                    ? '<span class="backup-type-tag tag-manual"><span class="badge-dot dot-purple" style="width:6px;height:6px;"></span>手动备份</span>'
+                    : '<span class="backup-type-tag tag-auto"><span class="badge-dot dot-blue" style="width:6px;height:6px;"></span>每日自动</span>';
+
+                return `
+                <div class="snapshot-row">
+                    <div class="col-time">${new Date(item.time).toLocaleString()}</div>
+                    <div class="col-id" title="${item.name}">
+                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <span style="font-family:monospace; font-weight:600;">${item.name}</span>
+                            ${typeTag}
+                        </div>
+                    </div>
+                    <div class="col-size">${this.formatFileSize(item.size)}</div>
+                    <div class="col-actions snapshot-actions">
+                        <button class="btn-download" onclick="app.downloadConfigBackup('${item.name}')" title="下载此配置备份文件到电脑">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            下载
+                        </button>
+                        <button class="btn-restore" onclick="app.restoreConfigBackup('${item.name}')" title="恢复此配置并热重载">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="1 4 1 10 7 10"></polyline>
+                                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                            </svg>
+                            恢复
+                        </button>
+                        <button class="btn-delete" onclick="app.deleteConfigBackup('${item.name}')" title="删除此备份文件">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                            删除
+                        </button>
+                    </div>
+                </div>
+                `;
+            }).join('');
+
+            container.classList.remove('content-loading');
+            container.classList.add('fade-in');
+            setTimeout(() => container.classList.remove('fade-in'), 400);
+
+        } catch (err) {
+            console.error(err);
+            showError('加载配置备份列表失败: ' + err.message);
+            container.classList.remove('content-loading');
+        }
+    }
+
+    async backupConfigNow() {
+        const btn = document.getElementById('btn-backup-config-now');
+        if (btn) btn.disabled = true;
+
+        try {
+            const res = await this.request('/api/config/backup-now', { method: 'POST' });
+            if (res.success) {
+                showSuccess(`✅ 备份创建成功：${res.filename}`);
+                this.loadConfigBackups();
+            } else {
+                showError('创建备份失败: ' + (res.error || '未知错误'));
+            }
+        } catch (err) {
+            showError('创建备份请求失败: ' + err.message);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    downloadConfigBackup(filename) {
+        if (!filename) return;
+        const url = `/api/config/backups/download?file=${encodeURIComponent(filename)}&auth=${encodeURIComponent(this.password)}`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+    }
+
+    async deleteConfigBackup(filename) {
+        if (!filename) return;
+        if (!(await showSelect('删除配置备份', `确定要删除备份文件 ${filename} 吗？\n\n删除后不可恢复。`, { danger: true }))) return;
+
+        try {
+            const res = await this.request(`/api/config/backups/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+            if (res.success) {
+                showSuccess(`已成功删除备份 ${filename}`);
+                this.loadConfigBackups();
+            } else {
+                showError('删除失败: ' + (res.error || '未知错误'));
+            }
+        } catch (err) {
+            showError('删除请求失败: ' + err.message);
+        }
+    }
+
+    async restoreConfigBackup(filename) {
+        if (!filename) return;
+        if (!(await showSelect('恢复配置文件', `警告：确定要从备份 ${filename} 还原系统配置吗？\n\n1. 系统将自动为当前配置额外创建一份安全备份以防失误。\n2. 还原后将立即热重载配置生效。\n\n确定要继续恢复吗？`, { danger: true }))) {
+            return;
+        }
+
+        try {
+            const res = await this.request('/api/config/backups/restore', {
+                method: 'POST',
+                body: JSON.stringify({ fileName: filename })
+            });
+            if (res.success) {
+                showSuccess(res.message || '✅ 配置已成功恢复并热加载！');
+                this.loadConfigBackups();
+                this.loadConfig(); // 刷新配置视图中的表单值
+            } else {
+                showError('恢复失败: ' + (res.error || '未知错误'));
+            }
+        } catch (err) {
+            showError('恢复请求失败: ' + err.message);
+        }
     }
 
     async loadSnapshots() {
