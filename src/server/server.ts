@@ -6812,6 +6812,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'] ?? 7,
             'configBackup.dir': global.lx.config['configBackup.dir'] ?? '',
             'snapshot.backupPath': global.lx.config['snapshot.backupPath'] ?? '',
+            subsonicPortConflict: global.lx.subsonicPortConflict || null,
             configFilePath: global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js'),
           }
           res.writeHead(200, {
@@ -8378,11 +8379,17 @@ const startSubsonicStandaloneServer = () => {
   })
 
   subServer.on('error', (err: any) => {
+    global.lx.subsonicPortConflict = {
+      port: subPort,
+      error: err.code === 'EADDRINUSE' ? `端口 ${subPort} 已被占用` : (err.message || '端口绑定失败'),
+      time: Date.now(),
+    }
     startupLog.error(`Subsonic standalone server failed on ${subBindIP}:${subPort}: ${err.message}`)
     console.error('[Subsonic] standalone server error:', err)
   })
 
   subServer.listen(subPort, subBindIP, () => {
+    global.lx.subsonicPortConflict = undefined
     startupLog.info(`Subsonic standalone server listening on ${subBindIP}:${subPort}`)
     console.log(`[Subsonic] Standalone API listening on http://${subBindIP}:${subPort}`)
   })

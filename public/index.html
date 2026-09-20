@@ -1295,6 +1295,9 @@
                                         <label class="config-label">Subsonic 独立监听端口</label>
                                         <input type="number" name="subsonic.port" class="form-input config-input"
                                             min="0" max="65535" placeholder="0-65535" />
+                                        <small id="subsonic-port-error" class="config-hint" style="color: #ef4444; display: none; margin-top: 6px; font-weight: 500;">
+                                            ⚠️ 端口配置未成功（端口已被占用），请更换端口后保存并重启服务器。
+                                        </small>
                                     </div>
                                 </div>
                                 <div class="config-divider"></div>

@@ -15,6 +15,11 @@ declare global {
     getConfigBackupDir?: () => string
     lastCpuSample?: { idle: number, total: number }
     lastProcessSample?: { cpu: NodeJS.CpuUsage, time: number }
+    subsonicPortConflict?: {
+      port: number
+      error: string
+      time: number
+    }
   }
 
   // var envParams: LX.EnvParams

@@ -2497,6 +2497,7 @@ class App {
             // Subsonic 独立端口开关：port>0 视为开启，切换端口输入框显隐
             const standaloneToggle = document.getElementById('subsonic-standalone-toggle');
             const standaloneFields = document.getElementById('subsonic-standalone-fields');
+            const portErrEl = document.getElementById('subsonic-port-error');
             if (standaloneToggle && standaloneFields) {
                 const enabled = (parseInt(config['subsonic.port']) || 0) > 0;
                 standaloneToggle.checked = enabled;
@@ -2510,7 +2511,19 @@ class App {
                     } else if (!on) {
                         portInput.value = 0;
                     }
+                    if (portErrEl && !on) {
+                        portErrEl.style.display = 'none';
+                    }
                 };
+            }
+            if (portErrEl) {
+                const currentPort = parseInt(config['subsonic.port']) || 0;
+                if (config.subsonicPortConflict && config.subsonicPortConflict.port === currentPort && currentPort > 0) {
+                    portErrEl.textContent = `⚠️ 独立端口 ${currentPort} 启动失败（${config.subsonicPortConflict.error || '端口已被占用'}），配置未生效，请更换端口后保存并重启服务器。`;
+                    portErrEl.style.display = 'block';
+                } else {
+                    portErrEl.style.display = 'none';
+                }
             }
             if (form.elements['subsonic.onlineSearch']) {
                 form.elements['subsonic.onlineSearch'].checked = config['subsonic.onlineSearch'] !== false;
