@@ -206,6 +206,27 @@ declare namespace LX {
     'webdav.excludeMusic'?: boolean
 
     /**
+     * 是否启用本地配置备份（每日一份 config.js 副本，保留指定天数）
+     */
+    'configBackup.enable'?: boolean
+
+    /**
+     * 本地配置备份保留天数（默认 7）
+     */
+    'configBackup.retentionDays'?: number
+
+    /**
+     * 本地配置备份目录，留空则使用 <data>/backups；相对路径基于 data 目录，绝对路径直接使用
+     */
+    'configBackup.dir'?: string
+
+    /**
+     * 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot）。
+     * 相对路径基于 data 目录，绝对路径直接使用
+     */
+    'snapshot.backupPath'?: string
+
+    /**
      * 是否开启Web播放器访问密码
      */
     'player.enableAuth'?: boolean
@@ -231,6 +252,26 @@ declare namespace LX {
     'proxy.all.address'?: string
 
     /**
+     * 音乐平台(内置音源 SDK)请求是否单独走代理；undefined 表示沿用 proxy.all.*
+     */
+    'proxy.music.enabled'?: boolean
+
+    /** 音乐平台请求的代理地址 */
+    'proxy.music.address'?: string
+
+    /** 自定义音源脚本请求是否单独走代理；undefined 表示沿用 proxy.all.* */
+    'proxy.customSource.enabled'?: boolean
+
+    /** 自定义音源脚本请求的代理地址 */
+    'proxy.customSource.address'?: string
+
+    /** 应用自身功能(封面代理/识别/远程导入等)请求是否单独走代理；undefined 表示沿用 proxy.all.* */
+    'proxy.app.enabled'?: boolean
+
+    /** 应用自身功能请求的代理地址 */
+    'proxy.app.address'?: string
+
+    /**
      * 是否禁用数据收集
      */
     disableTelemetry?: boolean
@@ -254,6 +295,13 @@ declare namespace LX {
      * Subsonic 访问路径 (默认 /rest)
      */
     'subsonic.path'?: string
+
+    /**
+     * Subsonic 独立监听端口 (默认 0)
+     * 0 = 不启用独立端口, Subsonic 仍走主端口的 subsonic.path;
+     * >0 = 单独监听该端口, 仅暴露 Subsonic API 且只允许通过 Subsonic 鉴权(verifyAuth)的用户访问。
+     */
+    'subsonic.port'?: number
 
     /**
      * 是否开启 Subsonic 调试日志模式 (默认 false)

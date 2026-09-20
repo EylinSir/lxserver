@@ -287,15 +287,15 @@ export default {
       return {
         singer: formatSingerName(item.singer, 'name'),
         name: item.title,
-        albumName: album.name,
-        albumId: album.mid,
+        albumName: album.name || '',
+        albumId: album.mid || '',
         source: 'tx',
         interval: formatPlayTime(item.interval),
         songId: item.id,
-        albumMid: album.mid,
+        albumMid: album.mid || '',
         strMediaMid: item.file.media_mid,
         songmid: item.mid,
-        img: (album.name === '' || album.name === '空')
+        img: (!album.name || !album.mid || album.name === '空')
           ? item.singer?.length ? `https://y.gtimg.cn/music/photo_new/T001R800x800M000${item.singer[0].mid}.jpg` : ''
           : `https://y.gtimg.cn/music/photo_new/T002R800x800M000${album.mid}.jpg`,
         lrc: null,
