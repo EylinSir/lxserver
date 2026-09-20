@@ -168,6 +168,22 @@ module.exports = {
   // 环境变量: PROXY_ALL_ADDRESS (例如: http://127.0.0.1:7890)
   "proxy.all.address": "",
 
+  // 本地配置备份（每日生成一份 config.js 本地副本并自动清理过期备份）
+  // 环境变量: CONFIG_BACKUP_ENABLE (true/false)
+  "configBackup.enable": true,
+
+  // 本地配置备份保留天数 (默认 7 天)
+  // 环境变量: CONFIG_BACKUP_RETENTION_DAYS
+  "configBackup.retentionDays": 7,
+
+  // 本地配置备份目录 (留空默认为 <data>/backups，相对路径基于 data 目录，绝对路径直接使用)
+  // 环境变量: CONFIG_BACKUP_DIR
+  "configBackup.dir": "",
+
+  // 歌单快照额外备份路径 (留空默认为用户数据目录 list/snapshot，相对路径基于 data 目录，绝对路径直接使用)
+  // 环境变量: SNAPSHOT_BACKUP_PATH
+  "snapshot.backupPath": "",
+
   // 后台管理界面访问路径（默认为 /admin）
   // 环境变量: ADMIN_PATH
   "admin.path": "/admin",
