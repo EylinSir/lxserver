@@ -11,6 +11,8 @@ declare global {
     staticPath: string
     configPath: string
     saveConfig: () => void
+    backupConfigNow?: () => { success: boolean, filename?: string, error?: string }
+    getConfigBackupDir?: () => string
     lastCpuSample?: { idle: number, total: number }
     lastProcessSample?: { cpu: NodeJS.CpuUsage, time: number }
   }

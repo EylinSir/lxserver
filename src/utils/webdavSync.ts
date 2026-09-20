@@ -161,9 +161,6 @@ class WebDAVSync extends EventEmitter {
             if (norm === 'music' || norm.startsWith('music/')) return true
         }
 
-        // 忽略本地配置备份目录（由 lxserver 本地维护，避免与 WebDAV 云备份形成冗余/循环）
-        if (norm === 'backups' || norm.startsWith('backups/')) return true
-
         return false
     }
 
@@ -567,10 +564,7 @@ class WebDAVSync extends EventEmitter {
                         'lx-sync-backup-*.zip',
                         'tmp/**',
                         'logs/**',
-                        'runtime/**',
-                        // 本地配置备份目录（configBackup.dir 默认 <data>/backups），无需同步/备份
-                        'backups/**',
-                        'backups'
+                        'runtime/**'
                     ]
                 if (this.excludeCache) {
                     // data/cache/ 下存放各用户缓存文件
