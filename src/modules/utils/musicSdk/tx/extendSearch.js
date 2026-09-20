@@ -19,6 +19,17 @@ const createSearchFetch = (str, searchType, resultNum, pageNum) => {
             },
         },
     }
+    // [备用/旧版请求方式 - POST 请求]
+    // return httpFetch(MUSICU_URL, {
+    //     method: 'post',
+    //     headers: {
+    //         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
+    //         'Content-Type': 'application/json;charset=utf-8',
+    //     },
+    //     body: payload,
+    // })
+
+    // [当前方式 - GET 请求]
     return httpFetch(`${MUSICU_URL}?format=json&data=${encodeURIComponent(JSON.stringify(payload))}`, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',

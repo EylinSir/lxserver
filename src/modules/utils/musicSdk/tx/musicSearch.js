@@ -63,6 +63,16 @@ export default {
         },
       },
     }
+    // [备用/旧版请求方式 - POST 请求]
+    // const searchRequest = httpFetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+    //   method: 'post',
+    //   headers: {
+    //     'User-Agent': 'QQMusic 14090508(android 12)',
+    //   },
+    //   body: searchPayload,
+    // })
+
+    // [当前方式 - GET 请求]
     const searchRequest = httpFetch(`https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify(searchPayload))}`, {
       headers: {
         'User-Agent': 'QQMusic 14090508(android 12)',

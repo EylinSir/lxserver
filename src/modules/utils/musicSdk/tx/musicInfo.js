@@ -27,6 +27,16 @@ export default (songmid) => {
       },
     },
   }
+  // [备用/旧版请求方式 - POST 请求]
+  // const requestObj = httpFetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+  //   method: 'post',
+  //   headers: {
+  //     'User-Agent': 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)',
+  //   },
+  //   body: payload,
+  // })
+
+  // [当前方式 - GET 请求]
   const requestObj = httpFetch(`https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify(payload))}`, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)',
