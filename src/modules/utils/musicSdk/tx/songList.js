@@ -229,7 +229,7 @@ export default {
       })
       const { body: bodyV2 } = await requestObj_v2.promise
       const detail = bodyV2?.req?.data
-      if (detail && Array.isArray(detail.songlist)) {
+      if (detail && Array.isArray(detail.songlist) && detail.songlist.length) {
         const dir = detail.dirinfo || {}
         return {
           list: this.filterListDetail(detail.songlist),

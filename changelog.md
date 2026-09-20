@@ -55,6 +55,24 @@
   - **OpenSubsonic 电台封面规范 (`coverArt`) 与 ICY 流媒体元数据中继**:
     - 按 OpenSubsonic 标准扩展规范下发各大热门歌单电台的高清封面 `coverArt`。
     - 服务端支持 ICY Metadata 代理注入，为支持 ICY 协议的客户端动态注入当前播放的真实歌手与歌名。
+- **Subsonic 协议全量补全、智能歌手匹配与简繁双向搜索 (#385 @pyss56)**:
+  - **Subsonic / OpenSubsonic 协议全量补全**:
+    - **专辑详情与封面 (`getAlbumInfo` / `getAlbumInfo2`)**：支持专辑描述（notes）与封面解析，构造不出平台直链时自动回退歌曲自带封面。
+    - **播放状态与听歌历史 (`reportPlayback` / `getNowPlaying` / `scrobble`)**：精确上报播放进度毫秒（`positionMs`）；按规范仅在 `stopped` 且未带 `ignoreScrobble` 时写入听歌历史；提供最近播放与最常播放列表，支持播放队列（`getPlayQueue` / `savePlayQueue`）与索引式队列接口。
+    - **相似歌曲推荐 (`getSonicSimilarTracks`)**：复用同歌手相似歌优选逻辑，按匹配度综合排序推荐。
+    - **音频书签三件套 (`getBookmarks` / `createBookmark` / `deleteBookmark`)**：支持跨客户端书签创建、读取与删除，分用户独立持久化存储。
+    - **服务端转码决策与流支持 (`getTranscodeDecision` / `getTranscodeStream`)**：自动下发安全签名 `transcodeParams`；支持服务端 ffmpeg 转码可用性探测（不可用时平滑降级 302 直链）、并发信号量限流控制、`timeOffset` 快速时间定位，并在 `handleStream` 中根据客户端 `maxBitrate` 智能决定转码。
+    - **规范化扩展声明与参数修复**：`getOpenSubsonicExtensions` 准确声明实际实现的官方扩展名（`songLyrics`, `playbackReport`, `sonicSimilarity`, `indexBasedQueue`, `transcodeOffset`, `transcoding`），确保第三方客户端准确调用；共享歌单支持「排行榜 / 歌单 / 都要」三态配置。
+  - **智能歌手匹配与跨源合并**:
+    - 歌手寻址由「精确同名」升级为「相似度模糊匹配」，引入失败短缓存与详细诊断日志，解决大量歌手无法检索到的问题。
+    - 跨音源歌手智能合并，名字型歌手 ID 优先复用本地规范 ID，搜索结果中跨音源同名智能去重。
+    - 艺术家按拼音首字母索引精准分组，并对歌手头像做自适应尺寸优化。
+  - **简繁体双向模糊搜索**:
+    - 新增轻量级简繁转换模块（`zhConvert.ts`），支持简繁双向互转变体匹配，彻底解决繁体搜索词匹配不到简体歌曲/歌手（或反之）的痛点。
+  - **音源与搜索鲁棒性增强**:
+    - `search3` 补齐在线歌手与在线专辑检索（此前未收藏时结果为空）。
+    - 腾讯与网易封面 URL 增加自适应尺寸与回退降级逻辑，避免客户端请求小图返回空白。
+    - 百度音乐源精简（不再参与运行时搜索与初始化注册，保留历史数据兼容解析模块）。
 
 ## v2.1.0 (2026-09-19)
 
