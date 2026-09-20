@@ -45,7 +45,7 @@ const saveTaskRecords = () => {
     }
     fs.writeFileSync(p, JSON.stringify(records, null, 2), 'utf8')
   } catch (err: any) {
-    syncLog.warn('[Scheduler] 保存任务执行记录失败:', err.message)
+    syncLog.warn('[任务调度] 保存任务执行记录失败:', err.message)
   }
 }
 
@@ -117,12 +117,12 @@ export const executeTask = async (taskId: string): Promise<TaskExecutionResult> 
 
   task.isRunning = true
   task.lastRunTime = Date.now()
-  syncLog.info(`[Scheduler] 开始执行后台任务: ${task.name} (${task.id})`)
+  syncLog.info(`[任务调度] 开始执行后台任务: ${task.name} (${task.id})`)
 
   try {
     const result = await task.run()
     task.lastResult = result
-    syncLog.info(`[Scheduler] 任务执行完毕: ${task.name}, 结果: ${result.message}`)
+    syncLog.info(`[任务调度] 任务执行完毕: ${task.name}, 结果: ${result.message}`)
     return result
   } catch (err: any) {
     const errorResult: TaskExecutionResult = {
@@ -132,7 +132,7 @@ export const executeTask = async (taskId: string): Promise<TaskExecutionResult> 
       message: `执行失败: ${err.message}`
     }
     task.lastResult = errorResult
-    syncLog.error(`[Scheduler] 任务 ${task.name} 执行异常:`, err)
+    syncLog.error(`[任务调度] 任务 ${task.name} 执行异常:`, err)
     return errorResult
   } finally {
     task.isRunning = false
@@ -200,7 +200,7 @@ export const startScheduler = () => {
   const syncDownloadTask = createSyncDownloadTask()
   registerTask(syncDownloadTask)
 
-  syncLog.info('[Scheduler] 后台任务调度器已启动')
+  syncLog.info('[任务调度] 后台任务调度器已启动')
 
   // 针对已启用的任务：
   // 1. 安排下一次定期执行时间
@@ -212,7 +212,7 @@ export const startScheduler = () => {
       // 服务端刚开机/刚启动时立即执行一次（延迟3秒等待网络/musicSdk初始化）
       setTimeout(() => {
         if (isSchedulerRunning && task.enabled) {
-          syncLog.info(`[Scheduler] 服务端启动，触发任务首次执行: ${task.name}`)
+          syncLog.info(`[任务调度] 服务端启动，触发任务首次执行: ${task.name}`)
           void executeTask(task.id)
         }
       }, 3000)
@@ -229,5 +229,5 @@ export const stopScheduler = () => {
     clearTimeout(timer)
   }
   taskTimers.clear()
-  syncLog.info('[Scheduler] 后台任务调度器已停止')
+  syncLog.info('[任务调度] 后台任务调度器已停止')
 }

@@ -107,7 +107,7 @@ async function getScriptInfo(scriptContent: string, allowUnsafeVM: boolean = fal
             requireUnsafe = !!result.requireUnsafe
         }
     } catch (e: any) {
-        console.warn('[CustomSource] 分析脚本支持源失败:', e.message)
+        console.warn('[自定义源] 分析脚本支持源失败:', e.message)
     }
 
     return { metadata, supportedSources, requireUnsafe }
@@ -247,7 +247,7 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true, id, metadata, supportedSources, owner: targetOwner, allowUnsafeVM: !!requireUnsafe || !!allowUnsafeVM }))
     } catch (err: any) {
-        console.error('[CustomSource] Upload error:', err)
+        console.error('[自定义源] 上传失败:', err)
         res.writeHead(500, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: false, error: err.message }))
     }
@@ -408,7 +408,7 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true, filename: displayName, id, metadata, supportedSources, owner: targetOwner, allowUnsafeVM: !!requireUnsafe || !!allowUnsafeVM }))
     } catch (err: any) {
-        console.error('[CustomSource] Import error:', err)
+        console.error('[自定义源] 导入失败:', err)
         res.writeHead(500, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: false, error: err.message }))
     }
@@ -485,6 +485,9 @@ export async function handleList(req: IncomingMessage, res: ServerResponse, user
         if (status) {
             source.status = status.status
             source.error = status.error
+            if (status.updateAlert) {
+                source.updateAlert = status.updateAlert
+            }
         }
 
         // 读取对应音源的禁用平台列表
@@ -657,7 +660,7 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
                     status.error.includes('timeout')
                 ))
                 if (isRequireUnsafe) {
-                    console.warn(`[CustomSource] Detect REQUIRE_UNSAFE_VM or Timeout during toggle for ${targetId}, rolling back...`)
+                    console.warn(`[自定义源] 开启目标 ${targetId} 时触发超时或依赖 REQUIRE_UNSAFE_VM，已回滚...`)
                     // 回滚状态
                     target.enabled = oldEnabled
                     target.allowUnsafeVM = oldAllowUnsafeVM
@@ -694,7 +697,7 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
             throw e
         }
     } catch (err: any) {
-        console.error('[CustomSource] Toggle error:', err)
+        console.error('[自定义源] 状态切换异常:', err)
         res.writeHead(500)
         res.end(err.message)
     }
@@ -787,7 +790,7 @@ export async function handleReorder(req: IncomingMessage, res: ServerResponse) {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true }))
     } catch (err: any) {
-        console.error('[CustomSource] Reorder error:', err)
+        console.error('[自定义源] 排序保存异常:', err)
         res.writeHead(500)
         res.end(err.message)
     }
@@ -873,7 +876,7 @@ export async function handleDelete(req: IncomingMessage, res: ServerResponse) {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true }))
     } catch (err: any) {
-        console.error('[CustomSource] Delete error:', err)
+        console.error('[自定义源] 删除异常:', err)
         res.writeHead(500)
         res.end(err.message)
     }

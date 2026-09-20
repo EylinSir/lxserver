@@ -91,7 +91,7 @@ const saveNow = () => {
     }, null, 2), 'utf8')
     fs.renameSync(tempFile, file)
   } catch (err) {
-    console.warn('[ServerDownloadQueue] Failed to save queue:', err)
+    console.warn('[下载队列] 保存任务失败:', err)
     try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile) } catch (e) { }
   }
 }
@@ -146,9 +146,9 @@ const loadTasks = () => {
       }
       tasks.set(taskMapKey(task.username, task.id), task)
     }
-    console.log(`[ServerDownloadQueue] Restored ${tasks.size} persisted tasks`)
+    console.log(`[下载队列] 已恢复 ${tasks.size} 个持久化下载任务`)
   } catch (err) {
-    console.warn('[ServerDownloadQueue] Failed to restore queue:', err)
+    console.warn('[下载队列] 恢复队列任务失败:', err)
   }
 }
 
@@ -200,10 +200,10 @@ const runTask = async (task: ServerDownloadTask) => {
 
     await fileCache.downloadAndCache(task.songInfo, resolved.url, task.quality, task.username, controller.signal,
       task.enableOnlyDownloadMode, task.cacheLyric, task.embedLyric, {
-        requestedSource: resolved.requestedSource,
-        downloadSource: resolved.downloadSource,
-        sourceName: resolved.sourceName,
-      })
+      requestedSource: resolved.requestedSource,
+      downloadSource: resolved.downloadSource,
+      sourceName: resolved.sourceName,
+    })
 
     if (controller.signal.aborted) return
     const progress = fileCache.cacheProgress.get(task.activeSongKey)

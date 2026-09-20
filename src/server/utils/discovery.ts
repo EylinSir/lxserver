@@ -28,13 +28,13 @@ export const fetchGenres = async () => {
             headers: commonHeaders
         }).promise
 
-        if (!body || body.code !== 0) {
-            console.error('[Discovery] fetchGenres API Error:', body)
+        if (body.code !== 200) {
+            console.error('[发现页] fetchGenres 接口异常:', body)
             return []
         }
 
         const categories = body.data?.categories || []
-        console.log(`[Discovery] fetchGenres categories found: ${categories.length}`)
+        console.log(`[发现页] fetchGenres 获取分类数量: ${categories.length}`)
 
         const targetGroups = ['语种', '流派']
         const filteredGroups = categories.filter((c: any) => targetGroups.includes(c.categoryGroupName))
@@ -51,7 +51,7 @@ export const fetchGenres = async () => {
             albumCount: 100
         }))
     } catch (e) {
-        console.error('[Discovery] fetchGenres unexpected error:', e)
+        console.error('[发现页] fetchGenres 发生异常:', e)
         return []
     }
 }
@@ -89,7 +89,7 @@ export const fetchPlaylistsByGenre = async (categoryId: string, size: number = 2
             playCount: item.listennum || 0
         }))
     } catch (e) {
-        console.error('[Discovery] fetchPlaylistsByGenre error:', e)
+        console.error('[发现页] fetchPlaylistsByGenre 获取失败:', e)
         return []
     }
 }
@@ -134,7 +134,7 @@ export const fetchPlaylistSongs = async (dissid: string) => {
             }))
         }
     } catch (e) {
-        console.error('[Discovery] fetchPlaylistSongs error:', e)
+        console.error('[发现页] fetchPlaylistSongs 获取失败:', e)
         return { name: '错误歌单', list: [] }
     }
 }
@@ -177,7 +177,7 @@ export const fetchSongsByGenre = async (categoryId: string, size: number = 20): 
 
         return allSongs.slice(0, size)
     } catch (e) {
-        console.error(`[Discovery] fetchSongsByGenre error:`, e)
+        console.error(`[发现页] fetchSongsByGenre 获取失败:`, e)
         return []
     }
 }
@@ -204,7 +204,7 @@ export const fetchRadioSongs = async (radioId: string) => {
             headers: commonHeaders
         }).promise
 
-        console.log(`[Discovery] fetchRadioSongs response for ${radioId}:`, JSON.stringify(body).slice(0, 200))
+        console.log(`[发现页] fetchRadioSongs 请求电台 ${radioId} 响应:`, JSON.stringify(body).slice(0, 200))
 
         const tracks = body?.radio?.data?.tracks || []
         return tracks.map((t: any) => ({
@@ -213,7 +213,7 @@ export const fetchRadioSongs = async (radioId: string) => {
             songname: t.name
         }))
     } catch (e) {
-        console.error('[Discovery] fetchRadioSongs error:', e)
+        console.error('[发现页] fetchRadioSongs 获取失败:', e)
         return []
     }
 }
@@ -256,7 +256,7 @@ export const fetchRadios = async () => {
         }
         return Array.from(radioMap.values())
     } catch (e) {
-        console.error('[Discovery] fetchRadios error:', e)
+        console.error('[发现页] fetchRadios 获取失败:', e)
         return []
     }
 }

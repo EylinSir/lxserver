@@ -7,6 +7,10 @@ module.exports = {
   // 环境变量: SERVER_NAME
   "serverName": "lxserver",
 
+  // 是否启用 DEBUG 模式 (开启后输出详细的调试日志与音源内部日志，默认关闭，供开发人员使用)
+  // 环境变量: ENABLE_DEBUG (true/false)
+  "debug.enabled": false,
+
   // 是否使用代理转发请求到本服务器 (如果配置了 proxy.header，此项会自动设为 true)
   // 环境变量: 无 (通过 PROXY_HEADER 隐式开启)
   "proxy.enabled": false,

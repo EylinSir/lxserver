@@ -417,7 +417,7 @@ const deleteLocalSong = (username: string, songId: string, subPath: string): boo
       fileCache.removeCacheFile(item.filename, username, 'music')
       deleted = true
     } catch (e: any) {
-      syncLog.warn(`[SyncDownload] 删除文件失败: ${item.filename}: ${e.message}`)
+      syncLog.warn(`[同步下载] 删除文件失败: ${item.filename}: ${e.message}`)
     }
   }
   return deleted
@@ -456,7 +456,7 @@ export const touchGlobalLock = () => {
 const syncUserPlaylists = async (username: string, signal?: AbortSignal, targetPlaylistId?: string) => {
   const progress = getProgress(username)
   if (progress.isRunning) {
-    syncLog.info(`[SyncDownload] 用户 ${username} 当前正在同步中，跳过`)
+    syncLog.info(`[同步下载] 用户 ${username} 当前正在同步中，跳过`)
     return
   }
 
@@ -468,7 +468,7 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal, targetP
   try {
     listData = await userSpace.listManage.getListData()
   } catch (e: any) {
-    syncLog.warn(`[SyncDownload] 用户 ${username} 获取歌单失败: ${e.message}`)
+    syncLog.warn(`[同步下载] 用户 ${username} 获取歌单失败: ${e.message}`)
     return
   }
 
@@ -639,12 +639,12 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal, targetP
     addLog(progress, errorMsg)
     syncData.lastSyncResult = errorMsg
     saveSyncDownloadData(username, syncData)
-    syncLog.error(`[SyncDownload] 用户 ${username} 同步执行出错:`, err)
+    syncLog.error(`[同步下载] 用户 ${username} 同步执行出错:`, err)
   } finally {
     progress.isRunning = false
     progress.startTime = null
     progress.currentSongName = ''
-    syncLog.info(`[SyncDownload] 用户 ${username} ${syncData.lastSyncResult}`)
+    syncLog.info(`[同步下载] 用户 ${username} ${syncData.lastSyncResult}`)
   }
 }
 
@@ -661,10 +661,10 @@ export const syncDownloadForAllUsers = async (signal?: AbortSignal): Promise<{
   const now = Date.now()
   if (globalIsRunning) {
     if (globalLockTime && now - globalLockTime > GLOBAL_LOCK_TIMEOUT_MS) {
-      syncLog.warn(`[SyncDownload] 全局同步任务锁定超过 ${GLOBAL_LOCK_TIMEOUT_MS / 60000} 分钟未完成，疑似异常挂起，自动强制释放锁并重新执行`)
+      syncLog.warn(`[同步下载] 全局同步任务锁定超过 ${GLOBAL_LOCK_TIMEOUT_MS / 60000} 分钟未完成，疑似异常挂起，自动强制释放锁并重新执行`)
       globalIsRunning = false
     } else {
-      syncLog.info('[SyncDownload] 全局同步任务正在运行中，跳过本次触发')
+      syncLog.info('[同步下载] 全局同步任务正在运行中，跳过本次触发')
       return { processedUsers: 0, totalSuccess: 0, totalAdded: 0, totalDeleted: 0, totalFail: 0 }
     }
   }
@@ -709,7 +709,7 @@ export const syncDownloadForAllUsers = async (signal?: AbortSignal): Promise<{
         totalFail += after.failCount - failBefore
         processedUsers++
       } catch (e: any) {
-        syncLog.warn(`[SyncDownload] 处理用户 ${username} 时出错: ${e.message}`)
+        syncLog.warn(`[同步下载] 处理用户 ${username} 时出错: ${e.message}`)
       }
     }
   } finally {

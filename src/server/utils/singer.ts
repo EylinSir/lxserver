@@ -125,7 +125,7 @@ async function resolveSingerFromSource(singerName: string, source: string): Prom
     const elapsed = Date.now() - started
 
     if (singerList.length === 0) {
-        console.warn(`[SingerUtils] ${source} 搜索歌手「${singerName}」返回 0 条 (${elapsed}ms)`)
+        console.warn(`[歌手服务] ${source} 搜索歌手「${singerName}」返回 0 条 (${elapsed}ms)`)
         return null
     }
 
@@ -133,11 +133,11 @@ async function resolveSingerFromSource(singerName: string, source: string): Prom
     const matched = picked?.item
     const mid = matched ? String(matched.mid || matched.id || '') : ''
     if (!mid) {
-        console.warn(`[SingerUtils] ${source} 搜索歌手「${singerName}」命中 ${singerList.length} 条但候选无可用 mid`)
+        console.warn(`[歌手服务] ${source} 搜索歌手「${singerName}」命中 ${singerList.length} 条但候选无可用 mid`)
         return null
     }
 
-    console.log(`[SingerUtils] ${source} 寻址「${singerName}」→「${matched.name}」(mid=${mid}, 相似度=${(picked?.score ?? 0).toFixed(2)}, 候选=${singerList.length}, ${elapsed}ms)`)
+    console.log(`[歌手服务] ${source} 寻址「${singerName}」→「${matched.name}」(mid=${mid}, 相似度=${(picked?.score ?? 0).toFixed(2)}, 候选=${singerList.length}, ${elapsed}ms)`)
 
     let desc = matched.alias?.[0] || ''
     let pic = matched.picUrl || matched.img || matched.avatar || ''
@@ -194,7 +194,7 @@ export async function getSingerDetail(singerName: string, sourcePriority?: Array
         return null
     }
     if (!priority.length) {
-        console.warn(`[SingerUtils] 歌手「${singerName}」寻址失败：没有任何可用源实现了 searchSinger`)
+        console.warn(`[歌手服务] 歌手「${singerName}」寻址失败：没有任何可用源实现了 searchSinger`)
         return null
     }
 
@@ -216,14 +216,14 @@ export async function getSingerDetail(singerName: string, sourcePriority?: Array
             }
             failCache.set(key, Date.now())
         } catch (err: any) {
-            console.warn(`[SingerUtils] 从 ${source} 获取歌手 [${singerName}] 失败 (${Date.now() - started}ms):`, err?.message || err)
+            console.warn(`[歌手服务] 从 ${source} 获取歌手 [${singerName}] 失败 (${Date.now() - started}ms):`, err?.message || err)
             failCache.set(key, Date.now())
             continue
         }
     }
 
     failCache.set(groupKey, Date.now())
-    console.warn(`[SingerUtils] 歌手「${singerName}」在 ${priority.join('/')} 均寻址失败，${FAIL_TTL / 1000}s 内不再重试`)
+    console.warn(`[歌手服务] 歌手「${singerName}」在 ${priority.join('/')} 均寻址失败，${FAIL_TTL / 1000}s 内不再重试`)
     return null
 }
 
@@ -254,7 +254,7 @@ export async function resolveSingerSources(singerName: string, sourcePriority?: 
             }
             return detail
         } catch (err: any) {
-            console.warn(`[SingerUtils] 跨源解析 ${source} 歌手 [${singerName}] 失败:`, err?.message || err)
+            console.warn(`[歌手服务] 跨源解析 ${source} 歌手 [${singerName}] 失败:`, err?.message || err)
             failCache.set(key, Date.now())
             return null
         }

@@ -77,18 +77,28 @@ interface UserApiInfo {
     allowUnsafeVM?: boolean
 }
 
+export interface ApiStatusInfo {
+    status: 'success' | 'failed'
+    error?: string
+    updateAlert?: {
+        name?: string
+        log?: string
+        updateUrl?: string
+    }
+}
+
 // 加载的 API 实例
 const loadedApis = new Map<string, any>()
 
 // API 初始化状态追踪 map<id, status>
-const apiStatus = new Map<string, { status: 'success' | 'failed', error?: string }>()
+const apiStatus = new Map<string, ApiStatusInfo>()
 
 /** 返回已成功加载的 API 源数量，用于状态展示与健康检查。 */
 export function getLoadedApisCount() {
     return loadedApis.size
 }
 
-export function getApiStatus(owner: string, id: string) {
+export function getApiStatus(owner: string, id: string): ApiStatusInfo | undefined {
     return apiStatus.get(`${owner}_${id}`)
 }
 
@@ -127,7 +137,7 @@ export function extractMetadata(script: string): Partial<UserApiInfo> {
 }
 
 // 创建 lx.request 包装器（使用 needle）
-async function createLxRequest(isUnsafe: boolean = false) {
+async function createLxRequest(isUnsafe: boolean = false, onSniffUpdate?: (alert: { name?: string, log?: string, updateUrl?: string }) => void) {
     // 自定义音源脚本调用 lx.request 是同步的，无法在调用时 await，
     // 因此这里预先按 http/https 各建一个 agent，调用时按目标协议取用。
     // 走 customSource 分类的独立开关（未配置时沿用 proxy.all.*）。
@@ -166,6 +176,19 @@ async function createLxRequest(isUnsafe: boolean = false) {
                         try {
                             parsedBody = JSON.parse(body)
                         } catch { }
+                    }
+
+                    // 自动嗅探第三方脚本通过 HTTP 响应返回的更新提醒 (例如独家音源、各大更新接口)
+                    if (onSniffUpdate && parsedBody && typeof parsedBody === 'object') {
+                        const targetData = parsedBody.data || parsedBody
+                        const updateMsg = targetData.updateMsg || targetData.log || targetData.updateLog || targetData.msg
+                        const updateUrl = targetData.updateUrl || targetData.url || targetData.downloadUrl
+                        if (updateMsg && (updateUrl || typeof updateMsg === 'string' && updateMsg.includes('更新'))) {
+                            onSniffUpdate({
+                                log: String(updateMsg),
+                                updateUrl: updateUrl ? String(updateUrl) : ''
+                            })
+                        }
                     }
 
                     let safeResp: any = {
@@ -271,18 +294,47 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
     const lxObject = {
         ...lxDataInside,
         utils: lxUtils,
-        request: await createLxRequest(!!apiInfo.allowUnsafeVM && !!global.lx.config['system.allowUnsafeVM']),
+        request: await createLxRequest(
+            !!apiInfo.allowUnsafeVM && !!global.lx.config['system.allowUnsafeVM'],
+            (alert) => {
+                const currentStatus = apiStatus.get(`${fullApiInfo.owner}_${fullApiInfo.id}`) || { status: 'success' }
+                currentStatus.updateAlert = {
+                    name: alert.name || fullApiInfo.name,
+                    log: alert.log,
+                    updateUrl: alert.updateUrl
+                }
+                apiStatus.set(`${fullApiInfo.owner}_${fullApiInfo.id}`, currentStatus)
+                console.log(`[自定义源] [更新嗅探] 嗅探到源 ${fullApiInfo.name} 的更新提示: ${alert.log}`)
+            }
+        ),
         send: (eventName: string, data: any) => {
             const dData = decontextify(data)
-            // console.log(`[UserApi-${fullApiInfo.name}] send:`, eventName)
+            // console.log(`[自定义源-${fullApiInfo.name}] send:`, eventName)
             if (eventName === 'inited') {
                 if (dData && dData.sources) {
                     registeredSources = dData.sources
-                    console.log(`[UserApi-${fullApiInfo.name}] Registered sources:`, Object.keys(registeredSources).join(', '))
+                    if (global.lx.config['debug.enabled']) {
+                        console.log(`[自定义源-${fullApiInfo.name}] 已注册音源:`, Object.keys(registeredSources).join(', '))
+                    }
                 }
                 if (initResolve) initResolve()
             } else if (eventName === 'updateAlert') {
-                const error = new Error(`发现新版本,需要更新: ${JSON.stringify(dData)}`)
+                let alertPayload: any = {}
+                if (typeof dData === 'object' && dData !== null) {
+                    alertPayload = {
+                        name: dData.name || fullApiInfo.name,
+                        log: dData.log || dData.updateMsg || dData.msg || (typeof dData === 'string' ? dData : ''),
+                        updateUrl: dData.updateUrl || dData.url || ''
+                    }
+                } else if (typeof dData === 'string') {
+                    alertPayload = {
+                        name: fullApiInfo.name,
+                        log: dData,
+                        updateUrl: ''
+                    }
+                }
+                const error: any = new Error(`发现新版本, 需要更新: ${alertPayload.log || JSON.stringify(dData)}`)
+                error.updateAlert = alertPayload
                 if (initReject) initReject(error)
             }
         },
@@ -294,18 +346,20 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
         }
     }
 
+    // 针对音源脚本沙箱的 console 代理：非 DEBUG 模式下静默普通的 log/info/debug 等输出
+    const sandboxConsole = {
+        log: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.log(...args) },
+        info: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.info(...args) },
+        debug: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.debug(...args) },
+        warn: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.warn(...args) },
+        time: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.time(...args) },
+        timeEnd: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.timeEnd(...args) },
+        error: (...args: any[]) => { console.error(...args) }
+    }
+
     // 完整沙箱环境
     const sandbox: any = {
-        // console: {
-        //     log: () => { }, // 静默脚本内部的普通日志
-        //     info: () => { },
-        //     error: console.error,
-        //     warn: console.warn,
-        //     debug: console.debug,
-        //     time: console.time,
-        //     timeEnd: console.timeEnd
-        // },
-        console,
+        console: sandboxConsole,
         setTimeout,
         clearTimeout,
         setInterval,
@@ -334,7 +388,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
 
     try {
         if (apiInfo.allowUnsafeVM && global.lx.config['system.allowUnsafeVM']) {
-            console.log(`[UserApi] ${fullApiInfo.name} 正在以原生 VM 模式启动...`)
+            console.log(`[自定义源] ${fullApiInfo.name} 正在以原生 VM 模式启动...`)
             const vm = require('vm')
             const context = vm.createContext(sandbox)
             // 不再注入 injectionCode 字符串，环境已在 sandbox 中就绪
@@ -355,7 +409,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
             } catch (e: any) {
                 const isContextError = e.message.includes('contextified object') || e.message.includes('Operation not allowed')
                 if (isContextError) {
-                    console.warn(`[UserApi] ${fullApiInfo.name} 触发 vm2 安全限制，正在提示用户开启 VM 模式`)
+                    console.warn(`[自定义源] ${fullApiInfo.name} 触发 vm2 安全限制，正在提示用户开启 VM 模式`)
                     throw new Error('REQUIRE_UNSAFE_VM')
                 }
                 throw e
@@ -386,20 +440,20 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
                     const result = await handler(inputData)
                     return decontextify(result)
                 } catch (e: any) {
-                    console.error(`[UserApi-${fullApiInfo.name}] callRequest Error:`, e.message)
+                    console.error(`[自定义源-${fullApiInfo.name}] 调用请求异常:`, e.message)
                     throw e
                 }
             }
         }
 
         loadedApis.set(`${fullApiInfo.owner}_${apiInfo.id}`, apiInstance)
-        console.log(`[UserApi] ✓ 成功加载: ${fullApiInfo.name} v${fullApiInfo.version} (Owner: ${fullApiInfo.owner})`)
-        console.log(`[UserApi]   支持源: ${Object.keys(registeredSources).join(', ')}`)
+        console.log(`[自定义源] ✓ 成功加载: ${fullApiInfo.name} v${fullApiInfo.version} (所属: ${fullApiInfo.owner})`)
+        console.log(`[自定义源]   支持平台: ${Object.keys(registeredSources).join(', ')}`)
         return { success: true, apiInstance, error: null }
     } catch (error: any) {
-        console.error(`[UserApi] ✗ 加载失败 ${fullApiInfo.name}:`, error.message)
+        console.error(`[自定义源] ✗ 加载失败 ${fullApiInfo.name}:`, error.message)
         if (error.stack && error.message !== 'REQUIRE_UNSAFE_VM') {
-            console.error(`[UserApi] [Stack] ${fullApiInfo.name}:`, error.stack)
+            console.error(`[自定义源] [错误堆栈] ${fullApiInfo.name}:`, error.stack)
         }
 
         let isRequireUnsafe = !apiInfo.allowUnsafeVM && (error.message === 'REQUIRE_UNSAFE_VM' || error.message.includes('初始化超时') || error.message.includes('timeout'))
@@ -413,13 +467,13 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
                     allowUnsafeVM: true
                 })
                 if (testUnsafeRes.success) {
-                    console.log(`[UserApi] ${fullApiInfo.name} 在 VM2 模式下失败，但在原生 VM 模式下成功，标记 requireUnsafe = true`)
+                    console.log(`[自定义源] ${fullApiInfo.name} 在 VM2 模式下失败，但在原生 VM 模式下成功，标记 requireUnsafe = true`)
                     isRequireUnsafe = true
                 }
             } catch (e) { }
         }
 
-        return { success: false, apiInstance: null, error: error.message, requireUnsafe: isRequireUnsafe }
+        return { success: false, apiInstance: null, error: error.message, requireUnsafe: isRequireUnsafe, updateAlert: error.updateAlert }
     }
 }
 
@@ -669,7 +723,7 @@ export async function callUserApiGetMusicUrl(
 
         for (let i = 0; i < maxRetries; i++) {
             try {
-                console.log(`[UserApi] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (第 ${i + 1}/${maxRetries} 次, Owner: ${api.info.owner})`)
+                console.log(`[自定义源] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (第 ${i + 1}/${maxRetries} 次, 所属: ${api.info.owner})`)
 
                 const url = await api.callRequest('musicUrl', source, {
                     musicInfo: normalizedSongInfo,
@@ -677,13 +731,13 @@ export async function callUserApiGetMusicUrl(
                     type: quality
                 })
 
-                console.log(`[UserApi] ✓ ${api.info.name} 成功返回链接 (Owner: ${api.info.owner})`)
+                console.log(`[自定义源] ✓ ${api.info.name} 成功返回链接 (所属: ${api.info.owner})`)
                 const att = { name: api.info.name, status: 'success', message: `第 ${i + 1} 次尝试成功` }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
                 return { url, type: quality, sourceName: api.info.name, sourceId: api.info.id, attempts, hasMoreSources: false }
             } catch (error: any) {
-                console.error(`[UserApi] ${api.info.name} 失败 (第 ${i + 1}/${maxRetries} 次):`, `音源日志：${error.message}`)
+                console.error(`[自定义源] ${api.info.name} 失败 (第 ${i + 1}/${maxRetries} 次):`, `音源日志：${error.message}`)
                 lastError = error
                 const att = { name: api.info.name, status: 'fail', message: `第 ${i + 1} 次尝试失败,音源日志：${error.message}` }
                 attempts.push(att)
@@ -699,7 +753,7 @@ export async function callUserApiGetMusicUrl(
         for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
             const api = candidates[candidateIndex]
             try {
-                console.log(`[UserApi] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (Owner: ${api.info.owner})`)
+                console.log(`[自定义源] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (所属: ${api.info.owner})`)
 
                 const url = await api.callRequest('musicUrl', source, {
                     musicInfo: normalizedSongInfo,
@@ -707,7 +761,7 @@ export async function callUserApiGetMusicUrl(
                     type: quality
                 })
 
-                console.log(`[UserApi] ✓ ${api.info.name} 成功返回链接 (Owner: ${api.info.owner})`)
+                console.log(`[自定义源] ✓ ${api.info.name} 成功返回链接 (所属: ${api.info.owner})`)
                 const att = { name: api.info.name, status: 'success' }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
@@ -720,7 +774,7 @@ export async function callUserApiGetMusicUrl(
                     hasMoreSources: candidateIndex < candidates.length - 1
                 }
             } catch (error: any) {
-                console.error(`[UserApi] ${api.info.name} 失败:`, `音源日志：${error.message}`)
+                console.error(`[自定义源] ${api.info.name} 失败:`, `音源日志：${error.message}`)
                 lastError = error
                 const att = { name: api.info.name, status: 'fail', message: `音源日志：${error.message}` }
                 attempts.push(att)
@@ -769,14 +823,14 @@ async function loadSourcesFromDir(dirPath: string, owner: string, stats: { loade
 
         for (const source of sources) {
             if (!source.enabled && owner !== 'open') {
-                console.log(`[UserApi] [${owner}] 跳过已禁用: ${source.name}`)
+                console.log(`[自定义源] [${owner}] 跳过已禁用: ${source.name}`)
                 apiStatus.delete(`${owner}_${source.id}`)
                 continue
             }
 
             const scriptPath = path.join(dirPath, source.id)
             if (!fs.existsSync(scriptPath)) {
-                console.warn(`[UserApi] [${owner}] 脚本文件未找到: ${source.id}`)
+                console.warn(`[自定义源] [${owner}] 脚本文件未找到: ${source.id}`)
                 continue
             }
 
@@ -800,14 +854,18 @@ async function loadSourcesFromDir(dirPath: string, owner: string, stats: { loade
 
                 if (result.success) {
                     stats.loadedCount++
-                    apiStatus.set(`${owner}_${source.id}`, { status: 'success' })
+                    const prevStatus = apiStatus.get(`${owner}_${source.id}`)
+                    apiStatus.set(`${owner}_${source.id}`, {
+                        status: 'success',
+                        updateAlert: result.updateAlert || prevStatus?.updateAlert
+                    })
 
                     // [Self-Healing] 检查并修复 supportedSources
                     const runtimeSources = Object.keys(result.apiInstance.info.sources).sort();
                     const storedSources = (source.supportedSources || []).sort();
 
                     if (JSON.stringify(runtimeSources) !== JSON.stringify(storedSources)) {
-                        console.log(`[UserApi] [Fix] [${owner}] 更新源 ${source.name} 的支持列表: ${JSON.stringify(storedSources)} -> ${JSON.stringify(runtimeSources)}`);
+                        console.log(`[自定义源] [自动修复] [${owner}] 更新源 ${source.name} 的支持列表: ${JSON.stringify(storedSources)} -> ${JSON.stringify(runtimeSources)}`);
                         source.supportedSources = runtimeSources;
                         if (metadata.version && source.version !== metadata.version) source.version = metadata.version;
                         if (metadata.author && source.author !== metadata.author) source.author = metadata.author;
@@ -816,25 +874,27 @@ async function loadSourcesFromDir(dirPath: string, owner: string, stats: { loade
                         needsSave = true;
                     }
                 } else {
-                    console.error(`[UserApi] [${owner}] 加载 ${metadata.name || source.name} 失败: ${result.error}`)
-                    apiStatus.set(`${owner}_${source.id}`, { status: 'failed', error: result.error })
+                    console.error(`[自定义源] [${owner}] 加载 ${metadata.name || source.name} 失败: ${result.error}`)
+                    apiStatus.set(`${owner}_${source.id}`, { status: 'failed', error: result.error, updateAlert: result.updateAlert })
                 }
             } catch (error: any) {
-                console.error(`[UserApi] [${owner}] 加载 ${source.name} 失败:`, error.message)
-                apiStatus.set(`${owner}_${source.id}`, { status: 'failed', error: error.message })
+                console.error(`[自定义源] [${owner}] 加载 ${source.name} 失败:`, error.message)
+                apiStatus.set(`${owner}_${source.id}`, { status: 'failed', error: error.message, updateAlert: error.updateAlert })
             }
         }
 
         if (needsSave) {
+            // 在保存前更新该用户的最后操作时间，防止启动时 Self-Healing 触发 watcher 重复重载
+            lastReloadMap.set(owner, Date.now())
             // Write back using the original (file-order) sources array to avoid overwriting sources.json ordering
             const originalSources = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
             const updatedMap = new Map(sources.map((s: any) => [s.id, s]))
             const merged = originalSources.map((s: any) => updatedMap.get(s.id) || s)
             fs.writeFileSync(metaPath, JSON.stringify(merged, null, 2));
-            console.log(`[UserApi] [${owner}] 已更新 sources.json 元数据`);
+            console.log(`[自定义源] [${owner}] 已更新 sources.json 元数据`);
         }
     } catch (error: any) {
-        console.error(`[UserApi] [${owner}] 读取 sources.json 失败:`, error.message)
+        console.error(`[自定义源] [${owner}] 读取 sources.json 失败:`, error.message)
     }
 }
 
@@ -846,7 +906,7 @@ const lastReloadMap = new Map<string, number>() // 记录每个用户的最后�
 function startWatcher(sourceRoot: string) {
     if (fsWatcher) return
 
-    console.log(`[UserApi] 启动源文件监控: ${sourceRoot}`)
+    console.log(`[自定义源] 启动源文件监控: ${sourceRoot}`)
     const debounceMap = new Map<string, NodeJS.Timeout>()
 
     try {
@@ -876,17 +936,16 @@ function startWatcher(sourceRoot: string) {
             }
 
             debounceMap.set(username, setTimeout(() => {
-                // 检查是否是最近刚手动加载过 (避免面板上传造成的重复加载)
-                // 阈值设为 3000ms，假设手动上传触发的 reload 会在这个时间内完成
+                // 检查是否是最近刚加载或写入过 (避免面板上传或服务端自愈保存造成的重复加载)
+                // 阈值设为 4000ms
                 const lastReload = lastReloadMap.get(username) || 0
-                if (Date.now() - lastReload < 3000) {
-                    console.log(`[UserApi] [Watcher] 忽略近期更新的文件变动 (视为手动上传): ${filename}`)
+                if (Date.now() - lastReload < 4000) {
                     return
                 }
 
-                console.log(`[UserApi] [Watcher] 检测到文件变动 (${eventType}): ${filename} -> 重新加载 ${username}`)
+                console.log(`[自定义源] [文件监控] 检测到文件变动 (${eventType}): ${filename} -> 重新加载 ${username}`)
                 initUserApis(username).catch(err => {
-                    console.error(`[UserApi] [Watcher] 重新加载失败:`, err)
+                    console.error(`[自定义源] [文件监控] 重新加载失败:`, err)
                 })
             }, 2000)) // 2秒防抖，等待文件写入完成
         })
@@ -896,7 +955,7 @@ function startWatcher(sourceRoot: string) {
             if (fsWatcher) fsWatcher.close()
         })
     } catch (e) {
-        console.error('[UserApi] 启动文件监控失败:', e)
+        console.error('[自定义源] 启动文件监控失败:', e)
     }
 }
 
@@ -914,12 +973,12 @@ export async function initUserApis(targetUser?: string) {
         // 全局加载
     }
 
-    console.log(`[UserApi] ========================================`)
+    console.log(`[自定义源] ========================================`)
 
     // 如果根目录不存在，无需加载
     if (!fs.existsSync(sourceRoot)) {
-        console.log(`[UserApi] Source root directory not found: ${sourceRoot}`)
-        console.log(`[UserApi] ========================================`)
+        console.log(`[自定义源] 未找到自定义源根目录: ${sourceRoot}`)
+        console.log(`[自定义源] ========================================`)
         return
     }
 
@@ -929,7 +988,7 @@ export async function initUserApis(targetUser?: string) {
     }
 
     if (targetUser) {
-        console.log(`[UserApi] 重新加载用户源: ${targetUser}`)
+        console.log(`[自定义源] 重新加载用户源: ${targetUser}`)
         // 清理该用户的旧源和状态
         for (const [key, api] of loadedApis.entries()) {
             if (api.info.owner === targetUser) {
@@ -956,7 +1015,7 @@ export async function initUserApis(targetUser?: string) {
         }
 
     } else {
-        console.log(`[UserApi] 初始化所有自定义源...`)
+        console.log(`[自定义源] 初始化所有自定义源...`)
         loadedApis.clear()
 
         // 扫描 sourceRoot 下的所有子目录
@@ -975,13 +1034,13 @@ export async function initUserApis(targetUser?: string) {
                 }
             }
         } catch (error: any) {
-            console.error('[UserApi] 扫描源目录失败:', error.message)
+            console.error('[自定义源] 扫描源目录失败:', error.message)
         }
     }
 
-    console.log(`[UserApi] 本次加载: ${stats.loadedCount} 个源`)
-    console.log(`[UserApi] 当前总计: ${loadedApis.size} 个源`)
-    console.log(`[UserApi] ========================================`)
+    console.log(`[自定义源] 本次加载: ${stats.loadedCount} 个源`)
+    console.log(`[自定义源] 当前总计: ${loadedApis.size} 个源`)
+    console.log(`[自定义源] ========================================`)
 }
 
 // 获取所有已加载的 API

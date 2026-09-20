@@ -135,7 +135,7 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string, 
             const ct = (upstreamCt && upstreamCt.startsWith('image/')) ? upstreamCt.split(';')[0].trim() : 'image/jpeg'
             return { buf, ct }
         } catch (e) {
-            console.error('[CoverArt] proxy fetch failed:', fetchUrl, (e as Error)?.message)
+            console.error('[封面代理] 代理请求失败:', fetchUrl, (e as Error)?.message)
             return null
         } finally {
             coverRelease()

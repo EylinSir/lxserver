@@ -25,10 +25,16 @@ type ENV_PARAMS_Value_Type = ENV_PARAMS_Type[number]
 
 
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err)
+  console.error('[异常捕获] 未捕获的同步异常:', err)
 })
-process.on('unhandledRejection', (reason, p) => {
-  console.error('Unhandled Rejection at:', p, 'reason:', reason)
+process.on('unhandledRejection', (reason: any) => {
+  if (global.lx?.config?.['debug.enabled']) {
+    console.error('[异常捕获] 未处理的异步Promise拒绝:', reason)
+  } else {
+    // 非 DEBUG 模式下精简输出一行，避免第三方音源后台请求失败时刷屏
+    const msg = reason?.message || reason || '未知错误'
+    console.warn(`[异步警告] 脚本/网络未捕获异常: ${msg}`)
+  }
 })
 
 let envParams: Partial<Record<Exclude<ENV_PARAMS_Value_Type, 'LX_USER_'>, string>> = {}
@@ -266,7 +272,7 @@ const margeConfig = (p: string) => {
     if (config[key] !== undefined) newConfig[key] = config[key]
   }
 
-  console.log('Load config: ' + p)
+  console.log('[配置] 加载配置文件: ' + p)
   if (newConfig.users.length) {
     const users: LX.UserConfig[] = []
     for (const user of newConfig.users) {
@@ -374,6 +380,9 @@ if (envParams.USER_ENABLE_PATH !== undefined) {
 }
 if (envParams.USER_ENABLE_ROOT !== undefined) {
   setBoolConfig('user.enableRoot', envParams.USER_ENABLE_ROOT)
+}
+if (envParams.ENABLE_DEBUG !== undefined) {
+  setBoolConfig('debug.enabled', envParams.ENABLE_DEBUG)
 }
 if (envParams.PORT) {
   const port = parseInt(envParams.PORT, 10)
@@ -645,11 +654,11 @@ if (fs.existsSync(usersJsonPath)) {
   try {
     const users = JSON.parse(fs.readFileSync(usersJsonPath, 'utf-8'))
     if (Array.isArray(users)) {
-      console.log('Load users from users.json')
+      console.log('[用户] 从 users.json 加载用户列表')
       global.lx.config.users = users.map(u => ({ ...u, dataPath: '' }))
     }
   } catch (err) {
-    console.error('Failed to load users.json', err)
+    console.error('[用户] 加载 users.json 失败:', err)
   }
 } else {
   // Save initial users to users.json
@@ -665,14 +674,14 @@ if (fs.existsSync(usersJsonPath)) {
       allowWriteCustomMusicDir: u.allowWriteCustomMusicDir,
     })), null, 2))
   } catch (err) {
-    console.error('Failed to save users.json', err)
+    console.error('[用户] 保存 users.json 失败:', err)
   }
 }
 
 checkUserConfig(global.lx.config.users)
 
-console.log(`Users:
-${global.lx.config.users.map(user => `  ${user.name}: ${user.password}`).join('\n') || '  No User'}
+console.log(`[用户] 已注册用户:
+${global.lx.config.users.map(user => `  ${user.name}: ${user.password}`).join('\n') || '  (暂无用户)'}
 `)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { getUserDirname } = require('@/user')
@@ -777,21 +786,21 @@ global.lx.webdavSync = webdavSync
 
 // 如果配置了 WebDAV，在启动时尝试从远程恢复
 if (webdavSync.isConfigured()) {
-  console.log('WebDAV configured, attempting to restore from remote...')
+  console.log('[WebDAV] 已配置 WebDAV，正在尝试从远端恢复数据...')
   void webdavSync.restoreFromRemote().then(async (success: boolean) => {
     if (success) {
-      console.log('Data restored from WebDAV successfully')
+      console.log('[WebDAV] 数据已成功从 WebDAV 恢复')
 
       // 1. 重新从磁盘加载最新的 config.js 到内存 (解决实时生效问题)
       const configPath = global.lx.configPath
       if (fs.existsSync(configPath)) {
-        console.log('Reloading config file after WebDAV restore: ' + configPath)
+        console.log('[WebDAV] 恢复完成后重新加载配置文件: ' + configPath)
         // 清除 node require 缓存以强制重载
         try {
           delete require.cache[require.resolve(configPath)]
           margeConfig(configPath)
         } catch (e) {
-          console.error('Failed to hot-reload config file:', e)
+          console.error('[WebDAV] 热重载配置文件失败:', e)
         }
       }
 
@@ -801,7 +810,7 @@ if (webdavSync.isConfigured()) {
         try {
           const users = JSON.parse(fs.readFileSync(usersJsonPath, 'utf-8'))
           if (Array.isArray(users)) {
-            console.log('Reload users from restored users.json')
+            console.log('[WebDAV] 从恢复的 users.json 重新加载用户列表')
             global.lx.config.users = users.map(u => ({ ...u, dataPath: '' }))
 
             // 重新初始化用户目录
@@ -814,21 +823,21 @@ if (webdavSync.isConfigured()) {
             }
           }
         } catch (err) {
-          console.error('Failed to reload users.json after WebDAV restore', err)
+          console.error('[WebDAV] 恢复后重新加载 users.json 失败:', err)
         }
       }
 
       // 3. 重新加载所有自定义源 (解决前端显示加载中/旧源问题)
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { initUserApis } = require('@/server/userApi')
-      console.log('Re-initializing user APIs after WebDAV restore...')
+      console.log('[WebDAV] 正在重新初始化自定义源...')
       await initUserApis()
     }
     // 启动自动同步
     webdavSync.startAutoSync()
   })
 } else {
-  console.log('WebDAV not configured, skipping remote restore')
+  console.log('[WebDAV] 未配置 WebDAV，跳过远端恢复')
 }
 
 // [新增] 确保数据目录下的 _open 及 _open/library 目录存在 (用于公共受限资源 & 公开收藏)

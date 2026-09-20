@@ -251,6 +251,7 @@ The configuration file is persisted by default in the data directory at `data/co
 | `PLAYER_PATH` | `player.path` | Web player access path (default root `/`) | `/` |
 | `FRONTEND_PASSWORD` | `frontend.password` | Web dashboard password | `123456` |
 | `SERVER_NAME` | `serverName` | Sync service name | `lxserver` |
+| `ENABLE_DEBUG` | `debug.enabled` | Enable DEBUG mode (verbose debug and source sandbox logs, default false) | `false` |
 | `MAX_SNAPSHOT_NUM` | `maxSnapshotNum` | Max snapshots to keep | `10` |
 | `CONFIG_PATH` | - | Absolute path to external config file (defaults to `data/config.js`) | - |
 | `DATA_PATH` | - | Absolute path to data storage directory | `./data` |

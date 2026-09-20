@@ -39,7 +39,7 @@ function load(username: string): RadioStation[] {
     }
   } catch (err: any) {
     if (err?.code !== 'ENOENT') {
-      console.error(`[RadioStations] Failed to load/parse radioStations.json for ${username}:`, err)
+      console.error(`[电台服务] 解析/加载用户 ${username} 的电台配置异常:`, err)
     }
     stations = []
   }

@@ -49,7 +49,7 @@ export const getCustomMusicDir = (username: string): string | null => {
             }
         }
     } catch (e) {
-        console.error(`[CustomMusic] Failed to get customMusicDir for ${username}:`, e)
+        console.error(`[自定义音乐] 获取用户 ${username} 的本地音乐目录失败:`, e)
     }
     return null
 }
@@ -137,7 +137,7 @@ class CustomIndexManager {
             const obj = Object.fromEntries(index)
             fs.writeFileSync(file, JSON.stringify(obj, null, 2), 'utf-8')
         } catch (e) {
-            console.error(`[CustomIndexManager] Failed to save custom_index.json for ${username}:`, e)
+            console.error(`[自定义音乐] 为用户 ${username} 保存自定义索引失败:`, e)
         }
     }
 
@@ -189,7 +189,7 @@ const scanAllFilesRecursively = async (baseDir: string, currentDir: string = bas
             }
         }
     } catch (e) {
-        console.error(`[CustomMusic] Error reading dir ${currentDir}:`, e)
+        console.error(`[自定义音乐] 读取目录 ${currentDir} 出错:`, e)
     }
     return results
 }
@@ -236,7 +236,7 @@ const buildLinkedInfoMap = (rootDir: string): Map<string, any> => {
                     map.set(remappedFilename, { ...item, filename: remappedFilename })
                 }
             } catch (e) {
-                console.warn(`[CustomMusic] 读取 ${fname} 失败（${dir}）:`, e)
+                console.warn(`[自定义音乐] 读取 ${fname} 失败（${dir}）:`, e)
             }
         }
 
@@ -529,7 +529,7 @@ export const removeCustomFile = (filename: string, username: string): boolean =>
         customIndexManager.remove(username, filename)
         return true
     } catch (e) {
-        console.error(`[CustomMusic] Failed to delete file ${filename}:`, e)
+        console.error(`[自定义音乐] 删除文件 ${filename} 失败:`, e)
         return false
     }
 }
@@ -552,7 +552,7 @@ export const linkCustomSong = async (filename: string, songInfo: any, username: 
         tagger.save()
         tagger.dispose()
     } catch (e: any) {
-        console.warn(`[CustomMusic] 写入音频标签失败: ${e.message}，继续更新索引`)
+        console.warn(`[自定义音乐] 写入音频标签失败: ${e.message}，继续更新索引`)
     }
 
     // 2. 更新 custom_index.json 中的元数据
@@ -642,7 +642,7 @@ export const batchUpdateMetadata = async (filenames: string[], username: string)
                 }
                 tagger.save()
             } catch (e) {
-                console.warn(`[CustomMusic] 批量写入标签失败: ${filename}`, e)
+                console.warn(`[自定义音乐] 批量写入标签失败: ${filename}`, e)
             } finally {
                 try { if (tagger) tagger.dispose() } catch (e) { }
             }
@@ -794,7 +794,7 @@ export const saveCustomLyricCache = (songInfo: any, lyricsObj: any, username: st
         customIndexManager.save(username)
         return true
     } catch (e) {
-        console.error('[CustomMusic] Failed to save custom lyric cache:', e)
+        console.error('[自定义音乐] 保存自定义歌词缓存失败:', e)
         return false
     }
 }
@@ -925,7 +925,7 @@ export const replaceCustomMusicItem = async (
                 tagger.save()
                 finalHasCover = true
             } catch (e) {
-                console.warn(`[CustomMusic] 无法将原封面写入 ${targetAudioFilename}:`, e)
+                console.warn(`[自定义音乐] 无法将原封面写入 ${targetAudioFilename}:`, e)
             } finally {
                 try { if (tagger) tagger.dispose() } catch (e) { }
             }
@@ -988,12 +988,12 @@ export const replaceCustomMusicItem = async (
         try {
             if (backedUpOldAudio && fs.existsSync(oldAudioBackup)) fs.unlinkSync(oldAudioBackup)
         } catch (cleanupErr) {
-            console.warn('[CustomMusic] 清理旧音频备份失败:', cleanupErr)
+            console.warn('[自定义音乐] 清理旧音频备份失败:', cleanupErr)
         }
         try {
             if (backedUpOldLyric && fs.existsSync(oldLyricBackup)) fs.unlinkSync(oldLyricBackup)
         } catch (cleanupErr) {
-            console.warn('[CustomMusic] 清理旧歌词备份失败:', cleanupErr)
+            console.warn('[自定义音乐] 清理旧歌词备份失败:', cleanupErr)
         }
 
         return replacementItem
@@ -1015,7 +1015,7 @@ export const replaceCustomMusicItem = async (
             customIndexManager.set(username, currentItem.filename, currentItem)
             customIndexManager.save(username)
         } catch (rollbackErr) {
-            console.error('[CustomMusic] 洗版回滚失败:', rollbackErr)
+            console.error('[自定义音乐] 洗版回滚失败:', rollbackErr)
         }
         throw err
     } finally {

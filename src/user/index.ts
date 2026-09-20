@@ -37,7 +37,7 @@ export const getUserSpace = (userName: string) => {
 
   let user = users.get(userName)
   if (!user) {
-    console.log('new user data manage:', userName)
+    console.log('[用户空间] 初始化用户数据管理器:', userName)
     const dataManage = new UserDataManage(userName)
     const listManage = new ListManage(dataManage)
     const dislikeManage = new DislikeManage(dataManage)

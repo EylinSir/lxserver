@@ -1,6 +1,7 @@
 export const ENV_PARAMS = [
   'PORT',
   'BIND_IP',
+  'ENABLE_DEBUG',
   'CONFIG_PATH',
   'LOG_PATH',
   'DATA_PATH',

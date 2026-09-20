@@ -59,6 +59,11 @@ declare namespace LX {
     'serverName': string
 
     /**
+     * 是否启用 DEBUG 模式 (开发人员使用)
+     */
+    'debug.enabled'?: boolean
+
+    /**
      * 是否使用代理转发请求到本服务器
      */
     'proxy.enabled': boolean

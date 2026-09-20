@@ -177,7 +177,7 @@ class CacheIndexManager {
             const data = Object.fromEntries(index)
             fs.writeFileSync(file, JSON.stringify(data, null, 2))
         } catch (e) {
-            console.error(`[CacheIndex] Failed to save index for ${key}:`, e)
+            console.error(`[缓存索引] 保存索引文件失败 (${key}):`, e)
         }
     }
 
@@ -696,7 +696,7 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                     }
                 }
             } catch (e) {
-                console.error(`[fileCache] error walking path: ${dirPath}`, e)
+                console.error(`[文件缓存] 遍历目录失败 (${dirPath}):`, e)
             }
             return acc
         }
@@ -1084,7 +1084,7 @@ export const batchRenameCacheFiles = async (username: string | undefined) => {
                     failCount++
                 }
             } catch (e) {
-                console.error(`[FileCache] Failed to rename ${item.filename} in ${folder}:`, e)
+                console.error(`[文件缓存] 批量重命名文件失败 (${folder}/${item.filename}):`, e)
                 failCount++
             }
         }
@@ -1173,7 +1173,7 @@ export const batchUpdateMetadata = async (filenames: string[], username: string 
             if (!hasCover && imageBuffer?.length) {
                 hasCover = writeCoverCache(item.filename, normalizedUsername, imageBuffer, imageMime, stats)
                 if (taggerError) {
-                    console.warn(`[FileCache] Audio tags are unavailable for ${filename}; using external cover cache`)
+                    console.warn(`[文件缓存] 无法向音频写入标签信息 (${filename})，已转存为外置封面缓存`)
                 }
             }
             if (taggerError && !hasCover) throw taggerError
@@ -1191,7 +1191,7 @@ export const batchUpdateMetadata = async (filenames: string[], username: string 
             indexManager.update(normalizedUsername, item, item.folder as 'cache' | 'music')
             successCount++
         } catch (e) {
-            console.error(`[FileCache] Failed to update metadata for ${filename}:`, e)
+            console.error(`[文件缓存] 更新元数据标签失败 (${filename}):`, e)
             failCount++
         }
     }
@@ -1368,7 +1368,7 @@ export const getCacheCover = async (filename: string, username?: string) => {
                         return cachedCover
                     }
                 } catch (e) {
-                    console.error(`[Cache] Error reading cover cache for: ${filename}`, e)
+                    console.error(`[文件缓存] 读取封面缓存失败 (${filename}):`, e)
                 }
 
                 let tagger: any
@@ -1385,7 +1385,7 @@ export const getCacheCover = async (filename: string, username?: string) => {
                         return { data, mime: detectImageMime(data) || mime }
                     }
                 } catch (e) {
-                    // console.error(`[Cache] Error reading tags for cover: ${filename}`, e)
+                    // console.error(`[文件缓存] 读取音频内嵌封面标签失败 (${filename}):`, e)
                 } finally {
                     try { if (tagger) tagger.dispose() } catch (e) { }
                 }
@@ -1440,7 +1440,8 @@ export const removeCacheFile = (filename: string, username?: string, requestedFo
     } catch (e: any) {
         if (e?.code !== 'ENOENT') throw e
     }
-    console.log(`[FileCache] Deleted from ${folder}: ${filename}`)
+    const folderName = folder === 'music' ? '下载目录(music)' : '缓存目录(cache)'
+    console.log(`[文件缓存] 已从 ${folderName} 删除: ${filename}`)
 
     const ext = path.extname(filename)
     if (ext !== '.lrc') {
@@ -1484,7 +1485,7 @@ export const removeCacheFile = (filename: string, username?: string, requestedFo
 export const setCacheLocation = (location: string) => {
     if (location === CACHE_ROOTS.DATA || location === CACHE_ROOTS.ROOT) {
         currentCacheLocation = location
-        console.log(`[FileCache] Base cache location set to: ${location}`)
+        console.log(`[文件缓存] 基础缓存根路径设置为: ${location}`)
     }
 }
 
@@ -1578,7 +1579,7 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
         }
 
     } catch (e) {
-        console.error('[FileCache] checkCache error:', e)
+        console.error('[文件缓存] 检查缓存状态异常:', e)
     }
 
     return { exists: false }
@@ -1727,12 +1728,12 @@ export const saveLyricCache = (songInfo: any, lyricsObj: any, username?: string,
 
         const formattedLrc = buildLyrics(lyricsObj)
         if (!formattedLrc) {
-            console.log(`[FileCache] Empty lyrics for ${baseName}, skip saving.`)
+            console.log(`[文件缓存] 歌词内容为空 (${baseName})，跳过保存`)
             return false
         }
 
         fs.writeFileSync(finalPath, formattedLrc, { encoding: 'utf-8' })
-        console.log(`[FileCache] Lyric cached saved to: ${finalPath}`)
+        console.log(`[文件缓存] 歌词已成功保存至: ${finalPath}`)
 
         // Update index — use normalizeSongId to ensure the ID has source prefix, matching index keys
         const foldersToUpdate: Array<'cache' | 'music'> = isOnlyDownload ? ['music', 'cache'] : ['cache', 'music']
@@ -1749,7 +1750,7 @@ export const saveLyricCache = (songInfo: any, lyricsObj: any, username?: string,
         void checkAndCleanupCache(username)
         return true
     } catch (err: any) {
-        console.error(`[FileCache] Lyric cache save failed: ${err.message}`)
+        console.error(`[文件缓存] 保存歌词缓存失败: ${err.message}`)
         return false
     }
 }
@@ -1834,9 +1835,9 @@ const ensureCachedLyrics = async (
             metadataError = embedResult.metadataWritable ? undefined : embedResult.error
             embedLyricError = embedResult.error
             if (embedResult.success) {
-                console.log(`[FileCache] USLT lyric embedded for: ${songInfo.name || songInfo.title || path.basename(audioPath)}`)
+                console.log(`[文件缓存] 已成功嵌入 USLT 歌词标签: ${songInfo.name || songInfo.title || path.basename(audioPath)}`)
             } else {
-                console.warn(`[FileCache] Lyric tag unavailable for ${path.basename(audioPath)}: ${embedResult.error}`)
+                console.warn(`[文件缓存] 无法写入歌词标签 (${path.basename(audioPath)}): ${embedResult.error}`)
             }
         }
 
@@ -1856,7 +1857,7 @@ const ensureCachedLyrics = async (
             indexManager.save(normalizedUsername, folder)
         }
     } catch (err: any) {
-        console.warn(`[FileCache] Failed to ensure lyrics for ${path.basename(audioPath)}: ${err?.message || err}`)
+        console.warn(`[文件缓存] 补全歌词缓存失败 (${path.basename(audioPath)}): ${err?.message || err}`)
     }
 }
 
@@ -1874,7 +1875,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
         const targetFolder: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
         if (result.folder === targetFolder && result.path) {
             await ensureCachedLyrics(songInfo, quality || result.quality, username, isOnlyDownload, result.path, targetFolder, shouldCacheLyric, shouldEmbedLyric)
-            console.log(`[FileCache] Song already exists in ${targetFolder}, skipping download: ${result.filename}`)
+            console.log(`[文件缓存] 歌曲已存在于 ${targetFolder}，跳过下载: ${result.filename}`)
             // 通知前端轮询：目标目录文件已存在，视为立即完成
             cacheProgress.set(songKey, { progress: 100, status: 'exists' })
             setTimeout(() => cacheProgress.delete(songKey), 30000)
@@ -1957,13 +1958,13 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
 
             await ensureCachedLyrics(songInfo, actualQuality, username, true, finalPath, 'music', shouldCacheLyric, shouldEmbedLyric)
 
-            console.log(`[FileCache] Copied cached song to music folder: ${path.basename(finalPath)}`)
+            console.log(`[文件缓存] 已复制缓存歌曲至下载目录: ${path.basename(finalPath)}`)
             cacheProgress.set(songKey, { progress: 100, status: 'finished', total: stat.size, received: stat.size })
             setTimeout(() => cacheProgress.delete(songKey), 30000)
             return Promise.resolve()
         }
 
-        console.log(`[FileCache] Song already exists in ${result.folder}, skipping download: ${result.filename}`)
+        console.log(`[文件缓存] 歌曲已存在于 ${result.folder}，跳过下载: ${result.filename}`)
         cacheProgress.set(songKey, { progress: 100, status: 'exists' })
         setTimeout(() => cacheProgress.delete(songKey), 30000)
         return Promise.resolve()
@@ -1977,7 +1978,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
         // 超过 10 分钟仍无进展视为卡死，允许本次重新下载（避免永久阻塞该歌曲，
         // 尤其 fire-and-forget 的 Subsonic 缓存触发没有 abort 信号）
         if (age < 10 * 60 * 1000) {
-            console.log(`[FileCache] Download already in progress for ${songKey}, skipping duplicate`)
+            console.log(`[文件缓存] 任务已在下载队列中 (${songKey})，跳过重复请求`)
             return Promise.resolve()
         }
     }
@@ -1985,7 +1986,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
     // 立即同步占坑标记下载中，关闭“拿到 200 响应前”的并发竞态窗口；
     // 后续到达的相同 songKey 请求会被上面的守卫跳过，不再重复下载。
     cacheProgress.set(songKey, { progress: 0, status: 'downloading', total: 0, received: 0, speed: 0, updatedAt: Date.now() })
-    console.log(`[FileCache] Starting download for: ${baseName}`)
+    console.log(`[文件缓存] 开始下载歌曲: ${baseName}`)
 
     return new Promise<void>((resolve, reject) => {
         let req: http.ClientRequest
@@ -2041,7 +2042,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                     }
                     redirectCount++
                     const nextUrl = new URL(location, currentUrl).toString()
-                    console.log(`[FileCache] Redirect ${status} -> ${nextUrl} (${redirectCount}/${MAX_REDIRECTS})`)
+                    console.log(`[文件缓存] 触发重定向 ${status} -> ${nextUrl} (${redirectCount}/${MAX_REDIRECTS})`)
                     downloadFrom(nextUrl)
                     return
                 }
@@ -2365,7 +2366,7 @@ export const replaceDownloadedMusicItem = async (
                 ]
                 tagger.save()
             } catch (e) {
-                console.warn(`[FileCache] Unable to embed the original cover in ${targetFilename}; using external cover cache`)
+                console.warn(`[文件缓存] 无法嵌入原封面 (${targetFilename})，转存为外置封面缓存`)
             } finally {
                 try { if (tagger) tagger.dispose() } catch (e) { }
             }
@@ -2424,12 +2425,12 @@ export const replaceDownloadedMusicItem = async (
         try {
             if (backedUpOldAudio && fs.existsSync(oldAudioBackup)) fs.unlinkSync(oldAudioBackup)
         } catch (cleanupError) {
-            console.warn('[FileCache] Failed to remove remaster audio backup:', cleanupError)
+            console.warn('[文件缓存] 清理重制音频备份失败:', cleanupError)
         }
         try {
             if (backedUpOldLyric && fs.existsSync(oldLyricBackup)) fs.unlinkSync(oldLyricBackup)
         } catch (cleanupError) {
-            console.warn('[FileCache] Failed to remove remaster lyric backup:', cleanupError)
+            console.warn('[文件缓存] 清理重制歌词备份失败:', cleanupError)
         }
         return { ...replacementItem }
     } catch (err) {
@@ -2449,7 +2450,7 @@ export const replaceDownloadedMusicItem = async (
                 indexManager.update(normalizedUsername, currentItem, 'music')
             }
         } catch (rollbackError) {
-            console.error('[FileCache] Failed to roll back remaster replacement:', rollbackError)
+            console.error('[文件缓存] 回滚重制替换操作失败:', rollbackError)
         }
         throw err
     } finally {
@@ -2457,12 +2458,12 @@ export const replaceDownloadedMusicItem = async (
         try {
             if (fs.existsSync(stageRoot)) fs.rmSync(stageRoot, { recursive: true, force: true })
         } catch (cleanupError) {
-            console.warn('[FileCache] Failed to clean remaster staging directory:', cleanupError)
+            console.warn('[文件缓存] 清理重制暂存目录失败:', cleanupError)
         }
         try {
             if (fs.existsSync(stageCoverRoot)) fs.rmSync(stageCoverRoot, { recursive: true, force: true })
         } catch (cleanupError) {
-            console.warn('[FileCache] Failed to clean remaster cover staging directory:', cleanupError)
+            console.warn('[文件缓存] 清理重制封面暂存目录失败:', cleanupError)
         }
     }
 }
@@ -2654,7 +2655,7 @@ export const checkAndCleanupCache = async (username?: string) => {
         if (currentSize <= targetSize) break
         try { fs.unlinkSync(file.path); currentSize -= file.size; deletedCount++ } catch (e) { }
     }
-    console.log(`[FileCache] Cleaned up ${deletedCount} files for ${normalizedUsername}`)
+    console.log(`[文件缓存] 用户 ${normalizedUsername} 缓存空间清理完成，已删除 ${deletedCount} 个过期文件`)
 }
 /**
  * Switch files between 'cache' and 'music' folders
@@ -2689,7 +2690,7 @@ export const switchFolder = async (filenames: string[], username: string | undef
         }
 
         if (!sourceFolder || !item) {
-            console.log(`[FileCache][DEBUG] switchFolder: not found in indexes`, { filename, inCache: !!inCache, inMusic: !!inMusic })
+            console.log(`[文件缓存][调试] 目录切换: 索引中未找到文件`, { filename, inCache: !!inCache, inMusic: !!inMusic })
             failCount++
             continue
         }
@@ -2698,7 +2699,7 @@ export const switchFolder = async (filenames: string[], username: string | undef
 
         // [Constraint] Cannot move from music subfolder to cache
         if (sourceFolder === 'music' && item.subPath && item.subPath !== '') {
-            console.log(`[FileCache] Move blocked: ${filename} is in a subfolder and cannot move to cache.`)
+            console.log(`[文件缓存] 移动已被拦截: ${filename} 位于分类子目录中，不支持直接移入缓存目录`)
             failCount++
             continue
         }
@@ -2710,10 +2711,10 @@ export const switchFolder = async (filenames: string[], username: string | undef
         const targetPath = path.join(targetDir, filename)
 
         try {
-            console.log(`[FileCache][DEBUG] switchFolder start`, { filename, sourceFolder, targetFolder, sourcePath, targetPath })
+            console.log(`[文件缓存][调试] 开始切换目录`, { filename, sourceFolder, targetFolder, sourcePath, targetPath })
             const srcExists = fs.existsSync(sourcePath)
             const tgtExists = fs.existsSync(targetPath)
-            console.log(`[FileCache][DEBUG] existence`, { filename, srcExists, tgtExists })
+            console.log(`[文件缓存][调试] 文件存在性校验`, { filename, srcExists, tgtExists })
 
             if (srcExists) {
                 // Ensure target directory exists (including any nested subfolders)
@@ -2722,7 +2723,7 @@ export const switchFolder = async (filenames: string[], username: string | undef
 
                 // Check collision in target folder
                 if (fs.existsSync(targetPath)) {
-                    console.log(`[FileCache] Move conflict: ${filename} already exists in ${targetFolder}, skipping.`)
+                    console.log(`[文件缓存] 移动冲突: ${filename} 已存在于 ${targetFolder}，跳过`)
                     failCount++
                     continue
                 }
@@ -2730,10 +2731,10 @@ export const switchFolder = async (filenames: string[], username: string | undef
                 // Move audio file
                 try {
                     safeRenameSync(sourcePath, targetPath)
-                    console.log(`[FileCache][DEBUG] moved audio`, { filename, sourcePath, targetPath })
+                    console.log(`[文件缓存][调试] 音频文件已移动`, { filename, sourcePath, targetPath })
                 } catch (moveErr) {
                     const errMsg = moveErr instanceof Error ? moveErr.stack : String(moveErr)
-                    console.error(`[FileCache][ERROR] move audio failed for ${filename}:`, errMsg)
+                    console.error(`[文件缓存][错误] 移动音频文件失败 (${filename}):`, errMsg)
                     failCount++
                     continue
                 }
@@ -2748,29 +2749,29 @@ export const switchFolder = async (filenames: string[], username: string | undef
                         if (fs.existsSync(targetLrcPath)) fs.unlinkSync(targetLrcPath)
                         try {
                             safeRenameSync(sourceLrcPath, targetLrcPath)
-                            console.log(`[FileCache][DEBUG] moved lyric`, { filename, sourceLrcPath, targetLrcPath })
+                            console.log(`[文件缓存][调试] 歌词文件已移动`, { filename, sourceLrcPath, targetLrcPath })
                         } catch (lrErr) {
                             const errMsg = lrErr instanceof Error ? lrErr.stack : String(lrErr)
-                            console.error(`[FileCache][ERROR] move lyric failed for ${filename}:`, errMsg)
+                            console.error(`[文件缓存][错误] 移动歌词文件失败 (${filename}):`, errMsg)
                         }
                     } else {
-                        console.log(`[FileCache][DEBUG] lyric not found`, { filename, sourceLrcPath })
+                        console.log(`[文件缓存][调试] 未找到关联歌词文件`, { filename, sourceLrcPath })
                     }
                 }
 
                 // Update Index
                 const removed = indexManager.remove(normalizedUsername, item.id, sourceFolder, item.quality)
-                console.log(`[FileCache][DEBUG] index remove result`, { filename, removed })
+                console.log(`[文件缓存][调试] 索引移除结果`, { filename, removed })
                 item.folder = targetFolder
                 indexManager.update(normalizedUsername, item, targetFolder)
                 successCount++
             } else {
-                console.log(`[FileCache][DEBUG] source missing`, { filename, sourcePath })
+                console.log(`[文件缓存][调试] 源文件不存在`, { filename, sourcePath })
                 failCount++
             }
         } catch (e) {
             const errMsg = e instanceof Error ? e.stack : String(e)
-            console.error(`[FileCache] Failed to move ${filename}:`, errMsg)
+            console.error(`[文件缓存] 移动文件失败 (${filename}):`, errMsg)
             failCount++
         }
     }
@@ -2828,7 +2829,7 @@ export const switchBaseLocation = async (filenames: string[], username: string |
 
                 // Check collision in target location
                 if (fs.existsSync(targetPath)) {
-                    console.log(`[FileCache] Base move conflict: ${filename} already exists at ${targetLoc}, skipping.`)
+                    console.log(`[文件缓存] 根路径迁移冲突: ${filename} 已存在于目标位置 ${targetLoc}，跳过`)
                     failCount++
                     continue
                 }
@@ -2858,7 +2859,7 @@ export const switchBaseLocation = async (filenames: string[], username: string |
                 failCount++
             }
         } catch (e) {
-            console.error(`[FileCache] Failed to move ${filename} from ${sourceLoc} to ${targetLoc}:`, e)
+            console.error(`[文件缓存] 迁移文件失败 (${filename} 从 ${sourceLoc} 到 ${targetLoc}):`, e)
             failCount++
         }
     }
@@ -2930,7 +2931,7 @@ export const categorizeFiles = async (filenames: string[], targetSubPath: string
     for (const filename of filenames) {
         const item = allItems.find(i => i.filename === filename)
         if (!item) {
-            console.warn(`[FileCache] Categorize: item not found for ${filename}`)
+            console.warn(`[文件缓存] 分类归档: 未在索引中找到歌曲 ${filename}`)
             failCount++;
             continue
         }
@@ -2969,7 +2970,7 @@ export const categorizeFiles = async (filenames: string[], targetSubPath: string
 
             successCount++
         } catch (e: any) {
-            console.error('[FileCache] Categorize failed for ' + filename + ':', e)
+            console.error('[文件缓存] 分类归档操作失败 (' + filename + '):', e)
             failCount++
         }
     }
@@ -2993,7 +2994,7 @@ export const renameSubDirectory = (username: string | undefined, folder: 'cache'
     try {
         safeRenameSync(oldDir, newDir)
     } catch (e: any) {
-        console.error('[FileCache] Rename directory failed:', e)
+        console.error('[文件缓存] 重命名目录失败:', e)
         return { success: false, message: e?.message || '重命名目录失败' }
     }
 
@@ -3045,7 +3046,7 @@ export const deleteSubDirectory = (username: string | undefined, folder: 'cache'
         try {
             fs.rmSync(targetDir, { recursive: true, force: true })
         } catch (e: any) {
-            console.error('[FileCache] Delete directory physically failed:', e)
+            console.error('[文件缓存] 物理删除分类目录失败:', e)
             return { success: false, message: e?.message || '删除物理目录失败' }
         }
         return { success: true, affectedCount: affectedItems.length, action: 'deleted' }
@@ -3077,7 +3078,7 @@ export const deleteSubDirectory = (username: string | undefined, folder: 'cache'
                 item.subPath = ''
                 movedCount++
             } catch (e: any) {
-                console.error('[FileCache] Move song to root failed:', item.filename, e)
+                console.error('[文件缓存] 移动歌曲至根目录失败 (' + item.filename + '):', e)
             }
         }
         indexManager.save(normalizedUsername, folder)
@@ -3086,7 +3087,7 @@ export const deleteSubDirectory = (username: string | undefined, folder: 'cache'
         try {
             fs.rmSync(targetDir, { recursive: true, force: true })
         } catch (e: any) {
-            console.warn('[FileCache] Delete emptied dir warning:', e)
+            console.warn('[文件缓存] 删除已清空分类目录警告:', e)
         }
         return { success: true, affectedCount: movedCount, action: 'moved_to_root' }
     }

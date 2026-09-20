@@ -1615,7 +1615,7 @@ class SubsonicHandler {
                     const lbPlaylists = await this.getLeaderboardPlaylists()
                     playlists.push(...lbPlaylists)
                 } catch (err) {
-                    subsonicLog.error('[Subsonic] Append leaderboard playlists failed:', err)
+                    subsonicLog.error('[Subsonic] 添加排行榜歌单失败:', err)
                 }
             }
             if (mode === 'playlist' || mode === 'both') {
@@ -1623,7 +1623,7 @@ class SubsonicHandler {
                     const plPlaylists = await this.getSharedPlaylists()
                     playlists.push(...plPlaylists)
                 } catch (err) {
-                    subsonicLog.error('[Subsonic] Append shared playlists failed:', err)
+                    subsonicLog.error('[Subsonic] 添加共享歌单失败:', err)
                 }
             }
         }
@@ -5960,7 +5960,7 @@ class SubsonicHandler {
                     ])
                     return typeof picUrl === 'string' && picUrl.startsWith('http') ? picUrl : null
                 } catch (e: any) {
-                    console.error(`[CoverArt] SDK getPic error:`, e?.message)
+                    console.error(`[封面服务] SDK getPic 请求失败:`, e?.message)
                     return null
                 }
             }
@@ -6009,7 +6009,7 @@ class SubsonicHandler {
                     const localPic = alb?.picUrl || alb?.img
                     if (localPic) return this.proxyCover(res, localPic)
                 } catch (e) {
-                    console.error(`[CoverArt] read album library failed for ${id}:`, (e as Error)?.message)
+                    console.error(`[封面服务] 读取本地专辑库失败 (id=${id}):`, (e as Error)?.message)
                 }
                 // [修复] 云端/推荐专辑不进本地库，按专辑 mid 直接构造封面 URL（修复首页推荐专辑缺图）
                 const cloudCover = this.buildAlbumCoverUrl(source, realId)
@@ -6027,7 +6027,7 @@ class SubsonicHandler {
                                     const cover = firstSong?.img || firstSong?.picUrl || firstSong?.meta?.picUrl || firstSong?.al?.picUrl
                                     return cover || null
                                 } catch (e) {
-                                    console.error(`[CoverArt] SDK getAlbumSongs failed for ${id}:`, (e as Error)?.message)
+                                    console.error(`[封面服务] SDK getAlbumSongs 获取失败 (id=${id}):`, (e as Error)?.message)
                                     return null
                                 } finally {
                                     this.albumSongFetchInFlight.delete(id)
@@ -6041,7 +6041,7 @@ class SubsonicHandler {
                             return this.proxyCover(res, albumCover)
                         }
                     } catch (e) {
-                        console.error(`[CoverArt] resolve albumCover failed for ${id}:`, (e as Error)?.message)
+                        console.error(`[封面服务] 解析专辑封面失败 (id=${id}):`, (e as Error)?.message)
                     }
                 }
                 // 注：musicSdk 各源未统一暴露专辑封面接口（kg 的 getAlbumInfo 未挂到 SDK 对象上），

@@ -12405,13 +12405,32 @@ async function renderCustomSources() {
             /* Status Badge Logic */
             let statusBadge = '';
             let errorMsg = '';
+            let updateAlertBanner = '';
+
+            if (source.updateAlert && (source.updateAlert.log || source.updateAlert.updateUrl)) {
+                const alertLog = source.updateAlert.log || '发现新版本，建议及时更新';
+                const alertUrl = source.updateAlert.updateUrl || '';
+                const clickAttr = alertUrl ? `onclick="window.open('${alertUrl}', '_blank')" role="button" tabindex="0"` : '';
+                const cursorStyle = alertUrl ? 'cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/40 hover:border-amber-300 transition-all active:scale-[0.99]' : '';
+                const linkIcon = alertUrl ? `<i class="fas fa-external-link-alt ml-1 text-[8px] opacity-70 shrink-0"></i>` : '';
+                updateAlertBanner = `
+                <div ${clickAttr} class="mt-1.5 p-1.5 md:p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 text-amber-700 dark:text-amber-300 text-[10px] md:text-[11px] flex items-center justify-between gap-1.5 ${cursorStyle}" title="${alertUrl ? '点击前往下载更新: ' + alertUrl : ''}">
+                    <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                        <i class="fas fa-bell text-amber-500 shrink-0"></i>
+                        ${createMarqueeHtml(alertLog, "font-medium text-[10px] md:text-[11px]")}
+                    </div>
+                    ${alertUrl ? `<span class="inline-flex items-center text-[9px] md:text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-bold shrink-0 whitespace-nowrap ml-1">更新${linkIcon}</span>` : ''}
+                </div>`;
+            }
 
             if (source.enabled) {
                 if (source.status === 'success') {
                     statusBadge = `<span class="text-[9px] md:text-[10px] bg-emerald-50 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/30 px-1.5 py-0.5 rounded-full border border-emerald-100 flex items-center gap-1 transition-colors whitespace-nowrap"><i class="fas fa-check-circle"></i>正常</span>`;
                 } else if (source.status === 'failed') {
                     statusBadge = `<span class="text-[9px] md:text-[10px] bg-red-50 text-red-600 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30 px-1.5 py-0.5 rounded-full border border-red-100 flex items-center gap-1 cursor-help transition-colors whitespace-nowrap" title="${source.error || '加载失败'}"><i class="fas fa-times-circle"></i>失败</span>`;
-                    errorMsg = `<div class="text-[9px] md:text-[10px] text-red-500 dark:text-red-400 mt-1 flex items-start gap-1 p-1.5 bg-red-50 dark:bg-red-900/20 rounded transition-colors"><i class="fas fa-info-circle mt-0.5 flex-shrink-0"></i><span class="break-all">${source.error || '未知错误'}</span></div>`;
+                    if (!source.updateAlert) {
+                        errorMsg = `<div class="text-[9px] md:text-[10px] text-red-500 dark:text-red-400 mt-1 flex items-start gap-1 p-1.5 bg-red-50 dark:bg-red-900/20 rounded transition-colors"><i class="fas fa-info-circle mt-0.5 flex-shrink-0"></i><span class="break-all">${source.error || '未知错误'}</span></div>`;
+                    }
                 } else {
                     statusBadge = `<span class="text-[9px] md:text-[10px] bg-blue-50 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/30 px-1.5 py-0.5 rounded-full border border-blue-100 flex items-center gap-1 transition-colors whitespace-nowrap"><i class="fas fa-circle-notch fa-spin"></i>加载...</span>`;
                 }
@@ -12447,6 +12466,7 @@ async function renderCustomSources() {
                         <span class="t-bg-main t-text-muted px-1.5 py-0.5 rounded-lg shrink-0 transition-colors font-mono pointer-events-none border t-border-main text-[9px] md:text-[10px] whitespace-nowrap">${source.version ? (/^v/i.test(source.version) ? source.version : 'v' + source.version) : '未知'}</span>
                         ${statusBadge}
                     </div>
+                    ${updateAlertBanner}
                     ${supportedBadges}
                 </div>
                 

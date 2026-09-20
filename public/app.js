@@ -2360,6 +2360,9 @@ class App {
             const form = document.getElementById('config-form');
 
             form.elements['serverName'].value = config.serverName || '';
+            if (form.elements['debug.enabled']) {
+                form.elements['debug.enabled'].checked = config['debug.enabled'] || false;
+            }
             form.elements['maxSnapshotNum'].value = config.maxSnapshotNum || 10;
             form.elements['list.addMusicLocationType'].value = config['list.addMusicLocationType'] || 'top';
             form.elements['proxy.enabled'].checked = config['proxy.enabled'] || false;
@@ -3021,6 +3024,7 @@ class App {
 
         const config = {
             serverName: formData.get('serverName'),
+            'debug.enabled': formData.get('debug.enabled') === 'on',
             maxSnapshotNum: parseInt(formData.get('maxSnapshotNum')),
             'list.addMusicLocationType': formData.get('list.addMusicLocationType'),
             'proxy.enabled': formData.get('proxy.enabled') === 'on',

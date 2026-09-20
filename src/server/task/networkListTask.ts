@@ -175,7 +175,7 @@ export const checkAllUsersNetworkLists = async (): Promise<{
               // 创建快照并持久化
               await userSpace.listManage.createSnapshot()
             } catch (err: any) {
-              syncLog.warn(`[Scheduler] 写入用户 ${username} 歌单 ${list.name || list.id} 失败: ${err.message}`)
+              syncLog.warn(`[网络歌单] 写入用户 ${username} 歌单 ${list.name || list.id} 失败: ${err.message}`)
             }
 
             // 记录红点标记到内存（重启后自动清空）
@@ -185,7 +185,7 @@ export const checkAllUsersNetworkLists = async (): Promise<{
           }
         } catch (err: any) {
           failed.push(list.name || list.id)
-          syncLog.warn(`[Scheduler] 检查用户 ${username} 的网络歌单 [${list.name || list.id}] 失败: ${err.message}`)
+          syncLog.warn(`[网络歌单] 检查用户 ${username} 的网络歌单 [${list.name || list.id}] 失败: ${err.message}`)
         }
       }
 
@@ -193,7 +193,7 @@ export const checkAllUsersNetworkLists = async (): Promise<{
 
       details[username] = { changed, failed }
     } catch (err: any) {
-      syncLog.warn(`[Scheduler] 处理用户 ${username} 失败: ${err.message}`)
+      syncLog.warn(`[网络歌单] 处理用户 ${username} 失败: ${err.message}`)
     }
   }
 
@@ -267,7 +267,7 @@ export const createNetworkListTask = (): ScheduledTask => {
         const { syncDownloadForAllUsers } = await import('./syncDownloadTask.js')
         void syncDownloadForAllUsers()
       } catch (e: any) {
-        syncLog.warn(`[NetworkListTask] 触发同步下载失败: ${e.message}`)
+        syncLog.warn(`[网络歌单] 触发同步下载失败: ${e.message}`)
       }
 
       return {

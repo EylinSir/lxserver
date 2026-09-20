@@ -84,7 +84,7 @@ const serializeDislikeRules = (rules: string, username?: string) => {
         }
       }
     } catch (e: any) {
-      console.warn('[Dislike] Error merging dislike library:', e.message)
+      console.warn('[黑名单] 合并黑名单规则失败:', e.message)
     }
   }
   return {
@@ -294,7 +294,7 @@ const scheduleSaveTokenConfig = (username: string) => {
     const tokenPath = path.join(userPath, File.userTokensJSON)
     if (!fs.existsSync(userPath)) fs.mkdirSync(userPath, { recursive: true })
     fs.writeFile(tokenPath, JSON.stringify(config, null, 2), 'utf8', (err) => {
-      if (err) console.error('[Token] 写盘失败:', err)
+      if (err) console.error('[凭证管理] 写盘失败:', err)
     })
   }, 10_000)
   persistentTokenSaveQueue.set(username, timer)
@@ -673,7 +673,7 @@ const saveUsers = () => {
     }
     return true
   } catch (err) {
-    console.error('Failed to save users.json', err)
+    console.error('[用户管理] 保存 users.json 失败:', err)
     return false
   }
 }
@@ -757,7 +757,7 @@ const checkAndCreateDir = (p: string) => {
     }
   } catch (e: any) {
     if (e.code !== 'EEXIST') {
-      console.error(`Could not create directory ${p}:`, e.message)
+      console.error(`[系统] 创建目录失败 (${p}):`, e.message)
     }
   }
 }
@@ -820,7 +820,7 @@ const getAudioRemoteSize = async (audioUrl: string): Promise<number | null> => {
     const size = parseContentLength(resp.headers || {})
     if (size) return size
   } catch (e: any) {
-    console.warn(`[QualitySize] HEAD failed: ${e.message}`)
+    console.warn(`[音质探测] HEAD 请求探测文件大小失败: ${e.message}`)
   }
 
   try {
@@ -833,7 +833,7 @@ const getAudioRemoteSize = async (audioUrl: string): Promise<number | null> => {
     })
     return parseContentLength(resp.headers || {})
   } catch (e: any) {
-    console.warn(`[QualitySize] Range probe failed: ${e.message}`)
+    console.warn(`[音质探测] Range 分段探测文件大小失败: ${e.message}`)
   }
 
   return null
@@ -942,7 +942,7 @@ const findServerSourceMatches = async (songInfo: any, username: string) => {
       const list = Array.isArray(searchData?.list) ? searchData.list : []
       return list.map((item: any) => ({ ...item, source }))
     } catch (err: any) {
-      console.warn(`[ServerAutoSource] Search failed for ${source}: ${err?.message || err}`)
+      console.warn(`[自动换源] 搜索 ${source} 失败: ${err?.message || err}`)
       return []
     }
   })).then(resultGroups => resultGroups.flat()
@@ -1528,7 +1528,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   return
                 }
 
-                console.log(`[RenameUser] Renaming ${name} to ${newName}...`)
+                console.log(`[用户管理] 正在重命名用户 ${name} 为 ${newName}...`)
 
                 // 1. 断开该用户的连接
                 if (wss) {
@@ -1552,7 +1552,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
                     handleFinalUpdate()
                   } catch (err: any) {
-                    console.error(`[RenameUser] Failed to migrate data: ${err.message}`)
+                    console.error(`[用户管理] 迁移用户数据失败: ${err.message}`)
                     res.writeHead(500)
                     res.end(err.message || 'Data Migration Failed')
                   } finally {
@@ -1564,7 +1564,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 handleFinalUpdate()
               }
             } catch (e) {
-              console.error('[RenameUser] Error:', e)
+              console.error('[用户管理] 重命名用户发生异常:', e)
               res.writeHead(500)
               res.end('Server Error')
             }
@@ -1593,11 +1593,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   const user = global.lx.config.users[idx]
 
                   // 保存用户数据路径（如果需要删除）
-                  console.log(`[DeleteUser] deleteData: ${deleteData}, user.dataPath: ${user.dataPath}`)
+                  console.log(`[用户管理] 删除数据选项: ${deleteData}, 用户数据路径: ${user.dataPath}`)
                   if (deleteData && user.dataPath) {
                     deletedUsers.push({ name: targetName, dataPath: user.dataPath })
                   } else {
-                    console.log(`[DeleteUser] Skipping data deletion for ${targetName}. deleteData=${deleteData}, hasDataPath=${!!user.dataPath}`)
+                    console.log(`[用户管理] 跳过删除用户 ${targetName} 的数据目录 (deleteData=${deleteData}, 数据目录存在=${!!user.dataPath})`)
                   }
 
                   // 断开该用户的连接
@@ -1616,23 +1616,23 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
                 // 如果需要删除数据文件夹
                 if (deleteData && deletedUsers.length > 0) {
-                  console.log(`[DeleteUser] Processing ${deletedUsers.length} data folders deletion...`)
+                  console.log(`[用户管理] 正在清理 ${deletedUsers.length} 个用户的数据目录...`)
                   for (const user of deletedUsers) {
                     try {
-                      console.log(`[DeleteUser] Checking path: ${user.dataPath}`)
+                      console.log(`[用户管理] 检查并清理目录: ${user.dataPath}`)
                       if (fs.existsSync(user.dataPath)) {
                         fs.rmSync(user.dataPath, { recursive: true, force: true })
-                        console.log(`Deleted user data folder: ${user.dataPath}`)
+                        console.log(`[用户管理] 已删除用户数据目录: ${user.dataPath}`)
                       } else {
-                        console.log(`[DeleteUser] Path not found: ${user.dataPath}`)
+                        console.log(`[用户管理] 数据目录不存在: ${user.dataPath}`)
                       }
                     } catch (err) {
-                      console.error(`Failed to delete user data folder for ${user.name}:`, err)
+                      console.error(`[用户管理] 删除用户 ${user.name} 的数据目录失败:`, err)
                       // 继续删除其他用户，不中断流程
                     }
                   }
                 } else {
-                  console.log('[DeleteUser] No data folders to delete (or deleteData is false)')
+                  console.log('[用户管理] 无需删除物理数据目录 (未勾选删除数据)')
                 }
 
                 res.writeHead(200)
@@ -1867,31 +1867,31 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               return
             }
 
-            console.log(`[UserAPI] 批量删除请求: 用户=${username}, 列表=${listId}, 删除歌曲数=${songIds.length}`)
-            console.log(`[UserAPI] 待删除歌曲ID:`, songIds)
+            console.log(`[用户接口] 批量删除请求: 用户=${username}, 列表=${listId}, 删除歌曲数=${songIds.length}`)
+            console.log(`[用户接口] 待删除歌曲ID:`, songIds)
 
             const userSpace = getUserSpace(username)
 
             // Get list before deletion
             const listBefore = await userSpace.listManage.listDataManage.getListMusics(listId)
-            console.log(`[UserAPI] 删除前列表歌曲数: ${listBefore.length}`)
+            console.log(`[用户接口] 删除前列表歌曲数: ${listBefore.length}`)
 
             // Remove songs from the list
             const affectedLists = await userSpace.listManage.listDataManage.listMusicRemove(listId, songIds)
-            console.log(`[UserAPI] 受影响的列表:`, affectedLists)
+            console.log(`[用户接口] 受影响的列表:`, affectedLists)
 
             // Get list after deletion  
             const listAfter = await userSpace.listManage.listDataManage.getListMusics(listId)
-            console.log(`[UserAPI] 删除后列表歌曲数: ${listAfter.length}`)
+            console.log(`[用户接口] 删除后列表歌曲数: ${listAfter.length}`)
 
             // Create new snapshot to persist changes
             const newSnapshotKey = await userSpace.listManage.createSnapshot()
-            console.log(`[UserAPI] 批量删除成功,已创建新快照: ${newSnapshotKey}`)
+            console.log(`[用户接口] 批量删除成功,已创建新快照: ${newSnapshotKey}`)
 
             res.writeHead(200)
             res.end('删除成功')
           } catch (err: any) {
-            console.error('[UserAPI] 批量删除失败:', err)
+            console.error('[用户接口] 批量删除失败:', err)
             res.writeHead(500)
             res.end(err.message || '删除失败')
           }
@@ -1918,7 +1918,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               return
             }
 
-            console.log(`[UserAPI] 批量添加请求: 用户=${username}, 列表=${listId}, 添加歌曲数=${musicInfos.length}`)
+            console.log(`[用户接口] 批量添加请求: 用户=${username}, 列表=${listId}, 添加歌曲数=${musicInfos.length}`)
 
             const userSpace = getUserSpace(username)
 
@@ -1930,12 +1930,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
             // Create new snapshot to persist changes
             const newSnapshotKey = await userSpace.listManage.createSnapshot()
-            console.log(`[UserAPI] 批量添加成功,已创建新快照: ${newSnapshotKey}`)
+            console.log(`[用户接口] 批量添加成功,已创建新快照: ${newSnapshotKey}`)
 
             res.writeHead(200)
             res.end('添加成功')
           } catch (err: any) {
-            console.error('[UserAPI] 批量添加失败:', err)
+            console.error('[用户接口] 批量添加失败:', err)
             res.writeHead(500)
             res.end(err.message || '添加失败')
           }
@@ -2370,7 +2370,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               syncNativeLibraryToSubsonic(username, 'artists',
                 added.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })),
                 removed.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })))
-            } catch (e: any) { console.error('[Library] 反向同步 Subsonic 星标失败:', e) }
+            } catch (e: any) { console.error('[音乐库] 反向同步 Subsonic 星标失败:', e) }
             res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true }))
           } catch (e: any) { res.writeHead(400); res.end(e.message) }
         })
@@ -2456,7 +2456,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               syncNativeLibraryToSubsonic(username, 'albums',
                 added.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })),
                 removed.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })))
-            } catch (e: any) { console.error('[Library] 反向同步 Subsonic 星标失败:', e) }
+            } catch (e: any) { console.error('[音乐库] 反向同步 Subsonic 星标失败:', e) }
             res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true }))
           } catch (e: any) { res.writeHead(400); res.end(e.message) }
         })
@@ -3980,7 +3980,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
             const songKey = fileCache.normalizeSongId(songInfo) + '_' + (quality || 'unknown')
 
-            console.log(`[Cache] Registering active task: ${songKey} for user: "${username}"`)
+            console.log(`[文件缓存] 注册下载任务: ${songKey} (用户: "${username}")`)
 
             const controller = new AbortController()
             let userTasks = fileCache.activeTasks.get(username)
@@ -3995,12 +3995,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               downloadSource,
               sourceName,
             })
-              .then(() => console.log(`[Cache] Downloaded ${songInfo.name} for ${username || '_open'}`))
+              .then(() => console.log(`[文件缓存] 已成功下载 ${songInfo.name} (用户: ${username || '_open'})`))
               .catch((err: any) => {
                 if (err.message === 'Aborted') {
-                  console.log(`[Cache] Task aborted for ${songInfo.name}`)
+                  console.log(`[文件缓存] 任务已取消: ${songInfo.name}`)
                 } else {
-                  console.error(`[Cache] Failed to download ${songInfo.name}:`, err)
+                  console.error(`[文件缓存] 下载歌曲失败 (${songInfo.name}):`, err)
                 }
               })
               .finally(() => {
@@ -4010,7 +4010,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   const idx = tasks.findIndex(t => t.songKey === songKey)
                   if (idx !== -1) {
                     tasks.splice(idx, 1)
-                    console.log(`[Cache] Cleaned up active task: ${songKey} for user: "${username}"`)
+                    console.log(`[文件缓存] 清理已完成任务: ${songKey} (用户: "${username}")`)
                   }
                 }
               })
@@ -4046,13 +4046,13 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (all) {
               fileCache.stopUserTasks(username)
               serverDownloadQueue.pause(username)
-              console.log(`[Cache] Stopped all tasks for user: ${username}`)
+              console.log(`[文件缓存] 已停止用户 ${username} 的所有下载任务`)
             } else if (queueId) {
               serverDownloadQueue.pause(username, queueId)
-              console.log(`[Cache] Paused persistent queue task ${queueId} for user: ${username}`)
+              console.log(`[文件缓存] 已暂停队列任务 ${queueId} (用户: ${username})`)
             } else if (songKey) {
               fileCache.stopUserTasks(username, songKey)
-              console.log(`[Cache] Stopped task ${songKey} for user: ${username}`)
+              console.log(`[文件缓存] 已停止任务 ${songKey} (用户: ${username})`)
             }
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true }))
@@ -4884,7 +4884,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
                 if (fs.existsSync(lrcPath)) {
                   lyricText = fs.readFileSync(lrcPath, 'utf8')
-                  console.log(`[EmbedLyric] Using local .lrc for: ${filename}`)
+                  console.log(`[嵌入歌词] 正在使用本地 .lrc 文件: ${filename}`)
                 } else if (songInfo && songInfo.source && songInfo.source !== 'unknown' && songInfo.source !== 'local') {
                   // 没有 .lrc 文件，尝试通过 SDK 获取
                   const lyricFetcherFn = fileCache.getLyricFetcher()
@@ -4892,7 +4892,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                     lyricText = await lyricFetcherFn(songInfo)
                   }
                   if (lyricText) {
-                    console.log(`[EmbedLyric] Fetched lyric from SDK for: ${filename}`)
+                    console.log(`[嵌入歌词] 从音源获取到歌词: ${filename}`)
                   }
                 }
 
@@ -4917,7 +4917,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
                 details.push({ filename, status: 'success' })
                 successCount++
-                console.log(`[EmbedLyric] Embedded lyric for: ${filename}`)
+                console.log(`[嵌入歌词] 歌词已成功写入文件: ${filename}`)
               } catch (itemErr: any) {
                 details.push({ filename, status: 'fail', reason: itemErr.message || '未知错误' })
                 failCount++
@@ -5003,7 +5003,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true, results }))
           } catch (e: any) {
-            console.error('[Identify] Error:', e.message)
+            console.error('[歌曲识别] 识别发生异常:', e.message)
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: e.message || 'Identification failed' }))
           }
@@ -5048,7 +5048,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }, lyricUsername)
 
         if (localLyricResult.exists && localLyricResult.content) {
-          console.log(`[Lyric] 命中本地 .lrc 缓存: ${source}_${songmid}`)
+          console.log(`[歌词服务] 命中本地 .lrc 缓存: ${source}_${songmid}`)
           res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400' })
           res.end(JSON.stringify({ ...localLyricResult.content, _fromLocalCache: true }))
           return
@@ -5059,7 +5059,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             throw new Error('Source not supported')
           }
 
-          // console.log('[Lyric] Fetching lyric for:', source, songmid)
+          // console.log('[歌词服务] 正在从音源获取歌词:', source, songmid)
 
           // Construct complete songInfo object for SDK compatibility
           // KuGou (kg) needs: name, hash, interval
@@ -5086,7 +5086,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           })
           res.end(JSON.stringify(lyricInfo))
         } catch (err: any) {
-          console.error('[Lyric] Fetch error:', source, songmid, err.message || err)
+          console.error('[歌词服务] 获取歌词失败:', source, songmid, err.message || err)
 
           // [Fallback] 网络请求失败时，再次尝试本地 .lrc 文件（防止 Step2 miss 但物理文件存在的情况）
           const fallbackResult = fileCache.checkLyricCache({
@@ -5097,7 +5097,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             singer: urlObj.searchParams.get('singer') || '',
           }, lyricUsername)
           if (fallbackResult.exists && fallbackResult.content) {
-            console.log(`[Lyric] 网络失败，fallback 到本地 .lrc: ${source}_${songmid}`)
+            console.log(`[歌词服务] 网络获取失败，回退到本地 .lrc: ${source}_${songmid}`)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ...fallbackResult.content, _fromLocalCache: true }))
             return
@@ -5208,7 +5208,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         try {
           const isTaggingMode = urlObj.searchParams.get('tag') === '1'
           const taskId = urlObj.searchParams.get('taskId')
-          console.log(`[DownloadProxy] Fetching: ${urlStr} (Tagging: ${isTaggingMode}, TaskId: ${taskId})`)
+          console.log(`[下载代理] 正在获取音频流: ${urlStr} (写入标签: ${isTaggingMode}, 任务ID: ${taskId})`)
 
           // 使用原生 http/https 模块以获得最高的流媒体转发性能
           const http = require('http')
@@ -5217,7 +5217,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           // Manual redirect handling for maximum control and stability
           const doFetch = (targetUrl: string, attempt: number) => {
             if (attempt > 5) {
-              console.error('[DownloadProxy] Too many redirects')
+              console.error('[下载代理] 触发过多重定向，已终止')
               if (!res.headersSent) {
                 res.writeHead(502)
                 res.end('Too Many Redirects')
@@ -5359,11 +5359,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                               // music-tag-native signature: (mime, data, type)
                               tagger.pictures = [new MetaPicture('image/jpeg', new Uint8Array(imgBuf), 'Cover')]
                             } catch (picErr) {
-                              console.warn('[DownloadProxy] MetaPicture creation failed:', picErr)
+                              console.warn('[下载代理] 封面标签创建失败:', picErr)
                             }
                           }
                         } catch (e: any) {
-                          console.warn('[DownloadProxy] Picture fetch/embed failed:', imageUrl, e.message)
+                          console.warn('[下载代理] 获取或嵌入封面失败:', imageUrl, e.message)
                         }
                       }
                       // [新增] 嵌入歌词 USLT 标签：SDK 返回 { promise, cancel }，必须 await .promise
@@ -5382,7 +5382,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                         } catch (e) { /* 歌词获取失败不影响下载 */ }
                       }
                       tagger.save()
-                      console.log('[DownloadProxy] Metadata saved successfully for:', songName)
+                      console.log('[下载代理] 音频元数据标签保存成功:', songName)
                       tagger.dispose()
                       tagger = null
 
@@ -5414,7 +5414,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               })
 
               proxyReq.on('error', (err: any) => {
-                console.error('[DownloadProxy] Request Error:', err)
+                console.error('[下载代理] 请求异常:', err)
                 if (!res.headersSent) {
                   res.writeHead(502)
                   res.end('Request Error')
@@ -5431,7 +5431,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               proxyReq.end()
 
             } catch (err: any) {
-              console.error('[DownloadProxy] Try Error:', err)
+              console.error('[下载代理] 代理请求捕获异常:', err)
               if (!res.headersSent) {
                 res.writeHead(500)
                 res.end('Internal Server Error')
@@ -5443,7 +5443,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           doFetch(urlStr, 0)
 
         } catch (err: any) {
-          console.error('[DownloadProxy] Error:', err)
+          console.error('[下载代理] 发生错误:', err)
           res.writeHead(500)
           res.end('Server Error')
         }
@@ -5954,14 +5954,14 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               await pushProgress(attempt, retries - 1)
             } else {
               sseFailed = true
-              console.warn(`[SSE] ReqId ${reqId} not found after retries (${musicProgressClients.size} clients registered)`)
+              console.warn(`[进度推送] 经过多次重试未找到 ReqId: ${reqId} (当前已注册 ${musicProgressClients.size} 个客户端)`)
             }
           }
 
           try {
             let { songInfo, quality, enableAutoSwitchApiSource, excludeApiSources } = JSON.parse(body)
             songInfo = normalizeSongInfo(songInfo)
-            // console.log('[MusicUrl] Song Info:', JSON.stringify(songInfo, null, 2))
+            // console.log('[歌曲播放] 歌曲信息:', JSON.stringify(songInfo, null, 2))
             if (!songInfo || !songInfo.source) {
               throw new Error('Invalid songInfo')
             }
@@ -5972,7 +5972,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             let attempts: any[] = []
             if (isSourceSupported(source, verifiedUsername)) {
               try {
-                console.log(`[MusicUrl] Using custom source for: ${source} (ReqId: ${reqId || 'None'}, User: ${verifiedUsername})`)
+                console.log(`[歌曲播放] 使用自定义源解析: ${source} (请求ID: ${reqId || '无'}, 用户: ${verifiedUsername})`)
 
                 const userApiResult = await callUserApiGetMusicUrl(
                   source, songInfo, quality || '128k', verifiedUsername,
@@ -5983,7 +5983,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 result = userApiResult
                 attempts = userApiResult.attempts || []
               } catch (userApiError: any) {
-                console.error(`[MusicUrl] Custom source failed:`, userApiError.message)
+                console.error(`[歌曲播放] 自定义源解析失败:`, userApiError.message)
                 customSourceError = userApiError.message
                 attempts = userApiError.attempts || []
                 // 不抛出错误，继续尝试内置源
@@ -6011,7 +6011,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               try {
                 // Only try to resolve if it looks like a remote URL and is not already resolved
                 if (result.url.startsWith('http')) {
-                  // console.log(`[MusicUrl] Resolving redirects for: ${songInfo.name} (${quality})`);
+                  // console.log(`[歌曲播放] 正在解析重定向: ${songInfo.name} (${quality})`);
 
                   const checkRedirect = async (u: string, depth: number = 0): Promise<string> => {
                     if (depth > 3) return u // Max depth 3
@@ -6032,16 +6032,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                         if (!nextUrl.startsWith('http')) {
                           try { nextUrl = new URL(nextUrl, u).href } catch (e) { }
                         }
-                        // console.log(`[MusicUrl] Resolve redirect [${resp.statusCode}]: ${u.substring(0, 50)}... -> ${nextUrl.substring(0, 50)}...`)
+                        // console.log(`[歌曲播放] 解析重定向 [${resp.statusCode}]: ${u.substring(0, 50)}... -> ${nextUrl.substring(0, 50)}...`)
                         return checkRedirect(nextUrl, depth + 1)
                       }
                       // If error status but not redirect, return original
                       if (resp.statusCode !== undefined && resp.statusCode >= 400) {
-                        console.warn(`[MusicUrl] Redirect check failed with status ${resp.statusCode}, using original URL`);
+                        console.warn(`[歌曲播放] 重定向探测返回异常状态码 ${resp.statusCode}，使用原始链接`);
                         return u;
                       }
                     } catch (e: any) {
-                      console.warn(`[MusicUrl] head check failed: ${e.message}`);
+                      console.warn(`[歌曲播放] HEAD 校验重定向失败: ${e.message}`);
                     }
                     return u
                   }
@@ -6050,16 +6050,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   if (finalUrl !== result.url) {
                     result.url = finalUrl
                   }
-                  // console.log(`[MusicUrl] Final Resolved URL: ${result.url.substring(0, 100)}...`);
+                  // console.log(`[歌曲播放] 最终解析音频链接: ${result.url.substring(0, 100)}...`);
                 }
               } catch (e) {
-                console.error('[MusicUrl] Resolve Error:', e)
+                console.error('[歌曲播放] 解析重定向发生异常:', e)
               }
 
               // 2. Mixed Content Handling (Optional Proxy) implementation details handled by frontend now
               // But we can keep the log for debugging
               if (result.url.startsWith('http://')) {
-                // console.log(`[MusicUrl] Note: URL is HTTP, frontend might proxy if enabled: ${result.url}`)
+                // console.log(`[歌曲播放] 提示: 音频链接为 HTTP 协议: ${result.url}`)
               }
 
               result.requestedSource = songInfo.source
@@ -6069,7 +6069,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify(result))
           } catch (err: any) {
-            console.error('[MusicUrl] Error:', err.message)
+            console.error('[歌曲播放] 音频地址解析失败:', err.message)
             // [Fix] Return 500 but with specific error JSON to let frontend show detailed toast
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ error: err.message, code: 500, attempts: err.attempts }))
@@ -6116,7 +6116,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               sourceName: result.sourceName,
             }))
           } catch (err: any) {
-            console.error('[QualitySize] Error:', err.message)
+            console.error('[音质探测] 获取文件大小失败:', err.message)
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, error: err.message, code: 500 }))
           }
@@ -6161,7 +6161,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             return
           }
 
-          // console.log(`[HotSearch] 获取热搜: source=${source}`)
+          // console.log(`[热搜服务] 获取热搜: source=${source}`)
           const result = await musicSdk[source].hotSearch.getList()
 
           res.writeHead(200, {
@@ -6170,7 +6170,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           })
           res.end(JSON.stringify(result))
         } catch (err: any) {
-          console.error('[HotSearch] Error:', err.message)
+          console.error('[热搜服务] 获取热搜失败:', err.message)
           // Return empty array instead of 500 to keep UI stable
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify([]))
@@ -6190,7 +6190,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ...result, sortList }))
         } catch (err: any) {
-          console.error(`[SongList Tags] Error:`, err)
+          console.error(`[歌单服务] 获取歌单分类标签失败:`, err)
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: err.message || '获取歌单标签失败' }))
         }
@@ -6210,7 +6210,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         } catch (err: any) {
-          console.error(`[SongList List] Error:`, err)
+          console.error(`[歌单服务] 获取歌单列表失败:`, err)
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: err.message || '获取歌单列表失败' }))
         }
@@ -6237,7 +6237,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         } catch (err: any) {
-          console.error(`[SongList Detail] Error:`, err)
+          console.error(`[歌单服务] 获取歌单详情失败:`, err)
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: err.message || '获取歌单详情失败' }))
         }
@@ -6261,7 +6261,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         } catch (err: any) {
-          console.error(`[SongList Search] Error:`, err)
+          console.error(`[歌单服务] 搜索歌单失败:`, err)
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: err.message || '搜索歌单失败' }))
         }
@@ -6286,7 +6286,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         } catch (err: any) {
-          console.error(`[User Playlist] Error:`, err)
+          console.error(`[用户歌单] 获取用户歌单失败:`, err)
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: err.message || '获取用户歌单失败' }))
         }
@@ -6307,7 +6307,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           })
           res.end(JSON.stringify(result))
         } catch (err: any) {
-          console.error(`[Leaderboard Boards] Error:`, err)
+          console.error(`[排行榜] 获取排行榜列表失败:`, err)
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: err.message || '获取排行榜列表失败' }))
         }
@@ -6333,7 +6333,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         } catch (err: any) {
-          console.error(`[Leaderboard List] Error:`, err)
+          console.error(`[排行榜] 获取排行榜歌曲失败:`, err)
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: err.message || '获取排行榜歌曲失败' }))
         }
@@ -6347,31 +6347,31 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             let { songInfo, type, page, limit } = JSON.parse(body)
             songInfo = normalizeSongInfo(songInfo)
             if (!songInfo || !songInfo.source) {
-              console.warn('[Comment] Invalid request body:', body)
+              console.warn('[评论服务] 无效的请求参数:', body)
               throw new Error('Invalid songInfo')
             }
             const source = songInfo.source
-            console.log(`[Comment] Request: ${source} - ${songInfo.name} - ${type} - page ${page}`)
+            console.log(`[评论服务] 请求评论: ${source} - ${songInfo.name} - ${type} - 第 ${page} 页`)
 
             if (!musicSdk[source] || !musicSdk[source].comment) {
-              console.warn(`[Comment] Source ${source} not supported for comments`)
+              console.warn(`[评论服务] 音源 ${source} 不支持评论功能`)
               throw new Error(`Source ${source} not supported for comments`)
             }
 
             const method = type === 'hot' ? 'getHotComment' : 'getComment'
-            console.log(`[Comment] Song: ${songInfo.name}, ID: ${songInfo.songmid}, Source: ${source}`)
+            console.log(`[评论服务] 歌曲: ${songInfo.name}, ID: ${songInfo.songmid}, 音源: ${source}`)
 
             if (!musicSdk[source].comment[method]) {
-              console.warn(`[Comment] Method ${method} not supported for source ${source}`)
+              console.warn(`[评论服务] 方法 ${method} 不被音源 ${source} 支持`)
               throw new Error(`Method ${method} not supported for source ${source}`)
             }
 
             const result = await musicSdk[source].comment[method](songInfo, page, limit)
-            console.log(`[Comment] Success: ${source} - ${result.comments?.length} comments found`)
+            console.log(`[评论服务] 获取成功: ${source} - 共找到 ${result.comments?.length} 条评论`)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify(result))
           } catch (err: any) {
-            console.error('[Comment] Error:', err.message)
+            console.error('[评论服务] 获取评论发生异常:', err.message)
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ error: err.message, code: 500 }))
           }
@@ -6477,7 +6477,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 const { syncDislikeToRating } = require('./subsonic')
                 await syncDislikeToRating(verified, subId, isAdd ? 1 : 0)
               } catch (e) {
-                console.error('[Dislike API] 评分回写失败:', e)
+                console.error('[黑名单 API] 评分回写失败:', e)
               }
             }
 
@@ -6504,7 +6504,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
             res.end(JSON.stringify({ success: true, data, options: dislikeMatchOptions() }))
           } catch (err: any) {
-            console.error('[Dislike API] Error:', err?.message)
+            console.error('[黑名单 API] 处理异常:', err?.message)
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: err.message }))
           }
@@ -6664,8 +6664,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   params[key] = params[key][0]
                 }
               }
-              console.log('[ElFinder] Files received:', Object.keys(files))
-              console.log('[ElFinder] Files detail:', files)
+              console.log('[文件管理] 接收到上传文件列表:', Object.keys(files))
+              console.log('[文件管理] 接收到文件详情:', files)
               try {
                 // 获取上传的文件（字段名可能是 upload, upload[] 等）
                 const uploadedFiles = files.upload || files['upload[]'] || Object.values(files)[0]
@@ -6758,6 +6758,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (req.method === 'GET') {
           const config = {
             serverName: global.lx.config.serverName,
+            'debug.enabled': global.lx.config['debug.enabled'] || false,
             maxSnapshotNum: global.lx.config.maxSnapshotNum,
             'list.addMusicLocationType': global.lx.config['list.addMusicLocationType'],
             'proxy.enabled': global.lx.config['proxy.enabled'],
@@ -6850,6 +6851,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             try {
               const newConfig = JSON.parse(body)
               if (newConfig.serverName !== undefined) global.lx.config.serverName = newConfig.serverName
+              if (newConfig['debug.enabled'] !== undefined) global.lx.config['debug.enabled'] = newConfig['debug.enabled']
               if (newConfig.maxSnapshotNum !== undefined) global.lx.config.maxSnapshotNum = parseInt(newConfig.maxSnapshotNum)
               if (newConfig['list.addMusicLocationType'] !== undefined) global.lx.config['list.addMusicLocationType'] = newConfig['list.addMusicLocationType']
               if (newConfig['proxy.enabled'] !== undefined) global.lx.config['proxy.enabled'] = newConfig['proxy.enabled']
@@ -7102,6 +7104,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
                 maxSnapshotNum: global.lx.config.maxSnapshotNum,
                 'list.addMusicLocationType': global.lx.config['list.addMusicLocationType'],
+                'debug.enabled': global.lx.config['debug.enabled'] || false,
                 disableTelemetry: global.lx.config.disableTelemetry,
                 'frontend.password': global.lx.config['frontend.password'],
                 'player.enableAuth': global.lx.config['player.enableAuth'],
@@ -7461,16 +7464,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               throw new Error('Unsupported protocol: ' + url.protocol)
             }
 
-            console.log(`[Proxy Test] Trying to connect to baidu.com via ${address}...`)
+            console.log(`[代理测试] 正在通过代理 ${address} 测试连接 baidu.com...`)
             const startTime = Date.now()
             needle.get('https://www.baidu.com', options, (err: Error | null, resp: any) => {
               const duration = Date.now() - startTime
               if (err) {
-                console.error('[Proxy Test] Failed:', err.message)
+                console.error('[代理测试] 连接失败:', err.message)
                 res.writeHead(200, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, message: err.message }))
               } else {
-                console.log(`[Proxy Test] Success: ${resp.statusCode} (${duration}ms)`)
+                console.log(`[代理测试] 测试成功: 状态码 ${resp.statusCode} (耗时 ${duration}ms)`)
                 res.writeHead(200, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: true, message: `连接成功 (状态码: ${resp.statusCode}, 耗时: ${duration}ms)` }))
               }
@@ -7885,7 +7888,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true, message: 'Restore from local ZIP success and reloaded' }))
           } catch (restoreErr: any) {
-            console.error('Local Restore Error:', restoreErr)
+            console.error('[数据备份] 本地还原异常:', restoreErr)
             res.writeHead(500); res.end('Restore failed: ' + restoreErr.message)
           }
         })
@@ -7923,7 +7926,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
         // 延迟1秒后重启
         setTimeout(() => {
-          console.log('Server restarting by admin request...')
+          console.log('[系统管理] 收到管理员指令，服务正在重启...')
           // 尝试通过更新文件时间戳触发 nodemon 重启
           const entryFile = path.join(process.cwd(), 'src', 'index.ts')
           try {
@@ -7934,7 +7937,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               process.exit(0)
             }
           } catch (err) {
-            console.error('Restart failed, forcing exit:', err)
+            console.error('[系统管理] 触发热重启失败，正在强制退出进程:', err)
             process.exit(0)
           }
         }, 1000)
@@ -8449,13 +8452,13 @@ const startSubsonicStandaloneServer = () => {
       time: Date.now(),
     }
     startupLog.error(`Subsonic standalone server failed on ${subBindIP}:${subPort}: ${err.message}`)
-    console.error('[Subsonic] standalone server error:', err)
+    console.error('[Subsonic] 独立服务发生异常:', err)
   })
 
   subServer.listen(subPort, subBindIP, () => {
     global.lx.subsonicPortConflict = undefined
     startupLog.info(`Subsonic standalone server listening on ${subBindIP}:${subPort}`)
-    console.log(`[Subsonic] Standalone API listening on http://${subBindIP}:${subPort}`)
+    console.log(`[Subsonic] 独立服务已监听: http://${subBindIP}:${subPort}`)
   })
 }
 
@@ -8519,7 +8522,7 @@ export const startServer = async (port: number, ip: string) => {
     try {
       const source = songInfo.source
       if (!source || !musicSdk[source] || !musicSdk[source].getLyric) {
-        console.log(`[LyricFetcher] Skip: source="${source}" not supported`)
+        console.log(`[歌词抓取] 跳过: 不支持的音源 "${source}"`)
         return null
       }
       // [Fix] Strip source prefix from songmid (e.g. "tx_004bd0..." -> "004bd0...")
@@ -8527,10 +8530,10 @@ export const startServer = async (port: number, ip: string) => {
       const sourcePrefix = `${source}_`
       if (songmid.startsWith(sourcePrefix)) songmid = songmid.slice(sourcePrefix.length)
       if (!songmid) {
-        console.log(`[LyricFetcher] Skip: empty songmid`)
+        console.log(`[歌词抓取] 跳过: 歌曲 songmid 为空`)
         return null
       }
-      console.log(`[LyricFetcher] Fetching lyric: ${source}_${songmid} (${songInfo.name})`)
+      console.log(`[歌词抓取] 正在获取歌词: ${source}_${songmid} (${songInfo.name})`)
       const requestObj = musicSdk[source].getLyric({
         songmid,
         name: songInfo.name || '',
@@ -8540,10 +8543,10 @@ export const startServer = async (port: number, ip: string) => {
       })
       const result = await requestObj.promise
       const lyricText = result?.lyric || result?.lrc || null
-      console.log(`[LyricFetcher] Result: ${lyricText ? lyricText.length + ' chars' : 'null'}`)
+      console.log(`[歌词抓取] 获取结果: ${lyricText ? lyricText.length + ' 字符' : '无歌词'}`)
       return lyricText
     } catch (e: any) {
-      console.warn(`[LyricFetcher] Failed for "${songInfo.name}":`, e.message || e)
+      console.warn(`[歌词抓取] 抓取失败 (${songInfo.name}):`, e.message || e)
       return null
     }
   })
@@ -8553,7 +8556,7 @@ export const startServer = async (port: number, ip: string) => {
   startupLog.info(`starting sync server in ${process.env.NODE_ENV == 'production' ? 'production' : 'development'}`)
   const proxyEnabled = global.lx.config['proxy.all.enabled']
   const proxyAddress = global.lx.config['proxy.all.address']
-  console.log(`[Proxy] Music SDK Proxy: ${proxyEnabled ? `Enabled (${proxyAddress})` : 'Disabled'}`)
+  console.log(`[网络代理] 音乐 SDK 代理状态: ${proxyEnabled ? `已启用 (${proxyAddress})` : '未启用'}`)
   startupLog.info(`Music SDK Proxy: ${proxyEnabled ? `Enabled (${proxyAddress})` : 'Disabled'}`)
   try {
     await musicSdk.init()
@@ -8564,12 +8567,12 @@ export const startServer = async (port: number, ip: string) => {
 
   // 初始化自定义源
   try {
-    console.log('[Server] Initializing custom user APIs...')
+    console.log('[服务] 正在初始化自定义源...')
     // 修改：不传参数，默认加载 open + 所有用户源
     await initUserApis()
-    console.log('[Server] Custom user APIs initialized')
+    console.log('[服务] 自定义源初始化完成')
   } catch (err: any) {
-    console.error('[Server] Failed to initialize user APIs:', err.message)
+    console.error('[服务] 初始化自定义源失败:', err.message)
   }
 
   // [Fix] 服务启动时从 _open 用户 settings.json 读取 serverCacheLocation 并预初始化 fileCache，
@@ -8581,15 +8584,15 @@ export const startServer = async (port: number, ip: string) => {
       const savedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
       if (savedSettings.serverCacheLocation) {
         fileCache.setCacheLocation(savedSettings.serverCacheLocation)
-        console.log(`[Server] Restored fileCache location from settings: ${savedSettings.serverCacheLocation}`)
+        console.log(`[缓存] 从配置恢复服务器缓存路径: ${savedSettings.serverCacheLocation}`)
       }
       if (savedSettings.serverCacheNamingPattern) {
         const normalizedNamingPattern = fileCache.setNamingPattern(savedSettings.serverCacheNamingPattern)
-        console.log(`[Server] Restored cache naming pattern from settings: ${normalizedNamingPattern}`)
+        console.log(`[缓存] 从配置恢复缓存文件命名模式: ${normalizedNamingPattern}`)
       }
     }
   } catch (err: any) {
-    console.warn('[Server] Failed to restore fileCache location:', err.message)
+    console.warn('[缓存] 恢复缓存设置失败:', err.message)
   }
 
   serverDownloadQueue.initialize(async task => {
@@ -8641,7 +8644,7 @@ export const startServer = async (port: number, ip: string) => {
     // void generateCode()
     // codeTools.start()
   }).catch(err => {
-    console.log(err)
+    console.error('[服务] 启动同步服务异常:', err)
     status.status = false
     status.message = err.message
     status.address = []
