@@ -2686,6 +2686,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               nextSyncTime,
               syncDownload: {
                 enabled: syncData.enabled,
+                preferredQuality: syncData.preferredQuality || '320k',
                 lastSyncTime: syncData.lastSyncTime,
                 lastSyncResult: syncData.lastSyncResult,
               },
@@ -2725,6 +2726,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             const payload = JSON.parse(body)
             const syncData = getSyncDownloadData(username!)
             if (typeof payload.enabled === 'boolean') syncData.enabled = payload.enabled
+            if (typeof payload.preferredQuality === 'string' && ['128k', '320k', 'flac', 'flac24bit'].includes(payload.preferredQuality)) {
+              syncData.preferredQuality = payload.preferredQuality
+            }
             if (payload.playlists && typeof payload.playlists === 'object') {
               for (const [id, cfg] of Object.entries(payload.playlists) as any) {
                 if (!syncData.playlists[id]) {
@@ -2765,7 +2769,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
         try {
-          const result = await triggerUserSync(username)
+          const targetPlId = urlObj.searchParams.get('playlistId') || undefined
+          const result = await triggerUserSync(username, targetPlId)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true, ...result }))
         } catch (e: any) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, message: e.message })) }

@@ -22,10 +22,15 @@ export interface SyncFailedSong {
   name: string
   singer: string
   reason: string
+  source?: string
+  cover?: string
+  interval?: string
+  album?: string
 }
 
 export interface SyncDownloadData {
   enabled: boolean
+  preferredQuality?: string // 歌单同步下载指定音质 ('128k' | '320k' | 'flac' | 'flac24bit' 等，默认 '320k')
   playlists: Record<string, SyncDownloadPlaylistConfig>
   lastSyncTime: number | null
   lastSyncResult: string | null
@@ -51,8 +56,10 @@ export interface SyncProgress {
   currentListTotalSongs: number   // 当前歌单内需下载总数
   totalSongs: number              // 总计需下载数 (整体)
   overallCurrent: number          // 总计已处理数 (整体)
-  successCount: number
-  failCount: number
+  successCount: number            // 成功下载数
+  addCount: number                // 实际新增/更新下载数
+  deleteCount: number             // 删除移除歌曲数
+  failCount: number               // 失败数
   log: SyncProgressLog[]          // 最新 100 条
 }
 
@@ -90,6 +97,8 @@ const getProgress = (username: string): SyncProgress => {
       totalSongs: 0,
       overallCurrent: 0,
       successCount: 0,
+      addCount: 0,
+      deleteCount: 0,
       failCount: 0,
       log: [],
     })
@@ -197,10 +206,14 @@ const cleanupStalePlaylists = (syncData: SyncDownloadData, validListIds: Set<str
 }
 
 // ─────────────────────────────────────────────
-// 读取用户设置中的首选音质
+// 读取同步下载指定的音质（未单独配置则回退到用户首选音质或 320k）
 // ─────────────────────────────────────────────
 const getPreferredQuality = (username: string): string => {
   try {
+    const syncData = getSyncDownloadData(username)
+    if (syncData.preferredQuality && typeof syncData.preferredQuality === 'string') {
+      return syncData.preferredQuality
+    }
     const userSpace = getUserSpace(username)
     const settingsPath = path.join(userSpace.dataManage.userDir, File.userSettingsJSON)
     if (fs.existsSync(settingsPath)) {
@@ -214,9 +227,26 @@ const getPreferredQuality = (username: string): string => {
 }
 
 // ─────────────────────────────────────────────
+// 超时控制工具函数
+// ─────────────────────────────────────────────
+const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, errorMsg: string): Promise<T> => {
+  let timer: NodeJS.Timeout
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
+    })
+  ]).finally(() => {
+    clearTimeout(timer)
+  })
+}
+
+// ─────────────────────────────────────────────
 // 核心：将单首歌曲下载到指定 subPath
 // ─────────────────────────────────────────────
 const CACHE_LOCATION = fileCache.CACHE_ROOTS.DATA
+const RESOLVE_TIMEOUT_MS = 25000 // 单曲解析超时 25s
+const DOWNLOAD_TIMEOUT_MS = 120000 // 单曲下载超时 120s
 
 export const downloadSongToSubPath = async (
   songInfo: any,
@@ -228,7 +258,12 @@ export const downloadSongToSubPath = async (
   if (!_resolver) return new Error('Sync download resolver not initialized')
 
   try {
-    const resolved = await _resolver(songInfo, quality, username)
+    touchGlobalLock()
+    const resolved = await withTimeout(
+      _resolver(songInfo, quality, username),
+      RESOLVE_TIMEOUT_MS,
+      `音源解析超时 (${RESOLVE_TIMEOUT_MS / 1000}s)`
+    )
     if (signal?.aborted) return new Error('Aborted')
     if (!resolved?.url) return new Error('No download URL returned')
 
@@ -244,23 +279,31 @@ export const downloadSongToSubPath = async (
     const subDir = path.join(musicDir, subPath)
     if (!fs.existsSync(subDir)) fs.mkdirSync(subDir, { recursive: true })
 
+    touchGlobalLock()
+
     // 直接调用 downloadAndCache，isOnlyDownload=true 写入 music 目录
-    // 文件名由 fileCache 内部决定，subPath 由 indexManager 更新时写入
-    await fileCache.downloadAndCache(
-      songInfoWithSubPath,
-      resolved.url,
-      resolved.quality || quality,
-      username,
-      signal,
-      true,   // isOnlyDownload → 写到 music/ 目录
-      true,   // cacheLyric
-      true,   // embedLyric
-      {
-        requestedSource: (resolved.songInfo || songInfo).requestedSource || (resolved.songInfo || songInfo).source,
-        downloadSource: (resolved.songInfo || songInfo).downloadSource,
-        sourceName: (resolved.songInfo || songInfo).sourceName,
-      }
+    // 增加单曲下载硬超时保护，防止特定网络中断无响应导致全局死锁
+    await withTimeout(
+      fileCache.downloadAndCache(
+        songInfoWithSubPath,
+        resolved.url,
+        resolved.quality || quality,
+        username,
+        signal,
+        true,   // isOnlyDownload → 写到 music/ 目录
+        true,   // cacheLyric
+        true,   // embedLyric
+        {
+          requestedSource: (resolved.songInfo || songInfo).requestedSource || (resolved.songInfo || songInfo).source,
+          downloadSource: (resolved.songInfo || songInfo).downloadSource,
+          sourceName: (resolved.songInfo || songInfo).sourceName,
+        }
+      ),
+      DOWNLOAD_TIMEOUT_MS,
+      `下载歌曲超时 (${DOWNLOAD_TIMEOUT_MS / 1000}s)`
     )
+
+    touchGlobalLock()
 
     if (signal?.aborted) return new Error('Aborted')
 
@@ -340,6 +383,17 @@ const downloadWithRetry = async (
 // ─────────────────────────────────────────────
 // 获取本地已有歌曲（按 subPath 分组）
 // ─────────────────────────────────────────────
+const getLocalSongsMap = (username: string, subPath: string): Map<string, fileCache.CacheItem> => {
+  const items = fileCache.indexManager.getAll(username, 'music', CACHE_LOCATION)
+  const map = new Map<string, fileCache.CacheItem>()
+  for (const item of items) {
+    if (item.subPath === subPath) {
+      map.set(item.id, item)
+    }
+  }
+  return map
+}
+
 const getLocalSongIds = (username: string, subPath: string): Set<string> => {
   const items = fileCache.indexManager.getAll(username, 'music', CACHE_LOCATION)
   const ids = new Set<string>()
@@ -381,14 +435,25 @@ const sanitizeDirName = (name: string): string => {
 }
 
 // ─────────────────────────────────────────────
-// 全局运行锁（跨用户共用，防止并发同步）
+// 全局运行锁（跨用户共用，带租约与自愈机制，防止死锁与并发）
 // ─────────────────────────────────────────────
 let globalIsRunning = false
+let globalLockTime = 0
+const GLOBAL_LOCK_TIMEOUT_MS = 10 * 60 * 1000 // 10 分钟锁租约超时
+
+/**
+ * 刷新全局锁心跳
+ */
+export const touchGlobalLock = () => {
+  if (globalIsRunning) {
+    globalLockTime = Date.now()
+  }
+}
 
 /**
  * 对单个用户执行歌单同步下载
  */
-const syncUserPlaylists = async (username: string, signal?: AbortSignal) => {
+const syncUserPlaylists = async (username: string, signal?: AbortSignal, targetPlaylistId?: string) => {
   const progress = getProgress(username)
   if (progress.isRunning) {
     syncLog.info(`[SyncDownload] 用户 ${username} 当前正在同步中，跳过`)
@@ -396,7 +461,7 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal) => {
   }
 
   const syncData = getSyncDownloadData(username)
-  if (!syncData.enabled) return
+  if (!syncData.enabled && !targetPlaylistId) return
 
   const userSpace = getUserSpace(username)
   let listData: any
@@ -416,21 +481,23 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal) => {
   const cleaned = cleanupStalePlaylists(syncData, validListIds)
   if (cleaned) saveSyncDownloadData(username, syncData)
 
-  // 只同步开启了同步的歌单（且必须是网络歌单 sourceListId 才有意义，但本地歌单也支持）
+  // 只同步开启了同步的歌单（如果指定了 targetPlaylistId，则仅同步该歌单）
   const targetLists = listData.userList.filter((l: any) => {
+    if (targetPlaylistId) return l.id === targetPlaylistId
     const cfg = syncData.playlists[l.id]
     return cfg?.enabled === true
   })
 
   if (targetLists.length === 0) return
 
-  // 预扫描所有需下载和需删除的歌曲以准确计算总数
+  // 预扫描所有需下载和需删除的歌曲
   let overallTotal = 0
   const plans: Array<{
     list: any
     subPath: string
-    toDownload: any[]
+    remoteSongs: any[]
     toDelete: string[]
+    localSongsMap: Map<string, fileCache.CacheItem>
   }> = []
 
   for (const list of targetLists) {
@@ -441,21 +508,20 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal) => {
       const src = s.source || 'unknown'
       return id.includes('_') ? id : `${src}_${id}`
     }))
-    const localSongIds = getLocalSongIds(username, subPath)
-
-    const toDownload = remoteSongs.filter((s: any) => {
-      const id = fileCache.normalizeSongId(s)
-      return !localSongIds.has(id)
-    })
+    const localSongsMap = getLocalSongsMap(username, subPath)
+    const localSongIds = new Set<string>(localSongsMap.keys())
     const toDelete = Array.from(localSongIds).filter(id => !remoteSongIds.has(id))
-    overallTotal += toDownload.length
-    plans.push({ list, subPath, toDownload, toDelete })
+
+    overallTotal += remoteSongs.length
+    plans.push({ list, subPath, remoteSongs, toDelete, localSongsMap })
   }
 
   progress.isRunning = true
   progress.isPaused = false
   progress.startTime = Date.now()
   progress.successCount = 0
+  progress.addCount = 0
+  progress.deleteCount = 0
   progress.failCount = 0
   progress.totalSongs = overallTotal
   progress.overallCurrent = 0
@@ -465,80 +531,121 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal) => {
   progress.currentSongIndex = 0
   progress.currentListTotalSongs = 0
   progress.log = []
-  addLog(progress, `开始同步用户 ${username} 的 ${targetLists.length} 个歌单，总计需下载 ${overallTotal} 首歌曲`)
+  addLog(progress, `开始同步用户 ${username} 的 ${targetLists.length} 个歌单，总计需同步核对 ${overallTotal} 首歌曲 (目标音质: ${quality})`)
 
-  let totalSuccess = 0
-  let totalFail = 0
+  let totalAdded = 0
+  let totalDeleted = 0
+  let totalFailed = 0
 
-  for (const plan of plans) {
-    if (signal?.aborted) break
-    const { list, subPath, toDownload, toDelete } = plan
-    const listCfg = syncData.playlists[list.id] ?? {
-      enabled: true, lastSyncTime: null, failedSongs: []
-    }
-
-    progress.currentListId = list.id
-    progress.currentListName = list.name || list.id
-    progress.currentListTotalSongs = toDownload.length
-    progress.currentSongIndex = 0
-
-    // 删除已移出歌单的歌曲
-    for (const id of toDelete) {
+  try {
+    for (const plan of plans) {
       if (signal?.aborted) break
-      deleteLocalSong(username, id, subPath)
-      addLog(progress, `  已删除: ${id}`)
-    }
-
-    // 下载新增歌曲
-    listCfg.failedSongs = []
-    for (let i = 0; i < toDownload.length; i++) {
-      if (signal?.aborted) break
-      const song = toDownload[i]
-      progress.currentSongIndex = i + 1
-      progress.overallCurrent++
-      progress.currentSongName = `${song.name || song.id}${song.singer ? ' - ' + song.singer : ''}`
-
-      addLog(progress, `  [${i + 1}/${toDownload.length}] 下载: ${song.name} - ${song.singer}`)
-      const result = await downloadWithRetry(song, quality, username, subPath, 3, signal)
-
-      if (result.status === 'ok' || result.status === 'exists') {
-        progress.successCount++
-        totalSuccess++
-      } else {
-        progress.failCount++
-        totalFail++
-        const reason = result.reason || '未知错误'
-        listCfg.failedSongs.push({
-          id: fileCache.normalizeSongId(song),
-          name: song.name || '',
-          singer: song.singer || '',
-          reason,
-        })
+      const { list, subPath, remoteSongs, toDelete, localSongsMap } = plan
+      const listCfg = syncData.playlists[list.id] ?? {
+        enabled: true, lastSyncTime: null, failedSongs: []
       }
+
+      progress.currentListId = list.id
+      progress.currentListName = list.name || list.id
+      progress.currentListTotalSongs = remoteSongs.length
+      progress.currentSongIndex = 0
+
+      // 删除已移出歌单的歌曲
+      for (const id of toDelete) {
+        if (signal?.aborted) break
+        const deleted = deleteLocalSong(username, id, subPath)
+        if (deleted) {
+          totalDeleted++
+          progress.deleteCount++
+        }
+        addLog(progress, `  已删除: ${id}`)
+      }
+
+      // 同步处理歌单中全部歌曲（对比本地缓存或执行下载）
+      listCfg.failedSongs = []
+      for (let i = 0; i < remoteSongs.length; i++) {
+        if (signal?.aborted) break
+        const song = remoteSongs[i]
+        const songId = fileCache.normalizeSongId(song)
+        const oldExisting = localSongsMap.get(songId)
+
+        progress.currentSongIndex = i + 1
+        progress.overallCurrent++
+        progress.currentSongName = `${song.name || song.id}${song.singer ? ' - ' + song.singer : ''}`
+
+        const isUpgrade = oldExisting && oldExisting.quality !== quality
+        const needDownload = !oldExisting || isUpgrade
+
+        if (!needDownload) {
+          // 本地已有且音质相符，直接计入成功
+          progress.successCount++
+          continue
+        }
+
+        addLog(progress, `  [${i + 1}/${remoteSongs.length}] ${isUpgrade ? '更新音质' : '下载'}: ${song.name} - ${song.singer} (${quality})`)
+        const result = await downloadWithRetry(song, quality, username, subPath, 3, signal)
+
+        if (result.status === 'ok') {
+          // 如果是音质变更重新下载成功，清理旧音质文件
+          if (isUpgrade && oldExisting && oldExisting.filename) {
+            try {
+              fileCache.removeCacheFile(oldExisting.filename, username, 'music')
+            } catch { }
+          }
+          progress.successCount++
+          progress.addCount++
+          totalAdded++
+        } else if (result.status === 'exists') {
+          progress.successCount++
+        } else {
+          progress.failCount++
+          totalFailed++
+          const reason = result.reason || '未知错误'
+          const cover = song.img || song.pic || song.picUrl || song.meta?.picUrl || song.meta?.pic || song.meta?.albumPic || song.meta?.cover || song.album?.picUrl || song.album?.pic || song.album?.img || song.otherSource?.meta?.picUrl || ''
+          const interval = song.interval || song.meta?.interval || ''
+          const album = song.albumName || song.meta?.albumName || (typeof song.album === 'string' ? song.album : song.album?.name) || ''
+          listCfg.failedSongs.push({
+            id: fileCache.normalizeSongId(song),
+            name: song.name || '',
+            singer: song.singer || '',
+            reason,
+            source: song.source || '',
+            cover,
+            interval: typeof interval === 'number' ? `${Math.floor(interval / 60)}:${String(Math.floor(interval % 60)).padStart(2, '0')}` : String(interval || ''),
+            album,
+          })
+        }
+      }
+
+      listCfg.lastSyncTime = Date.now()
+      syncData.playlists[list.id] = listCfg
+      saveSyncDownloadData(username, syncData)
     }
 
-    listCfg.lastSyncTime = Date.now()
-    syncData.playlists[list.id] = listCfg
+    if (signal?.aborted) {
+      const resultMsg = `已暂停/终止同步: 增加 ${totalAdded} 首，减少 ${totalDeleted} 首，失败 ${totalFailed} 首`
+      addLog(progress, resultMsg)
+      syncData.lastSyncResult = resultMsg
+      saveSyncDownloadData(username, syncData)
+    } else {
+      const resultMsg = `同步完成: 增加 ${totalAdded} 首，减少 ${totalDeleted} 首，失败 ${totalFailed} 首`
+      addLog(progress, resultMsg)
+      syncData.lastSyncTime = Date.now()
+      syncData.lastSyncResult = resultMsg
+      saveSyncDownloadData(username, syncData)
+    }
+  } catch (err: any) {
+    const errorMsg = `同步过程异常终止: ${err?.message || err}`
+    addLog(progress, errorMsg)
+    syncData.lastSyncResult = errorMsg
     saveSyncDownloadData(username, syncData)
+    syncLog.error(`[SyncDownload] 用户 ${username} 同步执行出错:`, err)
+  } finally {
+    progress.isRunning = false
+    progress.startTime = null
+    progress.currentSongName = ''
+    syncLog.info(`[SyncDownload] 用户 ${username} ${syncData.lastSyncResult}`)
   }
-
-  if (signal?.aborted) {
-    const resultMsg = `已暂停/终止同步: 成功 ${totalSuccess} 首，失败 ${totalFail} 首`
-    addLog(progress, resultMsg)
-    syncData.lastSyncResult = resultMsg
-    saveSyncDownloadData(username, syncData)
-  } else {
-    const resultMsg = `同步完成: 成功 ${totalSuccess} 首，失败 ${totalFail} 首`
-    addLog(progress, resultMsg)
-    syncData.lastSyncTime = Date.now()
-    syncData.lastSyncResult = resultMsg
-    saveSyncDownloadData(username, syncData)
-  }
-
-  progress.isRunning = false
-  progress.startTime = null
-  progress.currentSongName = ''
-  syncLog.info(`[SyncDownload] 用户 ${username} ${syncData.lastSyncResult}`)
 }
 
 /**
@@ -547,16 +654,28 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal) => {
 export const syncDownloadForAllUsers = async (signal?: AbortSignal): Promise<{
   processedUsers: number
   totalSuccess: number
+  totalAdded: number
+  totalDeleted: number
   totalFail: number
 }> => {
+  const now = Date.now()
   if (globalIsRunning) {
-    syncLog.info('[SyncDownload] 全局同步任务正在运行中，跳过本次触发')
-    return { processedUsers: 0, totalSuccess: 0, totalFail: 0 }
+    if (globalLockTime && now - globalLockTime > GLOBAL_LOCK_TIMEOUT_MS) {
+      syncLog.warn(`[SyncDownload] 全局同步任务锁定超过 ${GLOBAL_LOCK_TIMEOUT_MS / 60000} 分钟未完成，疑似异常挂起，自动强制释放锁并重新执行`)
+      globalIsRunning = false
+    } else {
+      syncLog.info('[SyncDownload] 全局同步任务正在运行中，跳过本次触发')
+      return { processedUsers: 0, totalSuccess: 0, totalAdded: 0, totalDeleted: 0, totalFail: 0 }
+    }
   }
+
   globalIsRunning = true
+  globalLockTime = Date.now()
 
   let processedUsers = 0
   let totalSuccess = 0
+  let totalAdded = 0
+  let totalDeleted = 0
   let totalFail = 0
 
   try {
@@ -576,12 +695,17 @@ export const syncDownloadForAllUsers = async (signal?: AbortSignal): Promise<{
     for (const username of users) {
       if (signal?.aborted) break
       try {
+        touchGlobalLock()
         const before = getProgress(username)
         const successBefore = before.successCount
+        const addBefore = before.addCount
+        const deleteBefore = before.deleteCount
         const failBefore = before.failCount
         await syncUserPlaylists(username, signal)
         const after = getProgress(username)
         totalSuccess += after.successCount - successBefore
+        totalAdded += after.addCount - addBefore
+        totalDeleted += after.deleteCount - deleteBefore
         totalFail += after.failCount - failBefore
         processedUsers++
       } catch (e: any) {
@@ -590,15 +714,16 @@ export const syncDownloadForAllUsers = async (signal?: AbortSignal): Promise<{
     }
   } finally {
     globalIsRunning = false
+    globalLockTime = 0
   }
 
-  return { processedUsers, totalSuccess, totalFail }
+  return { processedUsers, totalSuccess, totalAdded, totalDeleted, totalFail }
 }
 
 /**
- * 手动触发单个用户的同步（前端调用）
+ * 手动触发单个用户的同步（前端调用，可传 playlistId 仅同步单歌单）
  */
-export const triggerUserSync = async (username: string): Promise<{ queued: boolean; message: string }> => {
+export const triggerUserSync = async (username: string, playlistId?: string): Promise<{ queued: boolean; message: string }> => {
   const progress = getProgress(username)
   if (progress.isRunning) {
     return { queued: false, message: '同步任务正在进行中，请稍候' }
@@ -606,10 +731,10 @@ export const triggerUserSync = async (username: string): Promise<{ queued: boole
   const controller = new AbortController()
   activeAbortControllers.set(username, controller)
   // 异步执行，不阻塞请求
-  void syncUserPlaylists(username, controller.signal).finally(() => {
+  void syncUserPlaylists(username, controller.signal, playlistId).finally(() => {
     activeAbortControllers.delete(username)
   })
-  return { queued: true, message: '同步任务已启动' }
+  return { queued: true, message: playlistId ? '歌单同步任务已启动' : '同步任务已启动' }
 }
 
 /**
@@ -630,7 +755,7 @@ export const createSyncDownloadTask = (): ScheduledTask => {
           taskId: 'sync_download_task',
           timestamp: startTime,
           success: true,
-          message: `已同步 ${result.processedUsers} 个用户, 成功下载/缓存 ${result.totalSuccess} 首, 失败 ${result.totalFail} 首`,
+          message: `已同步 ${result.processedUsers} 个用户: 增加 ${result.totalAdded} 首，减少 ${result.totalDeleted} 首，失败 ${result.totalFail} 首`,
           details: result
         }
       } catch (err: any) {
