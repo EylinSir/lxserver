@@ -379,9 +379,6 @@ if (envParams.PORT) {
   const port = parseInt(envParams.PORT, 10)
   if (!isNaN(port) && port > 0) global.lx.config.port = port
 }
-if (envParams.BIND_IP) {
-  global.lx.config.bindIP = envParams.BIND_IP
-}
 if (envParams.ENABLE_WEBPLAYER_AUTH !== undefined) {
   setBoolConfig('player.enableAuth', envParams.ENABLE_WEBPLAYER_AUTH)
 }
@@ -438,6 +435,10 @@ if (envParams.SUBSONIC_ENABLE !== undefined) {
 }
 if (envParams.SUBSONIC_PATH !== undefined) {
   global.lx.config['subsonic.path'] = envParams.SUBSONIC_PATH
+}
+if (envParams.SUBSONIC_PORT !== undefined) {
+  const port = parseInt(envParams.SUBSONIC_PORT, 10)
+  if (!isNaN(port) && port >= 0) global.lx.config['subsonic.port'] = port
 }
 if (envParams.SUBSONIC_ENABLE_DEBUG !== undefined) {
   setBoolConfig('subsonic.enableDebug', envParams.SUBSONIC_ENABLE_DEBUG)
@@ -805,7 +806,7 @@ cleanOldConfigBackups()
 const configBackupTimer = setInterval(cleanOldConfigBackups, 24 * 60 * 60 * 1000)
 if (typeof configBackupTimer.unref === 'function') configBackupTimer.unref()
 
-startServer(global.lx.config.port, global.lx.config.bindIP)
+startServer(global.lx.config.port, '0.0.0.0')
 
 // 监控配置文件变动以实现热重载 (由于 nodemon 已忽略该文件)
 const activeWatcherConfigPath = global.lx.configPath
