@@ -456,14 +456,9 @@ window.SongListManager = (function () {
             const isSelected = window.selectedItems.has(String(song.id));
             const isMatched = window.ListSearch.isMatched(index);
             const isCurrentMatch = window.ListSearch.isCurrentMatch(index);
-
             const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(song));
 
-            // Highlight Logic: 
-            // - Current Match: Strong border and subtle background
-            // - Matched: Subtle background
-            // - Selected: Theme background (will be defined in CSS)
-            let rowClass = 'grid grid-cols-12 gap-4 p-3 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer ';
+            let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 px-3 py-2.5 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer items-center border border-transparent ';
             if (isDisliked) rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
             if (isCurrentMatch) rowClass += 'search-current ';
             else if (isMatched) rowClass += 'search-match ';
@@ -476,13 +471,13 @@ window.SongListManager = (function () {
                     ${window.batchMode ? `
                         <input type="checkbox" 
                                class="batch-checkbox w-4 h-4 text-emerald-600 rounded" 
-                               data-song-id="${String(song.id)}"
+                               data-song-id="${String(song.id)}" 
                                ${isSelected ? 'checked' : ''}
                                onclick="event.stopPropagation(); handleBatchSelect('${String(song.id)}', this.checked);">
                     ` : index + 1}
                 </div>
                 <!-- Title & Info -->
-                <div class="col-span-9 sm:col-span-9 md:col-span-5 lg:col-span-4 flex items-center gap-3 min-w-0">
+                <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center gap-3 min-w-0 pr-2">
                     <div class="w-10 h-10 md:w-12 md:h-12 flex-shrink-0 relative rounded-lg overflow-hidden shadow-sm border t-border-main group-hover:shadow-md transition-all group-hover:scale-105 duration-300">
                         <img data-src="${window.getImgUrl ? window.getImgUrl(song) : (song.img || song.albumImg || '/music/assets/logo.svg')}" src="/music/assets/logo.svg"
                              class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder" 
@@ -505,38 +500,41 @@ window.SongListManager = (function () {
                     </div>
                 </div>
                 <!-- Artist -->
-                <div class="hidden md:flex md:col-span-3 items-center text-xs t-text-muted overflow-hidden">
+                <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center text-xs md:text-sm t-text-muted overflow-hidden min-w-0">
                     ${window.createMarqueeHtml ? window.createMarqueeHtml(song.singer) : `<span class="truncate">${song.singer}</span>`}
                 </div>
                 <!-- Album -->
-                <div class="hidden lg:flex lg:col-span-2 items-center text-xs t-text-muted truncate">
-                    ${song.albumName || '--'}
+                <div class="hidden lg:flex lg:col-span-2 items-center text-xs md:text-sm t-text-muted overflow-hidden min-w-0" title="${window.getSongAlbumName ? window.getSongAlbumName(song) : (song.albumName || (typeof song.album === 'string' ? song.album : (song.album?.name || '')))}">
+                    ${(() => {
+                        const alb = (window.getSongAlbumName ? window.getSongAlbumName(song) : (song.albumName || (typeof song.album === 'string' ? song.album : (song.album?.name || '')))) || '-';
+                        return window.createMarqueeHtml ? window.createMarqueeHtml(alb) : `<span class="truncate">${alb}</span>`;
+                    })()}
                 </div>
                 <!-- Duration -->
-                <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-end text-xs font-mono t-text-muted">
+                <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-xs md:text-sm font-mono t-text-muted min-w-0 text-center">
                     ${song.interval || '--:--'}
                 </div>
                 <!-- Actions -->
-                <div class="col-span-2 md:col-span-1 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors"
                             title="播放"
                             onclick="event.stopPropagation(); window.SongListManager.playSong(${index})">
-                        <i class="fas fa-play w-3.5 h-3.5"></i>
+                        <i class="fas fa-play w-3.5 h-3.5 flex items-center justify-center"></i>
                     </button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors"
                             title="下载"
                             onclick="event.stopPropagation(); downloadSong(${JSON.stringify(song).replace(/"/g, '&quot;')})">
-                        <i class="fas fa-download w-3.5 h-3.5"></i>
+                        <i class="fas fa-download w-3.5 h-3.5 flex items-center justify-center"></i>
                     </button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors"
                             title="添加到歌单"
                             onclick="event.stopPropagation(); window.SongListManager.addSongToPlaylist(${index})">
-                        <i class="fas fa-plus w-3.5 h-3.5"></i>
+                        <i class="fas fa-plus w-3.5 h-3.5 flex items-center justify-center"></i>
                     </button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-red-50 rounded-lg ${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? 'text-red-500' : 'text-gray-400'} transition-colors"
                             title="${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? '取消不喜欢' : '不喜欢'}"
                             onclick="event.stopPropagation(); window.SongListManager.dislikeSong(${index})">
-                        <i class="fas fa-thumbs-down w-3.5 h-3.5"></i>
+                        <i class="fas fa-thumbs-down w-3.5 h-3.5 flex items-center justify-center"></i>
                     </button>
                 </div>
             </div>
