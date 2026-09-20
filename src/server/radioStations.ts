@@ -37,7 +37,10 @@ function load(username: string): RadioStation[] {
       const raw = JSON.parse(fs.readFileSync(storeFile, 'utf-8'))
       stations = Array.isArray(raw?.stations) ? raw.stations : []
     }
-  } catch {
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') {
+      console.error(`[RadioStations] Failed to load/parse radioStations.json for ${username}:`, err)
+    }
     stations = []
   }
   userCaches.set(username, stations)
@@ -45,14 +48,10 @@ function load(username: string): RadioStation[] {
 }
 
 function persist(username: string): void {
-  try {
-    const storeFile = getUserStoreFile(username)
-    const dir = path.dirname(storeFile)
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(storeFile, JSON.stringify({ stations: userCaches.get(username) ?? [] }, null, 2), 'utf-8')
-  } catch (err) {
-    console.error(`[RadioStations] persist failed for user ${username}:`, err)
-  }
+  const storeFile = getUserStoreFile(username)
+  const dir = path.dirname(storeFile)
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(storeFile, JSON.stringify({ stations: userCaches.get(username) ?? [] }, null, 2), 'utf-8')
 }
 
 export function listRadioStations(username: string): RadioStation[] {

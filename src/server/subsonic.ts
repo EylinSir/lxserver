@@ -46,8 +46,11 @@ const musicSdk = musicSdkRaw as any
 // 1. 无需在内存或数据库额外存储，重启完全有效；
 // 2. 分用户独立隔离，不泄露用户长期密码；
 // 3. 极大缩短 streamUrl 长度，在客户端二级标题展示极为清爽。
+// 进程级随机密钥备选（当未设置 frontend.password 时使用，避免硬编码常数字符串）
+const processRandomSecret = crypto.randomBytes(32).toString('hex')
+
 function radioTicketSecret(): string {
-    return String((global.lx.config as any)?.['frontend.password'] || 'lxserver-radio-ticket')
+    return String((global.lx.config as any)?.['frontend.password'] || processRandomSecret)
 }
 
 function signRadioToken(id: string, user: string): string {
@@ -807,6 +810,7 @@ class SubsonicHandler {
                 case 'updateInternetRadioStation':
                     return this.handleUpdateInternetRadioStation(res, username, params, format)
 
+                case 'deleteInternetRadioStation':
                 case 'deleteInternetRadioStations':
                     return this.handleDeleteInternetRadioStations(res, username, params, format)
 
