@@ -6957,6 +6957,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.path'] !== undefined) {
                 global.lx.config['subsonic.path'] = newConfig['subsonic.path'].replace(/\/+$/, '') || '/rest'
               }
+              if (newConfig['subsonic.port'] !== undefined) {
+                const port = parseInt(newConfig['subsonic.port'], 10)
+                global.lx.config['subsonic.port'] = !isNaN(port) && port >= 0 ? port : 0
+              }
               if (newConfig['subsonic.enableDebug'] !== undefined) global.lx.config['subsonic.enableDebug'] = newConfig['subsonic.enableDebug']
               // [本地配置备份] configBackup 配置
               if (newConfig['configBackup.enable'] !== undefined) global.lx.config['configBackup.enable'] = !!newConfig['configBackup.enable']
@@ -7062,6 +7066,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 'player.path': global.lx.config['player.path'] ?? '/',
                 'subsonic.enable': global.lx.config['subsonic.enable'],
                 'subsonic.path': global.lx.config['subsonic.path'],
+                'subsonic.port': global.lx.config['subsonic.port'] ?? 0,
                 'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'],
                 'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'],
                 'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'],

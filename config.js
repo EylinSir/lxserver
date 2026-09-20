@@ -201,6 +201,10 @@ module.exports = {
   // 环境变量: SUBSONIC_PATH
   "subsonic.path": "/rest",
 
+  // Subsonic 独立监听端口 (0 为不启用独立端口，共用主服务端口；>0 时单独监听指定端口)
+  // 环境变量: SUBSONIC_PORT
+  "subsonic.port": 0,
+
   // 是否开启 Subsonic 调试日志模式 (默认关闭)
   // 环境变量: SUBSONIC_ENABLE_DEBUG
   "subsonic.enableDebug": false,

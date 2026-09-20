@@ -247,7 +247,6 @@ The configuration file is persisted by default in the data directory at `data/co
 | Env Variable | Config Key | Description | Default |
 | --- | --- | --- | --- |
 | `PORT` | `port` | Service port | `9527` |
-| `BIND_IP` | `bindIP` | Binding IP | `0.0.0.0` |
 | `ADMIN_PATH` | `admin.path` | Backend management interface path | `/admin` |
 | `PLAYER_PATH` | `player.path` | Web player access path (default empty, i.e., root `/`) | (empty) |
 | `SUBSONIC_ENABLE` | `subsonic.enable` | Enable Subsonic protocol support | `true` |
@@ -290,6 +289,9 @@ The configuration file is persisted by default in the data directory at `data/co
 | `LIST_ADD_MUSIC_LOCATION_TYPE` | `list.addMusicLocationType` | Position when adding songs to list (`top` / `bottom`) | `top` |
 | `PROXY_ALL_ENABLED` | `proxy.all.enabled` | Enable outgoing request proxy (for Music SDK) | `false` |
 | `PROXY_ALL_ADDRESS` | `proxy.all.address` | Proxy address (supports http:// or socks5://) | - |
+| `SUBSONIC_ENABLE` | `subsonic.enable` | Enable Subsonic API support | `true` |
+| `SUBSONIC_PATH` | `subsonic.path` | Subsonic API access path (default `/rest`) | `/rest` |
+| `SUBSONIC_PORT` | `subsonic.port` | Standalone port for Subsonic (`0` means disabled, shares main port) | `0` |
 | `SINGER_SOURCE_PRIORITY` | `singer.sourcePriority` | Singer info retrieval priority (e.g., `tx,wy` or `wy,tx`) | `tx,wy` |
 | `SUBSONIC_ENABLE_DEBUG` | `subsonic.enableDebug` | Enable Subsonic debug log mode | `false` |
 | `SUBSONIC_ONLINE_SEARCH` | `subsonic.onlineSearch` | Enable Subsonic online search | `true` |

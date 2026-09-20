@@ -436,6 +436,10 @@ if (envParams.SUBSONIC_ENABLE !== undefined) {
 if (envParams.SUBSONIC_PATH !== undefined) {
   global.lx.config['subsonic.path'] = envParams.SUBSONIC_PATH
 }
+if (envParams.SUBSONIC_PORT !== undefined) {
+  const port = parseInt(envParams.SUBSONIC_PORT, 10)
+  if (!isNaN(port) && port >= 0) global.lx.config['subsonic.port'] = port
+}
 if (envParams.SUBSONIC_ENABLE_DEBUG !== undefined) {
   setBoolConfig('subsonic.enableDebug', envParams.SUBSONIC_ENABLE_DEBUG)
 }
