@@ -535,6 +535,49 @@ if (envParams.SERVER_NAME) {
   global.lx.config.serverName = envParams.SERVER_NAME
 }
 
+// 代理地址合法性校验与清洗（支持 http:, https:, socks:, socks4:, socks5:）
+const sanitizeProxyAddress = (address: any, fieldName: string): string => {
+  if (!address || typeof address !== 'string') return ''
+  const trimmed = address.trim()
+  if (!trimmed) return ''
+  try {
+    const parsed = new URL(trimmed)
+    if (['http:', 'https:', 'socks:', 'socks4:', 'socks5:'].includes(parsed.protocol)) {
+      return trimmed
+    }
+    console.warn(`[Config] ${fieldName} 协议不受支持 ("${parsed.protocol}")，仅支持 http/https/socks5，已清空为默认直连`)
+    return ''
+  } catch {
+    console.warn(`[Config] ${fieldName} 填入非法代理地址 ("${trimmed}")，已清空为默认直连`)
+    return ''
+  }
+}
+
+// 启动阶段清洗各代理地址
+global.lx.config['proxy.all.address'] = sanitizeProxyAddress(global.lx.config['proxy.all.address'], 'proxy.all.address')
+;(['music', 'customSource', 'app'] as const).forEach(cat => {
+  const kAddress = `proxy.${cat}.address` as keyof LX.Config
+  const val = global.lx.config[kAddress]
+  if (val) {
+    (global.lx.config as any)[kAddress] = sanitizeProxyAddress(val, kAddress)
+  }
+})
+
+// Subsonic 路径冗余校正（确保以 / 开头，去除尾部多余斜杠）
+if (typeof global.lx.config['subsonic.path'] === 'string') {
+  let subPath = global.lx.config['subsonic.path'].trim()
+  if (!subPath.startsWith('/')) subPath = '/' + subPath
+  subPath = subPath.replace(/\/+$/, '') || '/rest'
+  global.lx.config['subsonic.path'] = subPath
+}
+
+// 缓存大小边界防护（避免 <= 0 的非法值）
+if (typeof global.lx.config['user.cacheSizeLimit'] === 'number') {
+  if (isNaN(global.lx.config['user.cacheSizeLimit']) || global.lx.config['user.cacheSizeLimit'] <= 0) {
+    global.lx.config['user.cacheSizeLimit'] = 2000
+  }
+}
+
 if (envUsers.length) {
   const users: LX.Config['users'] = []
   let u

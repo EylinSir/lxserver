@@ -248,9 +248,7 @@ The configuration file is persisted by default in the data directory at `data/co
 | --- | --- | --- | --- |
 | `PORT` | `port` | Service port | `9527` |
 | `ADMIN_PATH` | `admin.path` | Backend management interface path | `/admin` |
-| `PLAYER_PATH` | `player.path` | Web player access path (default empty, i.e., root `/`) | (empty) |
-| `SUBSONIC_ENABLE` | `subsonic.enable` | Enable Subsonic protocol support | `true` |
-| `SUBSONIC_PATH` | `subsonic.path` | Subsonic access path | `/rest` |
+| `PLAYER_PATH` | `player.path` | Web player access path (default root `/`) | `/` |
 | `FRONTEND_PASSWORD` | `frontend.password` | Web dashboard password | `123456` |
 | `SERVER_NAME` | `serverName` | Sync service name | `lxserver` |
 | `MAX_SNAPSHOT_NUM` | `maxSnapshotNum` | Max snapshots to keep | `10` |
@@ -279,6 +277,7 @@ The configuration file is persisted by default in the data directory at `data/co
 | `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `user.enablePublicNonAdminServerCache` | Enable non-admin server cache (allows non-admin/public accounts to cache songs on server) | `false` |
 | `ENABLE_PUBLIC_FAVORITES` | `user.enablePublicFavorites` | Enable public favorites and songs (allows guest/public to view and play public favorites) | `false` |
 | `ENABLE_PUBLIC_NON_ADMIN_ACCESS` | `user.enablePublicNonAdminAccess` | Enable non-admin access to public favorites & songs (allows non-admin public accounts to view) | `false` |
+| `ENABLE_CUSTOM_MUSIC_DIR` | `user.enableCustomMusicDir` | Enable custom music directories feature globally | `false` |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | Enable cache settings restriction for logged-in non-admin users | `false` |
 | `ENABLE_CACHE_SIZE_LIMIT` | `user.enableCacheSizeLimit` | Enable cache size limit (auto-cleanup via LRU) | `false` |
 | `CACHE_SIZE_LIMIT` | `user.cacheSizeLimit` | Cache size limit in MB | `2000` |
@@ -289,10 +288,10 @@ The configuration file is persisted by default in the data directory at `data/co
 | `LIST_ADD_MUSIC_LOCATION_TYPE` | `list.addMusicLocationType` | Position when adding songs to list (`top` / `bottom`) | `top` |
 | `PROXY_ALL_ENABLED` | `proxy.all.enabled` | Enable outgoing request proxy (for Music SDK) | `false` |
 | `PROXY_ALL_ADDRESS` | `proxy.all.address` | Proxy address (supports http:// or socks5://) | - |
+| `SINGER_SOURCE_PRIORITY` | `singer.sourcePriority` | Singer info retrieval priority (e.g., `tx,wy` or `wy,tx`) | `tx,wy` |
 | `SUBSONIC_ENABLE` | `subsonic.enable` | Enable Subsonic API support | `true` |
 | `SUBSONIC_PATH` | `subsonic.path` | Subsonic API access path (default `/rest`) | `/rest` |
 | `SUBSONIC_PORT` | `subsonic.port` | Standalone port for Subsonic (`0` means disabled, shares main port) | `0` |
-| `SINGER_SOURCE_PRIORITY` | `singer.sourcePriority` | Singer info retrieval priority (e.g., `tx,wy` or `wy,tx`) | `tx,wy` |
 | `SUBSONIC_ENABLE_DEBUG` | `subsonic.enableDebug` | Enable Subsonic debug log mode | `false` |
 | `SUBSONIC_ONLINE_SEARCH` | `subsonic.onlineSearch` | Enable Subsonic online search | `true` |
 | `SUBSONIC_ONLINE_SEARCH_MODE` | `subsonic.onlineSearchMode` | Subsonic online search mode (`fallback` / `merge` / `local_only`) | `fallback` |
@@ -302,6 +301,8 @@ The configuration file is persisted by default in the data directory at `data/co
 | `SUBSONIC_LYRIC_TRANSLATION` | `subsonic.lyricTranslation` | Include translations in Subsonic lyrics | `true` |
 | `SUBSONIC_CACHE_ON_PLAY` | `subsonic.cacheOnPlay` | Trigger server caching on Subsonic playback (cached to user dir) | `false` |
 | `SUBSONIC_PLAY_CACHE_FIRST` | `subsonic.playCacheFirst` | Prefer streaming local cached/downloaded files on Subsonic playback | `true` |
+| `SUBSONIC_QUALITY_ENABLED` | `subsonic.quality.enabled` | Enable Subsonic audio quality selection | `true` |
+| `SUBSONIC_QUALITY_PRIORITY` | `subsonic.quality.priority` | Subsonic audio quality priority order (e.g. `flac,320k,128k`) | `flac,320k,128k` |
 | `ARTIST_MAX_FETCH_PAGES` | `artist.maxFetchPages` | Maximum fetch pages for artist tracks | `20` |
 | `CACHE_NAMING_PATTERN` | `cache.namingPattern` | Cache file naming rule (`simple` / `custom`) | `simple` |
 | `SYSTEM_ALLOW_UNSAFE_VM` | `system.allowUnsafeVM` | Allow VM mode custom source scripts (note security risks) | `false` |

@@ -6893,8 +6893,21 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['sync.backupInterval'] !== undefined) global.lx.config['sync.backupInterval'] = parseInt(newConfig['sync.backupInterval']) || 24
               if (newConfig['webdav.excludeCache'] !== undefined) global.lx.config['webdav.excludeCache'] = !!newConfig['webdav.excludeCache']
               if (newConfig['webdav.excludeMusic'] !== undefined) global.lx.config['webdav.excludeMusic'] = !!newConfig['webdav.excludeMusic']
+              const validateAndCleanProxy = (addr: any) => {
+                if (!addr || typeof addr !== 'string') return ''
+                const trimmed = addr.trim()
+                if (!trimmed) return ''
+                try {
+                  const parsed = new URL(trimmed)
+                  if (['http:', 'https:', 'socks:', 'socks4:', 'socks5:'].includes(parsed.protocol)) return trimmed
+                  return ''
+                } catch {
+                  return ''
+                }
+              }
+
               if (newConfig['proxy.all.enabled'] !== undefined) global.lx.config['proxy.all.enabled'] = newConfig['proxy.all.enabled']
-              if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = newConfig['proxy.all.address']
+              if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = validateAndCleanProxy(newConfig['proxy.all.address'])
               // 细分代理：null 表示「沿用统一开关」(写回 undefined，序列化时省略)
               ;(['music', 'customSource', 'app'] as const).forEach(cat => {
                 const cfg: any = global.lx.config
@@ -6904,7 +6917,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   cfg[kEnabled] = newConfig[kEnabled] === null ? undefined : !!newConfig[kEnabled]
                 }
                 if (newConfig[kAddress] !== undefined) {
-                  cfg[kAddress] = newConfig[kAddress] === null ? '' : String(newConfig[kAddress] || '')
+                  cfg[kAddress] = newConfig[kAddress] === null ? '' : validateAndCleanProxy(newConfig[kAddress])
                 }
               })
 

@@ -236,7 +236,7 @@ npm start
 ### 3. 访问说明
 
 - **Web 播放器**: `http://your-ip:9527` (默认路径，可通过 `PLAYER_PATH` 修改)
-- **同步管理后台**: `http://your-ip:9527/music` (默认路径，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
+- **同步管理后台**: `http://your-ip:9527/admin` (默认路径，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
 
 ---
 
@@ -246,7 +246,7 @@ npm start
 
 - **Backend (Express + WebSocket)**: 核心同步逻辑与 WebDAV 备份。
 - **WebPlayer (Vanilla JS)**: 负责音乐播放业务，默认访问路径为根路径 `/`。
-- **Console (Vanilla JS)**: 位于 `/music` 路径，负责用户与数据管理。
+- **Console (Vanilla JS)**: 位于 `/admin` 路径，负责用户与数据管理。
 
 ---
 
@@ -259,9 +259,6 @@ npm start
 | `PORT`                                | `port`                             | 服务端口                                                           | `9527`           |
 | `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径                                              | `/admin`           |
 | `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为根路径 `/`)                             | `/`                |
-| `SUBSONIC_ENABLE`                     | `subsonic.enable`                  | 是否启用 Subsonic 协议支持 (服务默认开启)                          | `true`           |
-| `SUBSONIC_PATH`                       | `subsonic.path`                    | Subsonic 访问路径 (默认为 `/rest`)                               | `/rest`          |
-| `SUBSONIC_PORT`                       | `subsonic.port`                    | Subsonic 独立监听端口 (`0` 为关闭独立端口，与主服务共用端口)       | `0`              |
 | `FRONTEND_PASSWORD`                   | `frontend.password`                | Web 管理界面访问密码                                               | `123456`         |
 | `SERVER_NAME`                         | `serverName`                       | 同步服务名称                                                       | `lxserver`       |
 | `MAX_SNAPSHOT_NUM`                    | `maxSnapshotNum`                   | 保留的最大快照数量                                                 | `10`             |
@@ -290,6 +287,7 @@ npm start
 | `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `user.enablePublicNonAdminServerCache` | 是否开启非管理员服务器缓存 (允许未登录管理员的公开/普通账号将歌曲缓存到服务器) | `false` |
 | `ENABLE_PUBLIC_FAVORITES`             | `user.enablePublicFavorites`       | 是否开启公开收藏和歌曲 (开启后允许公开/未登录用户查看及播放公开收藏) | `false`          |
 | `ENABLE_PUBLIC_NON_ADMIN_ACCESS`      | `user.enablePublicNonAdminAccess`  | 是否开启非管理员访问公开收藏和歌曲 (允许未登录管理员的公开账号查看) | `false`          |
+| `ENABLE_CUSTOM_MUSIC_DIR`             | `user.enableCustomMusicDir`        | 是否开启自定义歌曲目录总开关                                       | `false`          |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | 是否启用登录用户缓存限制 (开启后限非管理员登录用户的缓存设置)      | `false`          |
 | `ENABLE_CACHE_SIZE_LIMIT`             | `user.enableCacheSizeLimit`        | 是否启用缓存空间限制 (开启后超出容量将按 LRU 自动清理)             | `false`          |
 | `CACHE_SIZE_LIMIT`                    | `user.cacheSizeLimit`              | 缓存空间限制大小 (单位: MB)                                        | `2000`           |
@@ -313,6 +311,8 @@ npm start
 | `SUBSONIC_LYRIC_TRANSLATION`          | `subsonic.lyricTranslation`        | Subsonic 歌词中是否包含翻译                                        | `true`           |
 | `SUBSONIC_CACHE_ON_PLAY`            | `subsonic.cacheOnPlay`             | Subsonic 播放时是否触发服务器自动缓存保存 (落盘到用户目录)          | `false`          |
 | `SUBSONIC_PLAY_CACHE_FIRST`          | `subsonic.playCacheFirst`          | Subsonic 播放时是否优先使用服务器已有的本地缓存/下载文件直接传输      | `true`           |
+| `SUBSONIC_QUALITY_ENABLED`            | `subsonic.quality.enabled`         | Subsonic 是否开启音质优选                                          | `true`           |
+| `SUBSONIC_QUALITY_PRIORITY`           | `subsonic.quality.priority`        | Subsonic 音质优选优先级列表 (如 `flac,320k,128k`)                  | `flac,320k,128k` |
 | `ARTIST_MAX_FETCH_PAGES`              | `artist.maxFetchPages`             | 歌手歌曲最大抓取页数                                               | `20`             |
 | `CACHE_NAMING_PATTERN`                | `cache.namingPattern`              | 缓存文件命名规则 (`simple` / `custom`)                            | `simple`         |
 | `SYSTEM_ALLOW_UNSAFE_VM`              | `system.allowUnsafeVM`             | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                  | `false`          |
