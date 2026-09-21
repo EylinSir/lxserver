@@ -590,6 +590,7 @@ window.LocalMusicManager = {
     },
 
     saveFilters() {
+        const locationEl = document.getElementById('lm-location-select');
         const filters = {
             searchKeyword: this.searchKeyword,
             filterFolder: this.filterFolder,
@@ -598,7 +599,9 @@ window.LocalMusicManager = {
             filterSource: Array.from(this.filterSource),
             sortBy: this.sortBy,
             sortOrder: this.sortOrder,
-            selectedSubPath: this.selectedSubPath
+            selectedSubPath: this.selectedSubPath,
+            // 持久化目录位置选择（root/data），默认 root
+            location: locationEl ? locationEl.value : 'root'
         };
         localStorage.setItem(this.cacheKey, JSON.stringify(filters));
     },
@@ -606,6 +609,8 @@ window.LocalMusicManager = {
     loadFilters() {
         try {
             const cached = localStorage.getItem(this.cacheKey);
+            // 恢复目录位置（root/data），默认 root
+            const locationEl = document.getElementById('lm-location-select');
             if (cached) {
                 const filters = JSON.parse(cached);
                 this.searchKeyword = filters.searchKeyword || '';
@@ -621,6 +626,15 @@ window.LocalMusicManager = {
                 this.sortBy = filters.sortBy || 'mtime';
                 this.sortOrder = filters.sortOrder || 'desc';
                 this.selectedSubPath = filters.selectedSubPath || '';
+
+                // 恢复目录位置（优先本地存储，默认 root）
+                if (locationEl) {
+                    locationEl.value = filters.location || 'root';
+                    this._syncSelectActive('lm-location-select');
+                    if (window.CustomSelectManager && typeof window.CustomSelectManager.syncUI === 'function') {
+                        window.CustomSelectManager.syncUI(locationEl);
+                    }
+                }
 
                 // Update UI elements
                 if (document.getElementById('lm-search-input')) this.setRichInputValue(document.getElementById('lm-search-input'), this.searchKeyword);
@@ -648,6 +662,12 @@ window.LocalMusicManager = {
                     if (this.selectedSubPath === '') displayText = '全部';
                     else if (this.selectedSubPath === '__ROOT__') displayText = '根目录';
                     subPathText.innerText = displayText;
+                }
+            } else {
+                // 没有本地缓存时，默认显示根目录
+                if (locationEl) {
+                    locationEl.value = 'root';
+                    this._syncSelectActive('lm-location-select');
                 }
             }
         } catch (e) {
@@ -777,6 +797,22 @@ window.LocalMusicManager = {
 
     async syncLocationSelector() {
         try {
+            // 本地 localStorage 是用户的明确选择，优先于后端全局配置
+            // 只有在没有本地存储记录时，才从后端同步
+            const cached = localStorage.getItem(this.cacheKey);
+            if (cached) {
+                const filters = JSON.parse(cached);
+                if (filters.location) {
+                    // 本地有存储的偏好，直接使用，不请求后端
+                    const el = document.getElementById('lm-location-select');
+                    if (el && el.value !== filters.location) {
+                        el.value = filters.location;
+                        this._syncSelectActive('lm-location-select');
+                    }
+                    return;
+                }
+            }
+            // 无本地记录时从后端读取（仅首次）
             const headers = window.getUserAuthHeaders ? window.getUserAuthHeaders() : {};
             if (this.isViewingPublicSongs) headers['x-user-name'] = '_open';
             const url = '/api/music/cache/directories' + (this.isViewingPublicSongs ? '?user=_open' : '');
@@ -787,6 +823,7 @@ window.LocalMusicManager = {
                     const el = document.getElementById('lm-location-select');
                     if (el && el.value !== result.data.location) {
                         el.value = result.data.location;
+                        this._syncSelectActive('lm-location-select');
                     }
                 }
             }
@@ -3541,7 +3578,7 @@ window.toggleLmBatchMode = () => {
 };
 
 // 当处于自定义目录模式时，将通用动作自动转发给 CustomDirManager
-['toggleBatchMode', 'selectAll', 'deselectAll', 'batchDelete', 'batchDownloadToDevice', 'batchAddToPlaylist', 'batchFetchLyrics', 'batchEmbedLyric', 'batchUpdateMetadata', 'applyFilters', 'refresh', 'resetFilters', 'clearFilters'].forEach(method => {
+['toggleBatchMode', 'selectAll', 'deselectAll', 'batchDelete', 'batchDownloadToDevice', 'batchAddToPlaylist', 'batchFetchLyrics', 'batchEmbedLyric', 'batchUpdateMetadata', 'applyFilters', 'refresh', 'resetFilters', 'clearFilters', 'toggleFilterTag'].forEach(method => {
     if (window.LocalMusicManager && typeof window.LocalMusicManager[method] === 'function') {
         const orig = window.LocalMusicManager[method];
         window.LocalMusicManager[method] = function(...args) {

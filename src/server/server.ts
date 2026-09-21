@@ -32,7 +32,7 @@ import * as serverDownloadQueue from './serverDownloadQueue'
 import * as remasterQueue from './remasterQueue'
 import * as scheduler from './scheduler'
 import { getUpdatedListIds, removeUpdatedListId } from './task/networkListTask'
-import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSyncProgress, triggerUserSync, cancelUserSync } from './task/syncDownloadTask'
+import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSyncProgress, triggerUserSync, cancelUserSync, getUserSyncStorageLocation, isUserSyncRunning, migrateSyncStorage } from './task/syncDownloadTask'
 import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import needle from 'needle'
@@ -1492,6 +1492,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               const user = global.lx.config.users[userIdx]
 
               const handleFinalUpdate = () => {
+                const oldEnabled = !!user.enableCustomMusicDir
+                const oldCustomDir = (user.customMusicDir || '').trim()
+
                 if (password) user.password = password
                 if (enableCustomMusicDir !== undefined) user.enableCustomMusicDir = !!enableCustomMusicDir
                 if (customMusicDir !== undefined) {
@@ -1517,6 +1520,28 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 if (allowWriteCustomMusicDir !== undefined) user.allowWriteCustomMusicDir = !!allowWriteCustomMusicDir
                 if (enableAutoDownload !== undefined) user.enableAutoDownload = !!enableAutoDownload
                 saveUsers()
+
+                // 检测是否需要自动迁移该用户的同步下载歌曲
+                try {
+                  const newEnabled = !!user.enableCustomMusicDir
+                  const newCustomDir = (user.customMusicDir || '').trim()
+                  const syncData = getSyncDownloadData(user.name)
+
+                  if (syncData.storageLocation === 'custom') {
+                    if (oldEnabled && !newEnabled) {
+                      // 关闭了自定义目录：自动将文件从旧自定义目录迁回根目录 (root)
+                      console.log(`[用户管理] 用户 ${user.name} 自定义目录已被禁用，正在将同步歌曲从 ${oldCustomDir} 迁回根目录...`)
+                      migrateSyncStorage(user.name, 'root', { overrideOldCustomDir: oldCustomDir })
+                    } else if (newEnabled && oldCustomDir && newCustomDir && oldCustomDir !== newCustomDir) {
+                      // 更改了自定义目录路径：自动将文件从旧自定义目录迁移到新自定义目录
+                      console.log(`[用户管理] 用户 ${user.name} 自定义目录路径发生变更 (${oldCustomDir} -> ${newCustomDir})，正在迁移同步歌曲...`)
+                      migrateSyncStorage(user.name, 'custom', { overrideOldCustomDir: oldCustomDir, overrideNewCustomDir: newCustomDir })
+                    }
+                  }
+                } catch (migErr: any) {
+                  console.error(`[用户管理] 用户 ${user.name} 自动迁移同步歌曲失败:`, migErr.message || migErr)
+                }
+
                 res.writeHead(200, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: true }))
               }
@@ -2678,12 +2703,22 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               syncConfig: syncData.playlists[l.id] ?? { enabled: false, lastSyncTime: null, failedSongs: [] },
             }
           })
+          const storageLocation = getUserSyncStorageLocation(username)
+          // 检查该用户是否启用了自定义音乐目录
+          const globalCustSwitch = !!global.lx.config['user.enableCustomMusicDir']
+          const userCustCfg = global.lx.config.users?.find((u: any) => u.name === username)
+          const hasCustomDir = globalCustSwitch && !!userCustCfg?.enableCustomMusicDir && !!userCustCfg?.customMusicDir
+          const availableLocations: string[] = ['root', 'data']
+          if (hasCustomDir) availableLocations.push('custom')
+
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({
             success: true,
             data: {
               autoUpdateNetworkList,
               nextSyncTime,
+              storageLocation,
+              availableLocations,
               syncDownload: {
                 enabled: syncData.enabled,
                 preferredQuality: syncData.preferredQuality || '320k',
@@ -2817,7 +2852,69 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         res.end(JSON.stringify({ success: true, data: getUserSyncProgress(username) }))
         return
       }
+
+      // POST /api/user/sync-download/migrate-storage  迁移存储位置
+      if (pathname === '/api/user/sync-download/migrate-storage' && req.method === 'POST') {
+        const reqUsername = req.headers['x-user-name'] as string
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
+        let username: string | null = null
+        if (isPublic) {
+          username = '_open'
+        } else {
+          username = verifyUserAuth(req)
+        }
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async body => {
+          try {
+            const { newLocation } = JSON.parse(body)
+            if (!['root', 'data', 'custom'].includes(newLocation)) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '无效的存储位置，仅支持 root / data / custom' }))
+              return
+            }
+            // 同步运行中不允许切换
+            if (isUserSyncRunning(username!)) {
+              res.writeHead(409, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '同步任务正在运行中，请先暂停同步再切换存储位置' }))
+              return
+            }
+            // 如果选择 custom，验证该用户有自定义目录配置
+            if (newLocation === 'custom') {
+              const globalCustSwitch = !!global.lx.config['user.enableCustomMusicDir']
+              const userCustCfg = global.lx.config.users?.find((u: any) => u.name === username)
+              const hasCustomDir = globalCustSwitch && !!userCustCfg?.enableCustomMusicDir && !!userCustCfg?.customMusicDir
+              if (!hasCustomDir) {
+                res.writeHead(400, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: '该用户未配置自定义音乐目录' }))
+                return
+              }
+            }
+
+            let migrateResult: { moved: number; skipped: number; errors: number; message: string }
+
+            // migrateSyncStorage 已支持全部三种方向（root↔data、root/data↔custom）
+            migrateResult = await migrateSyncStorage(username!, newLocation as 'root' | 'data' | 'custom')
+
+            // 保存新 storageLocation 到 data.json
+            const syncData = getSyncDownloadData(username!)
+            syncData.storageLocation = newLocation as 'root' | 'data' | 'custom'
+            saveSyncDownloadData(username!, syncData)
+
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, ...migrateResult }))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message }))
+          }
+        })
+        return
+      }
       // ─────────────────────────────────────────────────────────────────────
+
 
       // [新增] Get User Settings (User Auth)
       if (pathname === '/api/user/settings' && req.method === 'GET') {

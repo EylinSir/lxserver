@@ -13,6 +13,8 @@ window.CustomDirManager = {
     searchKeyword: '',
     quickSearchKeyword: '',
     filterQuality: new Set(),
+    filterSource: new Set(),
+    filterStatus: new Set(),
     sortBy: 'mtime',
     sortOrder: 'desc',
     isActive: false,
@@ -27,12 +29,54 @@ window.CustomDirManager = {
     pendingDirPaths: new Set(),
     cacheKey: 'lx_custom_dir_filters',
 
+    // 同步标签按钮的激活状态
+    _syncTagUI(containerId, filterSet) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        container.querySelectorAll('[data-filter-value]').forEach(btn => {
+            const val = btn.dataset.filterValue;
+            if (filterSet && filterSet.has(val)) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    },
+
+    // 切换某个筛选标签的选中状态
+    toggleFilterTag(filterKey, value) {
+        const setMap = {
+            quality: 'filterQuality',
+            source: 'filterSource',
+            status: 'filterStatus'
+        };
+        const tagContainerMap = {
+            quality: 'lm-quality-tags',
+            source: 'lm-source-tags',
+            status: 'lm-status-tags'
+        };
+        const prop = setMap[filterKey];
+        if (!prop) return;
+        if (!this[prop]) this[prop] = new Set();
+        const set = this[prop];
+        if (set.has(value)) {
+            set.delete(value);
+        } else {
+            set.add(value);
+        }
+        this._syncTagUI(tagContainerMap[filterKey], set);
+        this.applyFilters();
+    },
+
     // 保存筛选状态到 localStorage
     saveFilters() {
         try {
             const filters = {
                 searchKeyword: this.searchKeyword || '',
                 quickSearchKeyword: this.quickSearchKeyword || '',
+                filterQuality: Array.from(this.filterQuality || []),
+                filterSource: Array.from(this.filterSource || []),
+                filterStatus: Array.from(this.filterStatus || []),
                 sortBy: this.sortBy || 'mtime',
                 sortOrder: this.sortOrder || 'desc',
                 dirFilterAll: this.dirFilterAll !== false,
@@ -48,10 +92,19 @@ window.CustomDirManager = {
     loadFilters() {
         try {
             const raw = localStorage.getItem(this.cacheKey);
+            const toSet = (v) => {
+                if (!v || v === 'all') return new Set();
+                if (Array.isArray(v)) return new Set(v);
+                return new Set([v]);
+            };
+
             if (raw) {
                 const filters = JSON.parse(raw);
                 this.searchKeyword = filters.searchKeyword || '';
                 this.quickSearchKeyword = filters.quickSearchKeyword || '';
+                this.filterQuality = toSet(filters.filterQuality);
+                this.filterSource = toSet(filters.filterSource);
+                this.filterStatus = toSet(filters.filterStatus);
                 this.sortBy = filters.sortBy || 'mtime';
                 this.sortOrder = filters.sortOrder || 'desc';
                 this.dirFilterAll = filters.dirFilterAll !== false;
@@ -83,11 +136,76 @@ window.CustomDirManager = {
                 const sortOrder = document.getElementById('lm-sort-order');
                 if (sortOrder) sortOrder.value = this.sortOrder;
 
+                // 同步标签按钮 UI
+                this._syncTagUI('lm-quality-tags', this.filterQuality);
+                this._syncTagUI('lm-source-tags', this.filterSource);
+                this._syncTagUI('lm-status-tags', this.filterStatus);
+
                 this.updateDirFilterButtonText();
+            } else {
+                this.filterQuality = new Set();
+                this.filterSource = new Set();
+                this.filterStatus = new Set();
+                this._syncTagUI('lm-quality-tags', this.filterQuality);
+                this._syncTagUI('lm-source-tags', this.filterSource);
+                this._syncTagUI('lm-status-tags', this.filterStatus);
             }
         } catch (e) {
             console.warn('[CustomDir] Failed to load filters:', e);
         }
+    },
+
+    resetFilters(apply = true) {
+        this.searchKeyword = '';
+        this.quickSearchKeyword = '';
+        this.filterQuality = new Set();
+        this.filterSource = new Set();
+        this.filterStatus = new Set();
+        this.sortBy = 'mtime';
+        this.sortOrder = 'desc';
+        this.dirFilterAll = true;
+        this.selectedDirPaths = new Set();
+        this.pendingDirFilterAll = true;
+        this.pendingDirPaths = new Set();
+
+        const si = document.getElementById('lm-search-input');
+        if (si) {
+            if (window.LocalMusicManager && typeof window.LocalMusicManager.setRichInputValue === 'function') {
+                window.LocalMusicManager.setRichInputValue(si, '');
+                window.LocalMusicManager.updateSearchInputErrorState(si, '');
+            } else {
+                si.value = '';
+                si.innerText = '';
+            }
+        }
+        const qs = document.getElementById('lm-quick-search');
+        if (qs) {
+            if (window.LocalMusicManager && typeof window.LocalMusicManager.setRichInputValue === 'function') {
+                window.LocalMusicManager.setRichInputValue(qs, '');
+                window.LocalMusicManager.updateSearchInputErrorState(qs, '');
+            } else {
+                qs.value = '';
+                qs.innerText = '';
+            }
+        }
+        const sortBy = document.getElementById('lm-sort-by');
+        if (sortBy) sortBy.value = 'mtime';
+        const sortOrder = document.getElementById('lm-sort-order');
+        if (sortOrder) sortOrder.value = 'desc';
+
+        this._syncTagUI('lm-quality-tags', this.filterQuality);
+        this._syncTagUI('lm-source-tags', this.filterSource);
+        this._syncTagUI('lm-status-tags', this.filterStatus);
+
+        this.updateDirFilterButtonText();
+        localStorage.removeItem(this.cacheKey);
+        const activeDot = document.getElementById('lm-filter-active-dot');
+        if (activeDot) activeDot.classList.add('hidden');
+        if (apply) this.applyFilters();
+    },
+
+    clearFilters() {
+        this.resetFilters();
     },
 
     escapeHtml(value) {
@@ -132,7 +250,8 @@ window.CustomDirManager = {
 
         // 2. 隐藏/显示位置选框（根目录/数据目录）
         const locationSelect = document.getElementById('lm-location-select');
-        const locationContainer = locationSelect ? locationSelect.closest('.flex.items-center.gap-0\\.5') : null;
+        const locationContainer = document.getElementById('lm-location-container')
+            || (locationSelect ? locationSelect.closest('[id="lm-location-container"]') || locationSelect.parentElement : null);
         if (locationContainer) {
             if (this.isActive) {
                 locationContainer.classList.add('hidden');
@@ -212,9 +331,19 @@ window.CustomDirManager = {
             this.loadFilters();
             this.fetchData();
         } else {
-            if (window.LocalMusicManager && typeof window.LocalMusicManager.fetchData === 'function') {
-                window.LocalMusicManager.fetchData();
+            if (window.LocalMusicManager) {
+                if (typeof window.LocalMusicManager.loadFilters === 'function') {
+                    window.LocalMusicManager.loadFilters();
+                }
+                if (typeof window.LocalMusicManager.fetchData === 'function') {
+                    window.LocalMusicManager.fetchData();
+                }
             }
+        }
+
+        // 10. 更新同步下载按钮可见性（模式切换后需重新判断）
+        if (typeof window.updateSyncDownloadBtnVisibility === 'function') {
+            window.updateSyncDownloadBtnVisibility();
         }
     },
 
@@ -503,6 +632,41 @@ window.CustomDirManager = {
             });
         }
 
+        // 音质过滤（多选）
+        if (this.filterQuality && this.filterQuality.size > 0) {
+            current = current.filter(item => this.filterQuality.has(item.quality));
+        }
+
+        // 来源过滤（多选）
+        if (this.filterSource && this.filterSource.size > 0) {
+            current = current.filter(item => {
+                const displayedSource = item.downloadSource || item.source;
+                return this.filterSource.has(displayedSource);
+            });
+        }
+
+        // 状态过滤（多选：命中任一状态条件即保留）
+        if (this.filterStatus && this.filterStatus.size > 0) {
+            current = current.filter(item => {
+                const isUnindexed = item.source === 'unknown' || item.source === 'local' || (item.songmid && String(item.songmid).includes(' - '));
+                const isNoTag = (n) => !n || n === '未知歌曲' || n === '未知歌手' || n.toLowerCase() === 'unknown';
+                const missingID3 = isNoTag(item.name) || isNoTag(item.singer) || isUnindexed;
+                const missingCover = !item.hasCover;
+                const missingLyric = !item.hasLyric && !item.lyricFilename;
+                const missingEmbedLyric = !item.hasEmbedLyric;
+
+                const statusMap = {
+                    'unindexed': isUnindexed,
+                    'missing_id3': missingID3,
+                    'missing_cover': missingCover,
+                    'missing_lyric': missingLyric,
+                    'missing_lyric_file': missingLyric,
+                    'missing_embed_lyric': missingEmbedLyric,
+                };
+                return Array.from(this.filterStatus).some(s => statusMap[s]);
+            });
+        }
+
         // 目录层级过滤（dirFilterAll 为 true 时不限制；否则严格匹配选中的目录或其子目录）
         if (!this.dirFilterAll && this.selectedDirPaths && this.selectedDirPaths.size > 0) {
             current = current.filter(item => {
@@ -514,6 +678,21 @@ window.CustomDirManager = {
                 }
                 return false;
             });
+        }
+
+        // 更新筛选面板活跃小红点指示器
+        const hasActiveFilter = (this.searchKeyword && this.searchKeyword.length > 0)
+            || (this.filterQuality && this.filterQuality.size > 0)
+            || (this.filterSource && this.filterSource.size > 0)
+            || (this.filterStatus && this.filterStatus.size > 0)
+            || (!this.dirFilterAll && this.selectedDirPaths && this.selectedDirPaths.size > 0);
+        const activeDot = document.getElementById('lm-filter-active-dot');
+        if (activeDot) {
+            if (hasActiveFilter) {
+                activeDot.classList.remove('hidden');
+            } else {
+                activeDot.classList.add('hidden');
+            }
         }
 
         // 排序

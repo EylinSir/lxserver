@@ -53,14 +53,15 @@
   const getSourceBadge = (source, isNetwork) => {
     if (!isNetwork && !source) return ''
     const map = {
-      wy: { name: '网易云', class: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20' },
-      tx: { name: 'QQ音乐', class: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' },
-      kg: { name: '酷狗', class: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' },
-      kw: { name: '酷我', class: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
-      mg: { name: '咪咕', class: 'bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/20' }
+      wy: { name: '网易云', class: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30' },
+      tx: { name: 'QQ音乐', class: 'bg-green-500/15 text-green-600 dark:text-green-400 border-green-500/30' },
+      kg: { name: '酷狗', class: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30' },
+      kw: { name: '酷我', class: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30' },
+      mg: { name: '咪咕', class: 'bg-pink-500/15 text-pink-600 dark:text-pink-400 border-pink-500/30' },
+      bd: { name: '百度', class: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/30' }
     }
-    const conf = (source && map[source]) || { name: 'lxserver', class: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20' }
-    return `<span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-medium border ${conf.class}">${conf.name}</span>`
+    const conf = (source && map[source]) || { name: 'lxserver', class: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30' }
+    return `<span class="inline-flex items-center justify-center h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold border ${conf.class}">${conf.name}</span>`
   }
 
   // ─────────────────────────────────────────────
@@ -165,6 +166,70 @@
     } else if (lastResult) {
       lastResult.classList.add('hidden')
     }
+
+    // 存储位置 select 渲染
+    const storageSelect = $('sd-storage-select')
+    if (storageSelect) {
+      const avail = Array.isArray(data.availableLocations) ? data.availableLocations : ['root', 'data']
+      const locLabels = { root: '根目录 /music/', data: '数据目录 /data/music/', custom: '自定义目录' }
+      // 重新构建 options（保留 root / data，动态处理 custom）
+      const existingCustom = storageSelect.querySelector('option[value="custom"]')
+      if (avail.includes('custom') && !existingCustom) {
+        const opt = document.createElement('option')
+        opt.value = 'custom'
+        opt.textContent = locLabels.custom
+        storageSelect.appendChild(opt)
+      } else if (!avail.includes('custom') && existingCustom) {
+        existingCustom.remove()
+      }
+
+      let curLoc = data.storageLocation || 'data'
+
+      // ── 降级处理：后台撤销了 custom 权限但 data.json 里仍记录 'custom' ──
+      // 此时 avail 不包含 'custom'，需要自动回退到 'root' 并通知后端执行迁移/更新。
+      if (curLoc === 'custom' && !avail.includes('custom')) {
+        curLoc = 'root'
+        console.warn('[SyncDownload] 自定义目录权限已被后台撤销，存储位置自动降级为根目录。')
+        apiFetch('/api/user/sync-download/migrate-storage', {
+          method: 'POST',
+          body: JSON.stringify({ newLocation: 'root' }),
+        }).catch(e => console.warn('[SyncDownload] 自动降级存储位置失败:', e))
+      }
+
+      storageSelect.value = curLoc
+      // 运行状态由 updateProgressUI → setSettingsLocked 统一管理
+
+      // 同步全局状态（供 updateSyncDownloadBtnVisibility 使用）
+      window._sdStorageLocation = curLoc
+      if (typeof window.updateSyncDownloadBtnVisibility === 'function') {
+        window.updateSyncDownloadBtnVisibility()
+      }
+
+      // 更新 footer 目录显示
+      const dirDisplay = { root: 'music/用户/歌单名/', data: 'data/music/用户/歌单名/', custom: '自定义目录/歌单名/' }
+      const footerDir = $('sd-footer-dir')
+      if (footerDir) footerDir.textContent = dirDisplay[curLoc] || `${curLoc}/`
+    }
+  }
+
+  const buildStatusTagHtml = (cfg, isEnabled, failCount, isGlobalRunning, isRunningThisList) => {
+    if (isGlobalRunning && isEnabled) {
+      if (isRunningThisList) {
+        return `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 animate-pulse"><i class="fas fa-spinner fa-spin text-[8px]"></i>同步中</span>`
+      } else {
+        return `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30"><i class="far fa-clock text-[8px]"></i>等待同步</span>`
+      }
+    } else if (!isEnabled) {
+      return `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-medium bg-gray-500/15 text-gray-500 dark:text-gray-400 border border-gray-500/30">未开启同步</span>`
+    } else if (cfg.lastSyncTime) {
+      if (failCount === 0) {
+        return `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-green-500/15 text-green-600 dark:text-green-400 border border-green-500/30"><i class="fas fa-check-circle text-[8px]"></i>同步完成</span>`
+      } else {
+        return `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30"><i class="fas fa-exclamation-triangle text-[8px]"></i>部分失败</span>`
+      }
+    } else {
+      return `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30"><i class="far fa-clock text-[8px]"></i>等待同步</span>`
+    }
   }
 
   const renderPlaylists = (playlists) => {
@@ -188,38 +253,17 @@
       const successCount = Math.max(0, totalSongs - failCount)
 
       // 状态判断
-      let statusTagHtml = ''
-      let isWaiting = false
-      let isSyncing = false
-
-      if (isGlobalRunning && isEnabled) {
-        if (pl.id === currentRunningListId) {
-          isSyncing = true
-          statusTagHtml = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 animate-pulse"><i class="fas fa-spinner fa-spin text-[8px]"></i>同步中</span>`
-        } else {
-          isWaiting = true
-          statusTagHtml = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"><i class="far fa-clock text-[8px]"></i>等待同步</span>`
-        }
-      } else if (!isEnabled) {
-        statusTagHtml = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-gray-500/10 text-gray-500 dark:text-gray-400 border border-gray-500/20">未开启同步</span>`
-      } else if (cfg.lastSyncTime) {
-        if (failCount === 0) {
-          statusTagHtml = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"><i class="fas fa-check-circle text-[8px]"></i>同步完成</span>`
-        } else {
-          statusTagHtml = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"><i class="fas fa-exclamation-triangle text-[8px]"></i>部分失败</span>`
-        }
-      } else {
-        statusTagHtml = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">等待同步</span>`
-      }
+      const statusTagHtml = buildStatusTagHtml(cfg, isEnabled, failCount, isGlobalRunning, pl.id === currentRunningListId)
 
       // 歌曲数量/状态统计药丸（未在同步中时展示）
       let countTagHtml = ''
+      const isSyncing = isGlobalRunning && isEnabled && pl.id === currentRunningListId
       if (!isSyncing) {
         if (isEnabled && cfg.lastSyncTime) {
           if (failCount === 0) {
-            countTagHtml = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/60 shadow-xs"><i class="fas fa-check text-[7px]"></i>全部已同步 (${totalSongs})</span>`
+            countTagHtml = `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-green-500/15 text-green-600 dark:text-green-400 border border-green-500/30"><i class="fas fa-check text-[7px]"></i>全部已同步 (${totalSongs})</span>`
           } else {
-            countTagHtml = `<button type="button" onclick="window.SyncDownloadPanel.toggleCardFailedList('${_esc(pl.id)}')" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-red-100 hover:bg-red-200 dark:bg-red-950/60 dark:hover:bg-red-900/60 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800/60 transition-colors shadow-xs cursor-pointer"><i class="fas fa-exclamation-circle text-[8px]"></i>未全同步 (${failCount}首失败 / 共${totalSongs}首)<i class="fas fa-chevron-down text-[7px] ml-0.5 opacity-70"></i></button>`
+            countTagHtml = `<button type="button" onclick="window.SyncDownloadPanel.toggleCardFailedList('${_esc(pl.id)}')" class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-600 dark:text-red-400 border border-red-500/30 hover:border-red-500/50 transition-colors cursor-pointer"><i class="fas fa-exclamation-circle text-[8px]"></i>未全同步 (${failCount}首失败 / 共${totalSongs}首)<i class="fas fa-chevron-down text-[7px] ml-0.5 opacity-70"></i></button>`
           }
         }
       }
@@ -271,7 +315,7 @@
                          <div class="flex items-center gap-1.5 flex-wrap">
                            <span class="text-xs font-bold text-gray-800 dark:text-gray-100 truncate max-w-[180px] sm:max-w-[260px]" title="${_esc(s.name || s.id)}">${_esc(s.name || s.id)}</span>
                            ${sSrcBadge}
-                           <span class="inline-flex items-center px-1 py-0.2 rounded text-[8px] font-bold bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800/60">未下载</span>
+                           <span class="inline-flex items-center justify-center h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30">未下载</span>
                          </div>
                          <div class="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
                            <span class="truncate max-w-[140px] sm:max-w-[200px]" title="${_esc(s.singer || '未知歌手')}"><i class="fas fa-user text-[8px] mr-1 opacity-60"></i>${_esc(s.singer || '未知歌手')}</span>
@@ -305,7 +349,7 @@
                 <div class="flex items-center gap-1.5 flex-wrap">
                   <span class="text-xs font-bold text-gray-800 dark:text-gray-100 truncate max-w-[170px] sm:max-w-[240px]" title="${_esc(pl.name)}">${_esc(pl.name)}</span>
                   ${networkBadge}
-                  <span class="sd-status-tag">${statusTagHtml}</span>
+                  <span class="sd-status-tag inline-flex items-center">${statusTagHtml}</span>
                   ${countTagHtml}
                 </div>
                 <div class="flex items-center gap-2 mt-1 flex-wrap">
@@ -417,6 +461,37 @@
     } catch { }
   }
 
+  // ─────────────────────────────────────────────
+  // 同步运行时锁定 / 停止时解锁所有可配置控件
+  // ─────────────────────────────────────────────
+  const setSettingsLocked = (locked) => {
+    // 顶部三个主控件
+    const masterSw = $('sd-master-switch')
+    const qualitySel = $('sd-quality-select')
+    const storageSel = $('sd-storage-select')
+    if (masterSw)  masterSw.disabled  = locked
+    if (qualitySel) qualitySel.disabled = locked
+    if (storageSel) storageSel.disabled = locked
+
+    // 所有歌单的启用 toggle
+    document.querySelectorAll('.sd-playlist-toggle').forEach(chk => {
+      chk.disabled = locked
+    })
+
+    // 所有"重试同步"按钮：运行中统一隐藏，停止后由 renderPlaylists 按条件恢复
+    document.querySelectorAll('.sd-manual-sync-btn').forEach(btn => {
+      if (locked) btn.classList.add('hidden')
+      // unlock 时不做任何操作，由 renderPlaylists 重新渲染决定可见性
+    })
+
+    // 视觉提示：锁定时给顶部设置区域加半透明遮罩感
+    const settingsArea = $('sd-settings-area')
+    if (settingsArea) {
+      settingsArea.classList.toggle('opacity-50', locked)
+      settingsArea.classList.toggle('pointer-events-none', locked)
+    }
+  }
+
   const updateProgressUI = (progress) => {
     const progressArea = $('sd-progress-area')
     const triggerBtn = $('sd-trigger-btn')
@@ -443,6 +518,8 @@
         const liveBox = card.querySelector('.sd-playlist-live-box')
         if (liveBox) liveBox.classList.add('hidden')
       })
+      // 同步停止：解锁所有设置控件
+      setSettingsLocked(false)
       return
     }
 
@@ -457,6 +534,8 @@
       triggerBtn.disabled = true
       triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin text-[10px]"></i>同步中...'
     }
+    // 同步运行时锁定所有设置控件
+    setSettingsLocked(true)
 
     // 更新顶部总进度看板
     const listEl = $('sd-progress-list')
@@ -495,7 +574,7 @@
         // 当前正在同步的歌单
         card.classList.add('ring-1.5', 'ring-emerald-500', 'border-emerald-500', 'bg-emerald-50/60', 'dark:bg-emerald-950/30', 'shadow-md')
         if (statusTagContainer) {
-          statusTagContainer.innerHTML = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 animate-pulse"><i class="fas fa-spinner fa-spin text-[8px]"></i>同步中</span>`
+          statusTagContainer.innerHTML = `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 animate-pulse"><i class="fas fa-spinner fa-spin text-[8px]"></i>同步中</span>`
         }
         if (liveBox) {
           liveBox.classList.remove('hidden')
@@ -516,7 +595,7 @@
         card.classList.remove('ring-1.5', 'ring-emerald-500', 'border-emerald-500', 'bg-emerald-50/60', 'dark:bg-emerald-950/30', 'shadow-md')
         if (liveBox) liveBox.classList.add('hidden')
         if (statusTagContainer && isCardEnabled) {
-          statusTagContainer.innerHTML = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"><i class="far fa-clock text-[8px]"></i>等待同步</span>`
+          statusTagContainer.innerHTML = `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30"><i class="far fa-clock text-[8px]"></i>等待同步</span>`
         }
       }
     })
@@ -557,10 +636,22 @@
         method: 'PUT',
         body: JSON.stringify({ playlists: { [listId]: { enabled } } }),
       })
-      // 更新统计药丸
+      // 更新统计药丸与卡片自身状态 Tag
       if (_currentData?.playlists) {
         const item = _currentData.playlists.find(p => p.id === listId)
-        if (item && item.syncConfig) item.syncConfig.enabled = enabled
+        if (item) {
+          if (!item.syncConfig) item.syncConfig = {}
+          item.syncConfig.enabled = enabled
+          const card = document.querySelector(`.sd-playlist-card[data-playlist-id="${listId}"]`)
+          if (card) {
+            const statusTagContainer = card.querySelector('.sd-status-tag')
+            if (statusTagContainer) {
+              const isGlobalRunning = !!(_currentData?.progress?.isRunning)
+              const failCount = item.syncConfig.failedSongs?.length || 0
+              statusTagContainer.innerHTML = buildStatusTagHtml(item.syncConfig, enabled, failCount, isGlobalRunning, false)
+            }
+          }
+        }
         const countTag = $('sd-playlist-count-tag')
         if (countTag) {
           const enabledCount = _currentData.playlists.filter(p => p.syncConfig?.enabled).length
@@ -648,6 +739,134 @@
   }
 
   // ─────────────────────────────────────────────
+  // 存储位置切换（含迁移确认）
+  // ─────────────────────────────────────────────
+  const _locDirDisplay = {
+    root: 'music/用户/歌单名/',
+    data: 'data/music/用户/歌单名/',
+    custom: '自定义目录/歌单名/',
+  }
+
+  const onStorageLocationChange = (newLoc) => {
+    const currentLoc = window._sdStorageLocation || 'data'
+    if (newLoc === currentLoc) return
+
+    // 正在同步时不允许切换
+    if (_currentData?.progress?.isRunning) {
+      const sel = $('sd-storage-select')
+      if (sel) sel.value = currentLoc
+      alert('同步任务正在运行中，请先暂停同步后再切换存储位置。')
+      return
+    }
+
+    // 显示迁移确认对话框
+    const fromLabel = _locDirDisplay[currentLoc] || `${currentLoc}/`
+    const toLabel = _locDirDisplay[newLoc] || `${newLoc}/`
+    const fromEl = $('sd-migrate-from')
+    const toEl = $('sd-migrate-to')
+    const descEl = $('sd-migrate-desc')
+    const subtitleEl = $('sd-migrate-subtitle')
+    if (fromEl) fromEl.textContent = fromLabel
+    if (toEl) toEl.textContent = toLabel
+    if (subtitleEl) subtitleEl.textContent = `将同步歌曲从「${fromLabel}」迁移到「${toLabel}」`
+    if (descEl) {
+      if (newLoc === 'custom') {
+        descEl.textContent = '切换为自定义目录模式后，新同步的歌曲将存储在您的自定义目录中。现有已下载歌曲不会移动，需手动整理。'
+      } else {
+        descEl.textContent = `所有已同步的歌曲文件将被移动到新的存储目录（${toLabel}），music_index.json 索引也会同步更新。迁移过程中请勿关闭页面。`
+      }
+    }
+
+    // 暂存待迁移目标
+    window._sdPendingMigrateLocation = newLoc
+    window._sdPreviousLocation = currentLoc
+
+    const modal = $('sd-migrate-modal')
+    if (modal) {
+      modal.classList.remove('hidden')
+      document.body.style.overflow = 'hidden'
+    }
+  }
+
+  const cancelMigrate = () => {
+    // 恢复 select 到原来的值
+    const sel = $('sd-storage-select')
+    if (sel && window._sdPreviousLocation) sel.value = window._sdPreviousLocation
+    window._sdPendingMigrateLocation = null
+    window._sdPreviousLocation = null
+    const modal = $('sd-migrate-modal')
+    if (modal) {
+      modal.classList.add('hidden')
+      document.body.style.overflow = ''
+    }
+  }
+
+  const confirmMigrate = async () => {
+    const newLoc = window._sdPendingMigrateLocation
+    if (!newLoc) return
+    const btn = $('sd-migrate-confirm-btn')
+    if (btn) {
+      btn.disabled = true
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin text-[10px]"></i>迁移中...'
+    }
+    try {
+      const resp = await apiFetch('/api/user/sync-download/migrate-storage', {
+        method: 'POST',
+        body: JSON.stringify({ newLocation: newLoc }),
+      })
+      if (resp.success) {
+        // 更新全局 storageLocation 状态
+        window._sdStorageLocation = newLoc
+        window._sdPendingMigrateLocation = null
+        window._sdPreviousLocation = null
+
+        // 更新 footer 显示
+        const footerDir = $('sd-footer-dir')
+        if (footerDir) footerDir.textContent = _locDirDisplay[newLoc] || `${newLoc}/`
+
+        // 更新同步下载按钮可见性
+        if (typeof window.updateSyncDownloadBtnVisibility === 'function') {
+          window.updateSyncDownloadBtnVisibility()
+        }
+
+        // 关闭迁移对话框
+        const modal = $('sd-migrate-modal')
+        if (modal) {
+          modal.classList.add('hidden')
+          document.body.style.overflow = ''
+        }
+
+        // 刷新状态
+        await loadStatus()
+
+        // 文件已迁移到新目录，刷新本地歌单列表（custom/list + cache/list）
+        if (typeof window.LocalMusicManager?.refresh === 'function') {
+          window.LocalMusicManager.refresh()
+        }
+
+        if (resp.moved !== undefined) {
+          console.info(`[SyncDownload] 存储迁移完成: ${resp.message}`)
+        }
+      } else {
+        alert(`迁移失败: ${resp.message || '请重试'}`)
+        // 恢复 select
+        const sel = $('sd-storage-select')
+        if (sel && window._sdPreviousLocation) sel.value = window._sdPreviousLocation
+      }
+    } catch (e) {
+      console.warn('[SyncDownload] 存储迁移失败:', e)
+      alert(`迁移请求失败: ${e.message}`)
+      const sel = $('sd-storage-select')
+      if (sel && window._sdPreviousLocation) sel.value = window._sdPreviousLocation
+    } finally {
+      if (btn) {
+        btn.disabled = false
+        btn.innerHTML = '<i class="fas fa-exchange-alt text-[10px]"></i>确认迁移'
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────
   // 暴露公共接口
   // ─────────────────────────────────────────────
   window.SyncDownloadPanel = {
@@ -660,6 +879,9 @@
     cancelSync,
     toggleCardFailedList,
     triggerSinglePlaylistSync,
+    onStorageLocationChange,
+    cancelMigrate,
+    confirmMigrate,
   }
 
   // ─────────────────────────────────────────────
@@ -677,9 +899,43 @@
     setTimeout(mountToManager, 500)
   }
 
+  // ─────────────────────────────────────────────
+  // 预加载存储位置（页面初始化时立即获取，确保
+  // updateSyncDownloadBtnVisibility 在面板未打开时
+  // 也能拿到正确的 storageLocation，避免按钮显示
+  // 在错误的目录筛选条件下。
+  // ─────────────────────────────────────────────
+  const prefetchStorageLocation = async () => {
+    // 仅当尚未由 loadStatus() 赋值时才发起请求，避免重复
+    if (window._sdStorageLocation !== undefined) return
+    try {
+      const data = await apiFetch('/api/user/sync-download/status')
+      if (data && data.success && window._sdStorageLocation === undefined) {
+        const loc = data.storageLocation || 'data'
+        window._sdStorageLocation = loc
+        if (typeof window.updateSyncDownloadBtnVisibility === 'function') {
+          window.updateSyncDownloadBtnVisibility()
+        }
+      }
+    } catch (_) {
+      // 静默失败：fallback 仍为 'data'，不影响其他功能
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', prefetchStorageLocation)
+  } else {
+    prefetchStorageLocation()
+  }
+
   // ESC 关闭
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+      const migrateModal = $('sd-migrate-modal')
+      if (migrateModal && !migrateModal.classList.contains('hidden')) {
+        cancelMigrate()
+        return
+      }
       const modal = $('sync-download-modal')
       if (modal && !modal.classList.contains('hidden')) close()
     }

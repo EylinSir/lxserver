@@ -767,8 +767,8 @@
                                 <div class="config-field" id="proxy-customSource-address-field">
                                     <label class="config-label">代理地址</label>
                                     <div class="config-input-group">
-                                        <input type="text" name="proxy.customSource.address" class="form-input config-input"
-                                            placeholder="http://127.0.0.1:7890" />
+                                        <input type="text" name="proxy.customSource.address"
+                                            class="form-input config-input" placeholder="http://127.0.0.1:7890" />
                                         <button type="button" class="btn-secondary config-inline-btn test-proxy-btn-cat"
                                             data-target="proxy.customSource.address">测试</button>
                                     </div>
@@ -1351,7 +1351,8 @@
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
                                         <span class="config-toggle-label">启用 Subsonic 独立监听端口</span>
-                                        <span class="config-toggle-desc">与主端口同时生效。主端口用于网页端与管理后台，此端口仅暴露纯净 Subsonic API（严格鉴权且非 API 请求返回空 404），适合反代、公网穿透或防火墙单独放行</span>
+                                        <span class="config-toggle-desc">与主端口同时生效。主端口用于网页端与管理后台，此端口仅暴露纯净 Subsonic
+                                            API（严格鉴权且非 API 请求返回空 404），适合反代、公网穿透或防火墙单独放行</span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="subsonic-standalone-toggle" />
@@ -1364,8 +1365,10 @@
                                         <label class="config-label">Subsonic 独立监听端口</label>
                                         <input type="number" name="subsonic.port" class="form-input config-input"
                                             min="0" max="65535" placeholder="0-65535" />
-                                        <small class="config-hint">开启后两端口均可访问 Subsonic；此独立端口对爬虫与探测完全静默，关闭请设为 0 或关闭上方开关</small>
-                                        <small id="subsonic-port-error" class="config-hint" style="color: #ef4444; display: none; margin-top: 6px; font-weight: 500;">
+                                        <small class="config-hint">开启后两端口均可访问 Subsonic；此独立端口对爬虫与探测完全静默，关闭请设为 0
+                                            或关闭上方开关</small>
+                                        <small id="subsonic-port-error" class="config-hint"
+                                            style="color: #ef4444; display: none; margin-top: 6px; font-weight: 500;">
                                             ⚠️ 端口配置未成功（端口已被占用），请更换端口后保存并重启服务器。
                                         </small>
                                     </div>
@@ -2055,8 +2058,10 @@
                             <p class="text-secondary">集中管理系统配置文件历史备份与各用户歌单数据快照，保障数据安全与即时回滚。</p>
                         </div>
                         <div class="backup-segmented-tabs glass">
-                            <button type="button" class="backup-tab-btn active" id="tab-btn-config-backup" onclick="app.switchBackupTab('config')">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                            <button type="button" class="backup-tab-btn active" id="tab-btn-config-backup"
+                                onclick="app.switchBackupTab('config')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                    style="width:16px;height:16px;">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                                     <polyline points="14 2 14 8 20 8" />
                                     <line x1="16" y1="13" x2="8" y2="13" />
@@ -2066,10 +2071,13 @@
                                 <span>系统配置备份</span>
                                 <span class="backup-tab-dot" id="config-backup-status-dot" title="自动备份状态"></span>
                             </button>
-                            <button type="button" class="backup-tab-btn" id="tab-btn-snapshot-backup" onclick="app.switchBackupTab('snapshot')">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                            <button type="button" class="backup-tab-btn" id="tab-btn-snapshot-backup"
+                                onclick="app.switchBackupTab('snapshot')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                    style="width:16px;height:16px;">
                                     <path d="M12 2v20M2 12h20" />
-                                    <path d="M12 2a10 10 0 0 1 10 10 10 10 0 0 1-10 10 10 10 0 0 1-10-10 10 10 0 0 1 10-10z" />
+                                    <path
+                                        d="M12 2a10 10 0 0 1 10 10 10 10 0 0 1-10 10 10 10 0 0 1-10-10 10 10 0 0 1 10-10z" />
                                     <path d="M12 6v6l4 2" />
                                 </svg>
                                 <span>歌单快照</span>
@@ -2095,20 +2103,25 @@
                                 </div>
                                 <div class="config-backup-meta-item meta-item-path">
                                     <div class="meta-label">备份保存目录</div>
-                                    <div class="meta-value text-truncate" id="config-backup-dir-text" title="backups">backups</div>
+                                    <div class="meta-value text-truncate" id="config-backup-dir-text" title="backups">
+                                        backups</div>
                                 </div>
                             </div>
                             <div class="config-backup-actions-wrap">
-                                <button type="button" class="btn-primary" id="btn-backup-config-now" onclick="app.backupConfigNow()" style="white-space: nowrap;">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;">
+                                <button type="button" class="btn-primary" id="btn-backup-config-now"
+                                    onclick="app.backupConfigNow()" style="white-space: nowrap;">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                        style="width:15px;height:15px;">
                                         <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
                                         <polyline points="17 21 17 13 7 13 7 21" />
                                         <polyline points="7 3 7 8 15 8" />
                                     </svg>
                                     <span>立即备份配置</span>
                                 </button>
-                                <button type="button" class="btn-secondary" onclick="app.loadConfigBackups()" style="white-space: nowrap;">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;">
+                                <button type="button" class="btn-secondary" onclick="app.loadConfigBackups()"
+                                    style="white-space: nowrap;">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                        style="width:15px;height:15px;">
                                         <polyline points="23 4 23 10 17 10" />
                                         <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
                                     </svg>
@@ -2298,6 +2311,15 @@
                             class="btn-secondary config-inline-btn">检测</button>
                     </div>
                     <div id="user-custom-dir-status" style="font-size: 0.75rem; margin-top: 6px; min-height: 1.1em;">
+                    </div>
+                    <div
+                        style="margin-top: 10px; padding: 9px 12px; border-radius: 7px; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); font-size: 0.73rem; color: var(--text-secondary); line-height: 1.6;">
+                        <i class="fas fa-circle-info" style="color: #818cf8; margin-right: 5px;"></i>
+                        <b style="color: var(--text-primary);">目录用途：</b>用于挂载用户本地外部歌曲，同时也可作为「同步下载」功能的可选存储位置。<br>
+                        <i class="fas fa-triangle-exclamation"
+                            style="color: #f59e0b; margin-right: 5px; margin-top: 4px;"></i>
+                        <b
+                            style="color: var(--text-primary);">注意：</b>当前端同步下载面板已选择「自定义目录」作为同步存储时，若在此处<b>关闭「启用此用户自定义歌曲目录」开关</b>或<b>修改目录地址</b>，前端将在下次打开面板时自动检测到配置变更，并将已同步的歌曲迁移回<b>根目录或者新的自定义目录</b>。
                     </div>
                     <div class="config-toggle-row"
                         style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.1);">

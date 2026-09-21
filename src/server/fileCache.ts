@@ -472,7 +472,7 @@ export const normalizeSongId = (songInfo: any): string => {
 /**
  * Extract rich metadata from Lx songInfo object
  */
-const extractSongMetadata = (songInfo: any) => {
+export const extractSongMetadata = (songInfo: any) => {
     const meta = songInfo.meta || {}
     const id = normalizeSongId(songInfo)
     return {
@@ -580,7 +580,7 @@ export const detectDownloadSource = (rawUrl: string, fallbackSource?: string) =>
 }
 
 // Generate consistent filename based on pattern with collision handling
-const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: boolean, username?: string) => {
+export const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: boolean, username?: string) => {
     const sanitizeFilename = (str: any) => String(str || '').replace(/[\\/:*?"<>|]/g, '_')
 
     const id = normalizeSongId(songInfo)
@@ -730,7 +730,7 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
             const nameWithoutExt = path.basename(fileNameOnly, ext)
 
             if (!existing) {
-                // Not found by filename, try to parse from standard format
+                // 先尝试从标准防碰撞命名格式解析 (Name_-_Singer_-_Source_-_ID_-_Quality)
                 const segments = nameWithoutExt.split('_-_')
                 if (segments.length >= 5) {
                     songName = segments[0]
@@ -739,20 +739,9 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                     songId = segments[3]
                     quality = segments[4]
                 } else {
-                    // Try simple pattern: Name - Singer - Quality - Album
-                    const segmentsShort = nameWithoutExt.split(' - ')
-                    if (segmentsShort.length >= 2) {
-                        songName = segmentsShort[0]
-                        singer = segmentsShort[1]
-                        quality = segmentsShort[2] || 'unknown'
-                        album = segmentsShort.slice(3).join(' - ')
-                        songId = nameWithoutExt // Fallback ID for unknown files
-                    } else {
-                        // Fallback for completely unknown filenames (e.g. download_4.mp3)
-                        songId = nameWithoutExt
-                        source = 'local'
-                        quality = 'unknown'
-                    }
+                    // 非标准格式（如未关联本地文件 / 简单命名），默认先标记为 local
+                    source = 'local'
+                    songId = nameWithoutExt
                 }
             }
 
@@ -813,6 +802,12 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                         try {
                             tagger = new MusicTagger()
                             tagger.loadPath(filePath)
+                            // 若为 local 未关联文件，元数据优先校准歌名歌手
+                            if (existing.source === 'local' || !existing.source) {
+                                if (tagger.title) existing.name = tagger.title
+                                if (tagger.artist) existing.singer = tagger.artist
+                                if (tagger.album) existing.album = tagger.album
+                            }
                             const dur = tagger.duration
                             if (dur && !existing.interval) existing.interval = formatPlayTime(dur / 1000)
                             existing.bitrate = tagger.bitRate
@@ -856,9 +851,10 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                     try {
                         const tagger = new MusicTagger()
                         tagger.loadPath(filePath)
-                        if (tagger.title && (source === 'local' || !songName)) songName = tagger.title
-                        if (tagger.artist && (source === 'local' || !singer)) singer = tagger.artist
-                        if (tagger.album && (source === 'local' || !album)) album = tagger.album
+                        // ① 优先从 ID3 读取元数据
+                        if (tagger.title) songName = tagger.title
+                        if (tagger.artist) singer = tagger.artist
+                        if (tagger.album) album = tagger.album
                         if (hasValidEmbeddedCover(tagger.pictures)) hasCover = true
 
                         const dur = tagger.duration
@@ -878,6 +874,17 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                     } catch (e: any) {
                         metadataError = getMetadataUnsupportedMessage(audioContainer)
                     }
+
+                    // ② 若 ID3 元数据缺失，尝试从文件名解析兜底
+                    if (!songName || !singer) {
+                        const segmentsShort = nameWithoutExt.split(' - ')
+                        if (segmentsShort.length >= 2) {
+                            if (!songName) songName = segmentsShort[0]
+                            if (!singer) singer = segmentsShort[1]
+                            if (!album && segmentsShort.length > 3) album = segmentsShort.slice(3).join(' - ')
+                        }
+                    }
+
                     const hasExternalCover = !hasCover && hasCachedCover(file, normalizedUsername, stats)
                     if (hasExternalCover) hasCover = true
                     const coverType: CacheItem['coverType'] = hasCover && !hasExternalCover
@@ -1408,6 +1415,42 @@ export const getCacheCover = async (filename: string, username?: string) => {
 }
 
 /**
+ * 递归安全清理空文件夹（不会删除根目录 baseDir）
+ */
+export const cleanEmptyParentDirs = (filePath: string, baseDir: string) => {
+    try {
+        const resolvedBase = path.resolve(baseDir)
+        let currentDir = path.resolve(path.dirname(filePath))
+
+        while (currentDir !== resolvedBase && currentDir.startsWith(resolvedBase + path.sep)) {
+            if (fs.existsSync(currentDir)) {
+                const entries = fs.readdirSync(currentDir)
+                if (entries.length === 0) {
+                    try {
+                        fs.rmdirSync(currentDir)
+                        if (global.lx?.config?.['debug.enabled']) {
+                            console.log(`[文件缓存] [Debug] 已清理空歌单目录: ${currentDir}`)
+                        }
+                    } catch (rmErr) {
+                        break
+                    }
+                } else {
+                    // 当前目录非空，无需继续向上清理
+                    break
+                }
+            } else {
+                break
+            }
+            currentDir = path.dirname(currentDir)
+        }
+    } catch (e) {
+        if (global.lx?.config?.['debug.enabled']) {
+            console.warn(`[文件缓存] [Debug] 清理空目录失败:`, e)
+        }
+    }
+}
+
+/**
  * Remove a specific cache file
  */
 export const removeCacheFile = (filename: string, username?: string, requestedFolder?: CacheFolder): RemoveCacheFileResult => {
@@ -1455,6 +1498,9 @@ export const removeCacheFile = (filename: string, username?: string, requestedFo
             }
         }
     }
+
+    // 删除音频与歌词后，清理可能变空的父级歌单分类目录
+    cleanEmptyParentDirs(filePath, dir)
 
     const items = indexManager.getAll(normalizedUsername, folder)
     const item = items.find(i => i.filename === filename)
@@ -1861,8 +1907,15 @@ const ensureCachedLyrics = async (
     }
 }
 
+export interface DownloadProvenance {
+    requestedSource?: string
+    downloadSource?: string
+    sourceName?: string
+    customTargetDir?: string
+}
+
 export const downloadAndCache = async (songInfo: any, url: string, quality?: string, username?: string, signal?: AbortSignal, isOnlyDownload?: boolean, shouldCacheLyric: boolean = true, shouldEmbedLyric: boolean = true, provenance: DownloadProvenance = {}) => {
-    const dir = ensureDir(username, isOnlyDownload)
+    const dir = provenance.customTargetDir || ensureDir(username, isOnlyDownload)
     const baseName = getFileName(songInfo, quality, isOnlyDownload, username)
     const tempPath = path.join(dir, baseName + '.tmp')
     const songKey = normalizeSongId(songInfo) + '_' + (quality || 'unknown')
@@ -2764,6 +2817,10 @@ export const switchFolder = async (filenames: string[], username: string | undef
                 console.log(`[文件缓存][调试] 索引移除结果`, { filename, removed })
                 item.folder = targetFolder
                 indexManager.update(normalizedUsername, item, targetFolder)
+
+                // 清理源位置可能变空的歌单/分类目录
+                cleanEmptyParentDirs(sourcePath, sourceDir)
+
                 successCount++
             } else {
                 console.log(`[文件缓存][调试] 源文件不存在`, { filename, sourcePath })
@@ -2853,6 +2910,9 @@ export const switchBaseLocation = async (filenames: string[], username: string |
                 indexManager.remove(normalizedUsername, item.id, sourceFolder, item.quality, sourceLoc)
                 // item is now in the other location's index
                 indexManager.update(normalizedUsername, item, sourceFolder, targetLoc)
+
+                // 清理源位置可能变空的歌单/分类目录
+                cleanEmptyParentDirs(sourcePath, sourceDir)
 
                 successCount++
             } else {
@@ -2963,6 +3023,9 @@ export const categorizeFiles = async (filenames: string[], targetSubPath: string
                     const lrcExt = path.extname(item.lyricFilename) || '.lrc'
                     item.lyricFilename = newFilename.substring(0, newFilename.length - musicExt.length) + lrcExt
                 }
+
+                // 清理原分类目录如果已变空
+                cleanEmptyParentDirs(oldPath, root)
             } else {
                 failCount++
                 continue

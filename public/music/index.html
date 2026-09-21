@@ -1102,7 +1102,7 @@
                                     首</span>
                             </div>
                             <div class="flex items-center gap-1 md:gap-2 order-3 md:order-2">
-                                <div
+                                <div id="lm-location-container"
                                     class="flex items-center gap-0.5 md:gap-1 bg-gray-100/50 dark:bg-gray-700/30 p-0.5 rounded-lg border t-border-main scale-90 md:scale-100 origin-left">
                                     <select id="lm-location-select" onchange="window.LocalMusicManager.changeLocation()"
                                         class="lm-select !w-16 md:!w-20 !py-0.5 !text-[9px] md:!text-[10px] !px-1">
@@ -5658,7 +5658,7 @@
             </div>
 
             <!-- 总开关卡片 -->
-            <div class="p-4 rounded-2xl bg-gray-50/80 dark:bg-gray-800/60 border border-gray-200/60 dark:border-gray-700/60 shadow-xs">
+            <div id="sd-settings-area" class="p-4 rounded-2xl bg-gray-50/80 dark:bg-gray-800/60 border border-gray-200/60 dark:border-gray-700/60 shadow-xs transition-opacity duration-200">
                 <div class="flex items-center justify-between gap-3">
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
@@ -5697,7 +5697,27 @@
                     </div>
                 </div>
 
-                <!-- 时间与状态药丸 -->
+                <!-- 存储位置设置 -->
+                <div id="sd-storage-row" class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-1.5">
+                            <i class="fas fa-folder text-emerald-500 text-xs"></i>
+                            <span class="text-xs font-bold text-gray-800 dark:text-gray-100">存储位置</span>
+                        </div>
+                        <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">同步下载的歌曲将存储到此目录；更改后会自动迁移已下载的歌曲</p>
+                    </div>
+                    <div class="shrink-0">
+                        <select id="sd-storage-select"
+                            onchange="window.SyncDownloadPanel.onStorageLocationChange(this.value)"
+                            class="px-3 py-1.5 text-xs font-semibold rounded-xl bg-white dark:bg-gray-700/80 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-600 shadow-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/40 cursor-pointer">
+                            <option value="root">根目录 /music/</option>
+                            <option value="data" selected>数据目录 /data/music/</option>
+                            <!-- custom 选项由 JS 动态添加 -->
+                        </select>
+                    </div>
+                </div>
+
+
                 <div class="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
                     <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] bg-white dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/40 shadow-xs text-gray-600 dark:text-gray-300">
                         <i class="far fa-clock text-emerald-500 text-[10px]"></i>
@@ -5776,7 +5796,7 @@
             <div class="text-[10px] text-gray-500 dark:text-gray-400 truncate flex items-center gap-1">
                 <i class="fas fa-folder-open text-gray-400"></i>
                 <span>目录:</span>
-                <code class="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">data/music/用户/歌单名/</code>
+                <code id="sd-footer-dir" class="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">data/music/用户/歌单名/</code>
             </div>
             <div class="flex items-center gap-2 shrink-0">
                 <button id="sd-pause-btn" onclick="window.SyncDownloadPanel.cancelSync()"
@@ -5792,5 +5812,44 @@
     </div>
 </div>
 
-</html>
+<!-- 同步存储迁移确认 Modal -->
+<div id="sd-migrate-modal"
+    class="hidden fixed inset-0 z-[9500] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div class="w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 overflow-hidden">
+        <!-- Header -->
+        <div class="flex items-center gap-3 px-5 py-4 border-b border-gray-100 dark:border-gray-800/80">
+            <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center shadow-md shadow-amber-500/20 text-white shrink-0">
+                <i class="fas fa-exchange-alt text-base"></i>
+            </div>
+            <div>
+                <h3 class="text-sm font-bold text-gray-800 dark:text-gray-100">确认迁移存储位置</h3>
+                <p class="text-[11px] text-gray-500 dark:text-gray-400" id="sd-migrate-subtitle">将歌曲文件迁移到新位置</p>
+            </div>
+        </div>
+        <!-- Body -->
+        <div class="px-5 py-4 space-y-3">
+            <div class="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 flex items-start gap-2.5">
+                <i class="fas fa-exclamation-triangle text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                <p class="text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed" id="sd-migrate-desc">所有已同步的歌曲文件将被移动到新的存储目录，music_index.json 索引也会同步更新。迁移过程中请勿关闭页面。</p>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                <span class="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 font-mono text-[11px]" id="sd-migrate-from">data/music/</span>
+                <i class="fas fa-long-arrow-alt-right text-gray-400"></i>
+                <span class="px-2 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/50 font-mono text-[11px] text-emerald-700 dark:text-emerald-300" id="sd-migrate-to">music/</span>
+            </div>
+        </div>
+        <!-- Footer -->
+        <div class="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-100 dark:border-gray-800/80">
+            <button onclick="window.SyncDownloadPanel.cancelMigrate()"
+                class="px-4 py-2 text-xs font-semibold rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors">
+                取消
+            </button>
+            <button id="sd-migrate-confirm-btn" onclick="window.SyncDownloadPanel.confirmMigrate()"
+                class="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl bg-amber-500 hover:bg-amber-600 text-white transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                <i class="fas fa-exchange-alt text-[10px]"></i>确认迁移
+            </button>
+        </div>
+    </div>
+</div>
 
+</html>

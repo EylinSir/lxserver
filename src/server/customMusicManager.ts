@@ -307,21 +307,7 @@ export const syncCustomIndex = async (username: string) => {
 
         const nameWithoutExt = path.basename(filePath, ext)
 
-        if (nameWithoutExt.includes('_-_')) {
-            const segs = nameWithoutExt.split('_-_')
-            if (segs.length >= 4) {
-                songName = segs[0]
-                singer = segs[1]
-            }
-        } else if (nameWithoutExt.includes(' - ')) {
-            const segs = nameWithoutExt.split(' - ')
-            if (segs.length >= 2) {
-                songName = segs[0]
-                singer = segs[1]
-                album = segs.slice(3).join(' - ')
-            }
-        }
-
+        // ① 优先读取 ID3 元数据
         let tagger: any
         try {
             tagger = new MusicTagger()
@@ -345,6 +331,25 @@ export const syncCustomIndex = async (username: string) => {
             try { if (tagger) tagger.dispose() } catch (e) { }
         }
 
+        // ② 元数据缺失时，尝试从文件名解析歌名/歌手（作为兜底）
+        if (!songName || !singer) {
+            if (nameWithoutExt.includes('_-_')) {
+                const segs = nameWithoutExt.split('_-_')
+                if (segs.length >= 4) {
+                    if (!songName) songName = segs[0]
+                    if (!singer) singer = segs[1]
+                }
+            } else if (nameWithoutExt.includes(' - ')) {
+                const segs = nameWithoutExt.split(' - ')
+                if (segs.length >= 2) {
+                    if (!songName) songName = segs[0]
+                    if (!singer) singer = segs[1]
+                    if (!album && segs.length > 3) album = segs.slice(3).join(' - ')
+                }
+            }
+        }
+
+        // ③ 最终兜底：文件名本身 / 未知歌手
         if (!songName) songName = nameWithoutExt
         if (!singer) singer = '未知歌手'
 
@@ -527,6 +532,37 @@ export const removeCustomFile = (filename: string, username: string): boolean =>
             try { fs.unlinkSync(lrcPath) } catch (e) { }
         }
         customIndexManager.remove(username, filename)
+
+        // 安全清理变空的父级子目录
+        try {
+            const resolvedBase = path.resolve(customDir)
+            let currentDir = path.resolve(path.dirname(filePath))
+            while (currentDir !== resolvedBase && currentDir.startsWith(resolvedBase + path.sep)) {
+                if (fs.existsSync(currentDir)) {
+                    const entries = fs.readdirSync(currentDir)
+                    if (entries.length === 0) {
+                        try {
+                            fs.rmdirSync(currentDir)
+                            if (global.lx?.config?.['debug.enabled']) {
+                                console.log(`[自定义音乐] [Debug] 已清理空歌单目录: ${currentDir}`)
+                            }
+                        } catch {
+                            break
+                        }
+                    } else {
+                        break
+                    }
+                } else {
+                    break
+                }
+                currentDir = path.dirname(currentDir)
+            }
+        } catch (e) {
+            if (global.lx?.config?.['debug.enabled']) {
+                console.warn(`[自定义音乐] [Debug] 清理空目录失败:`, e)
+            }
+        }
+
         return true
     } catch (e) {
         console.error(`[自定义音乐] 删除文件 ${filename} 失败:`, e)

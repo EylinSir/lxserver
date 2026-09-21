@@ -1064,24 +1064,36 @@ window.checkAndUpdateCustomDirUI = checkAndUpdateCustomDirUI;
 
 /**
  * 更新"同步下载"按钮的显示状态
- * 条件：用户启用了自动下载功能 AND 当前位置为"数据目录(data)" AND 当前分类为"下载(download)"
- * 可在位置/分类变化时调用以刷新状态
+ * 场景1（自定义目录模式 ON）：只要拥有自动下载权限即显示
+ * 场景2（自定义目录模式 OFF）：分类为"下载(music)"时显示
+ * 可在位置/分类/模式变化时调用以刷新状态
  */
 function updateSyncDownloadBtnVisibility() {
     const btn = document.getElementById('lm-sync-download-btn');
     if (!btn) return;
 
-    const locationSelect = document.getElementById('lm-location-select');
-    const currentLocation = locationSelect ? locationSelect.value : '';
+    if (!window.userEnableAutoDownload) {
+        btn.classList.add('hidden');
+        return;
+    }
 
-    // filterFolder: 'music' 对应显示的"下载"筛选（HTML option value="music"）
+    // 判断是否处于自定义目录模式
+    const isCustomDirActive = !!(window.CustomDirManager && window.CustomDirManager.isActive);
+
+    if (isCustomDirActive) {
+        // 自定义目录模式：拥有自动下载权限即常驻显示
+        btn.classList.remove('hidden');
+        return;
+    }
+
+    // 普通模式：分类为"下载(music)"时显示
+    // 注意：SD 存储位置（storageLocation）与本地列表目录筛选（lm-location-select）
+    // 是两个独立设置，不要求匹配——用户可以在任意目录视图下点击同步下载入口
     const currentFolderFilter = (typeof window.LocalMusicManager !== 'undefined' && window.LocalMusicManager.filterFolder != null)
         ? window.LocalMusicManager.filterFolder
         : '';
 
-    const shouldShow = !!(window.userEnableAutoDownload)
-        && currentLocation === 'data'
-        && currentFolderFilter === 'music';
+    const shouldShow = currentFolderFilter === 'music';
 
     if (shouldShow) {
         btn.classList.remove('hidden');
