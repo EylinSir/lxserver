@@ -5390,7 +5390,24 @@
                     </div>
                     <div class="min-w-0">
                         <h3 class="text-base font-bold t-text-main">歌曲洗版</h3>
-<option value="flac">无损音质</option>
+                        <p id="lm-remaster-modal-subtitle" class="text-[11px] t-text-muted truncate">仅处理服务器下载目录，不处理缓存目录</p>
+                    </div>
+                </div>
+                <button onclick="LocalMusicManager.closeRemasterModal()"
+                    class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                    title="关闭">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="p-4 md:p-5 overflow-y-auto custom-scrollbar space-y-4">
+                <div class="flex flex-col md:flex-row md:items-end gap-3">
+                    <div class="flex-1">
+                        <label for="lm-remaster-quality" class="block text-xs font-bold t-text-main mb-2">目标音质</label>
+                        <select id="lm-remaster-quality" class="lm-select !w-full !py-2.5">
+                            <option value="128k">标准音质</option>
+                            <option value="320k">高音质</option>
+                            <option value="flac">无损音质</option>
                             <option value="flac24bit">24bit无损</option>
                             <option value="hires">高解析度</option>
                             <option value="atmos">空间音频</option>
