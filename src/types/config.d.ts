@@ -59,6 +59,11 @@ declare namespace LX {
     'serverName': string
 
     /**
+     * 是否启用 DEBUG 模式 (开发人员使用)
+     */
+    'debug.enabled'?: boolean
+
+    /**
      * 是否使用代理转发请求到本服务器
      */
     'proxy.enabled': boolean
@@ -206,6 +211,27 @@ declare namespace LX {
     'webdav.excludeMusic'?: boolean
 
     /**
+     * 是否启用本地配置备份（每日一份 config.js 副本，保留指定天数）
+     */
+    'configBackup.enable'?: boolean
+
+    /**
+     * 本地配置备份保留天数（默认 7）
+     */
+    'configBackup.retentionDays'?: number
+
+    /**
+     * 本地配置备份目录，留空则使用 <data>/backups；相对路径基于 data 目录，绝对路径直接使用
+     */
+    'configBackup.dir'?: string
+
+    /**
+     * 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot）。
+     * 相对路径基于 data 目录，绝对路径直接使用
+     */
+    'snapshot.backupPath'?: string
+
+    /**
      * 是否开启Web播放器访问密码
      */
     'player.enableAuth'?: boolean
@@ -229,6 +255,26 @@ declare namespace LX {
      * 代理地址 (支持 http:// 或 socks5://)
      */
     'proxy.all.address'?: string
+
+    /**
+     * 音乐平台(内置音源 SDK)请求是否单独走代理；undefined 表示沿用 proxy.all.*
+     */
+    'proxy.music.enabled'?: boolean
+
+    /** 音乐平台请求的代理地址 */
+    'proxy.music.address'?: string
+
+    /** 自定义音源脚本请求是否单独走代理；undefined 表示沿用 proxy.all.* */
+    'proxy.customSource.enabled'?: boolean
+
+    /** 自定义音源脚本请求的代理地址 */
+    'proxy.customSource.address'?: string
+
+    /** 应用自身功能(封面代理/识别/远程导入等)请求是否单独走代理；undefined 表示沿用 proxy.all.* */
+    'proxy.app.enabled'?: boolean
+
+    /** 应用自身功能请求的代理地址 */
+    'proxy.app.address'?: string
 
     /**
      * 是否禁用数据收集
@@ -256,6 +302,13 @@ declare namespace LX {
     'subsonic.path'?: string
 
     /**
+     * Subsonic 独立监听端口 (默认 0)
+     * 0 = 不启用独立端口, Subsonic 仍走主端口的 subsonic.path;
+     * >0 = 单独监听该端口, 仅暴露 Subsonic API 且只允许通过 Subsonic 鉴权(verifyAuth)的用户访问。
+     */
+    'subsonic.port'?: number
+
+    /**
      * 是否开启 Subsonic 调试日志模式 (默认 false)
      */
     'subsonic.enableDebug'?: boolean
@@ -279,6 +332,12 @@ declare namespace LX {
      * Subsonic 在线排行榜音源平台 (tx | wy | kg | kw | mg，默认 tx)
      */
     'subsonic.leaderboardSource'?: string
+
+    /** Subsonic 共享歌单内容模式 (leaderboard | playlist | both，默认 leaderboard) */
+    'subsonic.sharedListMode'?: string
+
+    /** Subsonic 共享歌单排序 (hot | new，默认 hot) */
+    'subsonic.sharedListSort'?: string
 
     /**
      * Subsonic 评分联动 dislike 的阈值 (默认 1)
@@ -373,6 +432,27 @@ declare namespace LX {
      * 开启后,若服务器该用户目录下已存在此歌曲的缓存或下载文件,直接传输本地流,避免向源站请求在线直链
      */
     'subsonic.playCacheFirst'?: boolean
+
+    /**
+     * Subsonic 服务端转码总开关 (默认 false)。开启后,当音源无客户端请求音质(及更低音质)时,
+     * 服务端拉取最高可用音质并经 ffmpeg 降码率后流式发给客户端,节省客户端流量(需服务端安装 ffmpeg)。
+     */
+    'subsonic.transcode.enabled'?: boolean
+
+    /**
+     * 仅当音源缺失对应低音质时才转码 (默认 true)。关闭则退回 302 直链原行为,永不转码。
+     */
+    'subsonic.transcode.onQualityMiss'?: boolean
+
+    /**
+     * 转码目标容器格式 (默认 'mp3'),可选 mp3 | opus | aac。
+     */
+    'subsonic.transcode.format'?: string
+
+    /**
+     * 转码并发上限 (默认 2),防止多客户端同时转码压垮服务器 CPU。
+     */
+    'subsonic.transcode.maxConcurrent'?: number
 
     /**
      * Subsonic 音质优选总开关 (默认 true)。关闭后 stream 仅做单次解析、不做优先级选择。

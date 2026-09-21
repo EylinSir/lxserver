@@ -45,6 +45,20 @@ window.goToPage = function (page) {
     if (typeof doSearch === 'function') doSearch(page);
 };
 
+function getSongAlbumName(song) {
+    if (!song) return '';
+    if (typeof song.albumName === 'string' && song.albumName.trim()) return song.albumName.trim();
+    if (typeof song.album === 'string' && song.album.trim()) return song.album.trim();
+    if (song.album && typeof song.album.name === 'string' && song.album.name.trim()) return song.album.name.trim();
+    if (song.meta) {
+        if (typeof song.meta.albumName === 'string' && song.meta.albumName.trim()) return song.meta.albumName.trim();
+        if (typeof song.meta.album === 'string' && song.meta.album.trim()) return song.meta.album.trim();
+        if (song.meta.album && typeof song.meta.album.name === 'string' && song.meta.album.name.trim()) return song.meta.album.name.trim();
+    }
+    return '';
+}
+window.getSongAlbumName = getSongAlbumName;
+
 function initGlobalListSearch() {
     if (window.ListSearch) {
         window.ListSearch.init('global', {
@@ -1050,24 +1064,36 @@ window.checkAndUpdateCustomDirUI = checkAndUpdateCustomDirUI;
 
 /**
  * 更新"同步下载"按钮的显示状态
- * 条件：用户启用了自动下载功能 AND 当前位置为"数据目录(data)" AND 当前分类为"下载(download)"
- * 可在位置/分类变化时调用以刷新状态
+ * 场景1（自定义目录模式 ON）：只要拥有自动下载权限即显示
+ * 场景2（自定义目录模式 OFF）：分类为"下载(music)"时显示
+ * 可在位置/分类/模式变化时调用以刷新状态
  */
 function updateSyncDownloadBtnVisibility() {
     const btn = document.getElementById('lm-sync-download-btn');
     if (!btn) return;
 
-    const locationSelect = document.getElementById('lm-location-select');
-    const currentLocation = locationSelect ? locationSelect.value : '';
+    if (!window.userEnableAutoDownload) {
+        btn.classList.add('hidden');
+        return;
+    }
 
-    // filterFolder: 'music' 对应显示的"下载"筛选（HTML option value="music"）
+    // 判断是否处于自定义目录模式
+    const isCustomDirActive = !!(window.CustomDirManager && window.CustomDirManager.isActive);
+
+    if (isCustomDirActive) {
+        // 自定义目录模式：拥有自动下载权限即常驻显示
+        btn.classList.remove('hidden');
+        return;
+    }
+
+    // 普通模式：分类为"下载(music)"时显示
+    // 注意：SD 存储位置（storageLocation）与本地列表目录筛选（lm-location-select）
+    // 是两个独立设置，不要求匹配——用户可以在任意目录视图下点击同步下载入口
     const currentFolderFilter = (typeof window.LocalMusicManager !== 'undefined' && window.LocalMusicManager.filterFolder != null)
         ? window.LocalMusicManager.filterFolder
         : '';
 
-    const shouldShow = !!(window.userEnableAutoDownload)
-        && currentLocation === 'data'
-        && currentFolderFilter === 'music';
+    const shouldShow = currentFolderFilter === 'music';
 
     if (shouldShow) {
         btn.classList.remove('hidden');
@@ -2920,8 +2946,8 @@ function renderArtistSongsUI(list, page) {
 
     let html = `
         <!-- 表头 -->
-        <div class="grid grid-cols-12 gap-2 md:gap-4 p-3 md:p-4 border-b t-border-main t-bg-main text-gray-500 text-sm font-medium sticky top-0 z-10 rounded-t-2xl overflow-hidden shadow-sm">
-            <div class="col-span-3 sm:col-span-1 text-center flex items-center justify-center gap-1 sm:gap-2">
+        <div class="grid grid-cols-12 gap-2 md:gap-4 px-5 py-3 border-b t-border-main t-bg-main text-gray-500 text-xs md:text-sm font-medium sticky top-0 z-10 rounded-t-2xl overflow-hidden shadow-sm items-center pr-6 flex-shrink-0">
+            <div class="col-span-1 text-center flex items-center justify-center gap-1 sm:gap-2">
                 <span>#</span>
                 <div class="flex items-center gap-1">
                     <button onclick="toggleBatchMode()"
@@ -2934,12 +2960,11 @@ function renderArtistSongsUI(list, page) {
                     </button>
                 </div>
             </div>
-            <div class="col-span-7 sm:col-span-7 md:col-span-6 lg:col-span-4">歌曲标题</div>
-            <div class="hidden sm:block sm:col-span-3 md:col-span-3 lg:col-span-3 text-right md:text-left">歌手</div>
-            <div class="hidden lg:block lg:col-span-2">专辑</div>
-            <div class="hidden md:block md:col-span-1 text-center md:text-left">时长</div>
-            <div class="hidden sm:block sm:col-span-1 text-right">操作</div>
-            <div class="col-span-2 sm:hidden text-right">操作</div>
+            <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0">歌曲标题</div>
+            <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center min-w-0">歌手</div>
+            <div class="hidden lg:flex lg:col-span-2 items-center min-w-0">专辑</div>
+            <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-center min-w-0">时长</div>
+            <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 text-right flex items-center justify-end min-w-0">操作</div>
         </div>
         
         <div class="space-y-1 mt-2">
@@ -2951,7 +2976,7 @@ function renderArtistSongsUI(list, page) {
 
         const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(item));
 
-        let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 p-3 rounded-xl hover:t-bg-panel transition-all group cursor-pointer border border-transparent ';
+        let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 px-3 py-2.5 rounded-xl hover:t-bg-panel transition-all group cursor-pointer border border-transparent items-center ';
         if (isDisliked && window.currentViewingListId !== 'dislike_songs') rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
         if (isCurrentMatch) rowClass += 'search-current ';
         else if (isMatched) rowClass += 'search-match ';
@@ -2971,7 +2996,7 @@ function renderArtistSongsUI(list, page) {
                     </div>
 
                     <!-- Title -->
-                    <div class="col-span-9 sm:col-span-7 md:col-span-6 lg:col-span-4 flex items-center gap-3 min-w-0">
+                    <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center gap-3 min-w-0 pr-2">
                         <div class="w-10 h-10 md:w-12 md:h-12 rounded-lg overflow-hidden flex-shrink-0 shadow-sm relative">
                             <img src="${item.img || '/music/assets/logo.svg'}" 
                                  onerror="this.src='/music/assets/logo.svg'" 
@@ -2990,35 +3015,35 @@ function renderArtistSongsUI(list, page) {
                     </div>
 
                     <!-- Artist -->
-                    <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-3 text-sm t-text-muted items-center truncate">
+                    <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 text-xs md:text-sm t-text-muted items-center truncate min-w-0">
                         ${item.singer}
                     </div>
 
                     <!-- Album -->
-                    <div class="hidden lg:flex lg:col-span-2 text-sm t-text-muted items-center truncate">
-                        ${item.albumName || '-'}
+                    <div class="hidden lg:flex lg:col-span-2 text-xs md:text-sm t-text-muted items-center truncate min-w-0" title="${getSongAlbumName(item)}">
+                        ${getSongAlbumName(item) || '-'}
                     </div>
 
                     <!-- Duration -->
-                    <div class="hidden md:flex md:col-span-1 items-center justify-center text-xs font-mono t-text-muted">
+                    <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-xs md:text-sm font-mono t-text-muted min-w-0 text-center">
                         ${item.interval || '--:--'}
                     </div>
 
                     <!-- Actions -->
-                    <div class="col-span-2 sm:col-span-1 flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                         <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors" title="播放" onclick="event.stopPropagation(); playFromView(${index})">
-                            <i class="fas fa-play w-3.5 h-3.5"></i>
+                            <i class="fas fa-play w-3.5 h-3.5 flex items-center justify-center"></i>
                         </button>
                         <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors" title="下载" onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                            <i class="fas fa-download w-3.5 h-3.5"></i>
+                            <i class="fas fa-download w-3.5 h-3.5 flex items-center justify-center"></i>
                         </button>
                         <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors" title="添加到歌单" onclick="event.stopPropagation(); openPlaylistAddModalForSong(${index})">
-                            <i class="fas fa-plus w-3.5 h-3.5"></i>
+                            <i class="fas fa-plus w-3.5 h-3.5 flex items-center justify-center"></i>
                         </button>
                         <button class="p-0.5 sm:p-1.5 hover:bg-red-50 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors"
                                 title="${(isDisliked) ? '取消不喜欢' : '不喜欢'}"
                                 onclick="event.stopPropagation(); toggleDislikeSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                            <i class="fas fa-thumbs-down w-3.5 h-3.5"></i>
+                            <i class="fas fa-thumbs-down w-3.5 h-3.5 flex items-center justify-center"></i>
                         </button>
                     </div>
                 </div>
@@ -3443,35 +3468,9 @@ function renderResults(list) {
     if (paginationBar) paginationBar.classList.remove('hidden');
     // 重置歌手详情分页（进入歌曲搜索视图时清空）
     window.artistSongsPage = 1;
-    const headerTitle = document.getElementById('header-title');
-    const headerAlbum = document.getElementById('header-album');
-
-    // Determine if we should show the album column
-    // Search results (network) show album, collections (local) do not
-    const showAlbum = currentSearchScope === 'network';
-
-
     // Update Header
     if (header) {
         header.classList.remove('hidden');
-    }
-    if (headerTitle) {
-        if (showAlbum) {
-            headerTitle.classList.remove('lg:col-span-6');
-            headerTitle.classList.add('lg:col-span-4');
-        } else {
-            headerTitle.classList.remove('lg:col-span-4');
-            headerTitle.classList.add('lg:col-span-6');
-        }
-    }
-    if (headerAlbum) {
-        if (showAlbum) {
-            headerAlbum.classList.add('hidden');
-            headerAlbum.classList.add('lg:block');
-        } else {
-            headerAlbum.classList.add('hidden');
-            headerAlbum.classList.remove('lg:block');
-        }
     }
 
     container.innerHTML = '';
@@ -3524,7 +3523,7 @@ function renderResults(list) {
 
         const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(item));
 
-        let rowClass = 'grid grid-cols-12 gap-4 p-3 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer ';
+        let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 px-3 py-2.5 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer items-center border border-transparent ';
         if (isDisliked && window.currentViewingListId !== 'dislike_songs') rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
         if (isCurrentMatch) rowClass += 'search-current ';
         else if (isMatched) rowClass += 'search-match ';
@@ -3547,9 +3546,6 @@ function renderResults(list) {
         // Image
         const imgUrl = getImgUrl(item);
 
-        // Grid Layout Adjustment
-        const titleLgSpan = showAlbum ? 'lg:col-span-4' : 'lg:col-span-6';
-
         row.innerHTML = `
             <!-- Index -->
             <div class="col-span-1 sm:col-span-1 text-center font-mono t-text-muted text-xs md:text-sm flex items-center justify-center">
@@ -3563,7 +3559,7 @@ function renderResults(list) {
             </div>
 
             <!-- Title (Image + Text) -->
-            <div class="col-span-9 sm:col-span-7 md:col-span-6 ${titleLgSpan} flex items-center overflow-hidden pr-2">
+            <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center overflow-hidden pr-2 min-w-0">
                 <div class="relative w-10 h-10 md:w-12 md:h-12 mr-3 md:mr-4 flex-shrink-0 group cursor-pointer">
                      <img data-src="${imgUrl}" src="/music/assets/logo.svg" 
                           loading="lazy" fetchpriority="low"
@@ -3589,49 +3585,47 @@ function renderResults(list) {
             </div>
 
             <!-- Artist (Hidden on Mobile) -->
-            <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-3 t-text-muted text-sm md:text-base items-center hover:text-emerald-600 transition-colors cursor-pointer overflow-hidden"
+            <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 t-text-muted text-xs md:text-sm items-center hover:text-emerald-600 transition-colors cursor-pointer overflow-hidden min-w-0"
                  title="${item.singer}"
                  onclick="event.stopPropagation(); document.getElementById('search-input').value = '${item.singer.replace(/'/g, "\\'")}'; doSearch();">
                 ${createMarqueeHtml(item.singer)}
             </div>
 
             <!-- Album (Hidden until LG) -->
-            ${showAlbum ? `
-            <div class="hidden lg:block lg:col-span-2 t-text-muted text-sm truncate flex items-center" title="${item.albumName || ''}">
-                ${item.albumName || '-'}
+            <div class="hidden lg:flex lg:col-span-2 t-text-muted text-xs md:text-sm items-center overflow-hidden min-w-0" title="${getSongAlbumName(item)}">
+                ${createMarqueeHtml ? createMarqueeHtml(getSongAlbumName(item) || '-') : `<span class="truncate">${getSongAlbumName(item) || '-'}</span>`}
             </div>
-            ` : ''}
 
             <!-- Duration (Hidden until MD) -->
-            <div class="hidden md:block md:col-span-1 t-text-muted text-sm font-mono text-center flex items-center justify-center">
+            <div class="hidden md:flex md:col-span-2 lg:col-span-1 t-text-muted text-xs md:text-sm font-mono items-center justify-center min-w-0 text-center">
                 ${item.interval || '--:--'}
             </div>
 
             <!-- Actions -->
-            <div class="col-span-2 sm:col-span-1 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                 <button class="p-1 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors" 
                         title="播放" 
                         onclick="event.stopPropagation(); playFromView(${actualIndexInOriginal})">
-                    <i class="fas fa-play w-3 h-3 sm:w-4 sm:h-4"></i>
+                    <i class="fas fa-play w-3.5 h-3.5 flex items-center justify-center"></i>
                 </button>
                 <button class="p-1 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors" 
                         title="下载" 
                         onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                    <i class="fas fa-download w-3 h-3 sm:w-4 sm:h-4"></i>
+                    <i class="fas fa-download w-3.5 h-3.5 flex items-center justify-center"></i>
                 </button>
                 <button class="add-to-playlist-btn p-1 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors"
                         title="添加到歌单">
-                    <i class="fas fa-plus w-3 h-3 sm:w-4 sm:h-4"></i>
+                    <i class="fas fa-plus w-3.5 h-3.5 flex items-center justify-center"></i>
                 </button>
                 <button class="p-1 sm:p-1.5 hover:bg-red-50 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors"
                         title="${(isDisliked) ? '取消不喜欢' : '不喜欢'}"
                         onclick="event.stopPropagation(); toggleDislikeSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                    <i class="fas fa-thumbs-down w-3 h-3 sm:w-4 sm:h-4"></i>
+                    <i class="fas fa-thumbs-down w-3.5 h-3.5 flex items-center justify-center"></i>
                 </button>
                 ${currentSearchScope !== 'network' && window.currentViewingListId !== 'dislike_songs' ? `
                 <button class="delete-song-btn p-1 sm:p-1.5 hover:bg-red-50 rounded-lg text-red-600 transition-colors"
                         title="删除">
-                    <i class="fas fa-trash w-3 h-3 sm:w-4 sm:h-4"></i>
+                    <i class="fas fa-trash w-3.5 h-3.5 flex items-center justify-center"></i>
                 </button>
                 ` : ''}
             </div>
@@ -12423,13 +12417,32 @@ async function renderCustomSources() {
             /* Status Badge Logic */
             let statusBadge = '';
             let errorMsg = '';
+            let updateAlertBanner = '';
+
+            if (source.updateAlert && (source.updateAlert.log || source.updateAlert.updateUrl)) {
+                const alertLog = source.updateAlert.log || '发现新版本，建议及时更新';
+                const alertUrl = source.updateAlert.updateUrl || '';
+                const clickAttr = alertUrl ? `onclick="window.open('${alertUrl}', '_blank')" role="button" tabindex="0"` : '';
+                const cursorStyle = alertUrl ? 'cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/40 hover:border-amber-300 transition-all active:scale-[0.99]' : '';
+                const linkIcon = alertUrl ? `<i class="fas fa-external-link-alt ml-1 text-[8px] opacity-70 shrink-0"></i>` : '';
+                updateAlertBanner = `
+                <div ${clickAttr} class="mt-1.5 p-1.5 md:p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 text-amber-700 dark:text-amber-300 text-[10px] md:text-[11px] flex items-center justify-between gap-1.5 ${cursorStyle}" title="${alertUrl ? '点击前往下载更新: ' + alertUrl : ''}">
+                    <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                        <i class="fas fa-bell text-amber-500 shrink-0"></i>
+                        ${createMarqueeHtml(alertLog, "font-medium text-[10px] md:text-[11px]")}
+                    </div>
+                    ${alertUrl ? `<span class="inline-flex items-center text-[9px] md:text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-bold shrink-0 whitespace-nowrap ml-1">更新${linkIcon}</span>` : ''}
+                </div>`;
+            }
 
             if (source.enabled) {
                 if (source.status === 'success') {
                     statusBadge = `<span class="text-[9px] md:text-[10px] bg-emerald-50 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/30 px-1.5 py-0.5 rounded-full border border-emerald-100 flex items-center gap-1 transition-colors whitespace-nowrap"><i class="fas fa-check-circle"></i>正常</span>`;
                 } else if (source.status === 'failed') {
                     statusBadge = `<span class="text-[9px] md:text-[10px] bg-red-50 text-red-600 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30 px-1.5 py-0.5 rounded-full border border-red-100 flex items-center gap-1 cursor-help transition-colors whitespace-nowrap" title="${source.error || '加载失败'}"><i class="fas fa-times-circle"></i>失败</span>`;
-                    errorMsg = `<div class="text-[9px] md:text-[10px] text-red-500 dark:text-red-400 mt-1 flex items-start gap-1 p-1.5 bg-red-50 dark:bg-red-900/20 rounded transition-colors"><i class="fas fa-info-circle mt-0.5 flex-shrink-0"></i><span class="break-all">${source.error || '未知错误'}</span></div>`;
+                    if (!source.updateAlert) {
+                        errorMsg = `<div class="text-[9px] md:text-[10px] text-red-500 dark:text-red-400 mt-1 flex items-start gap-1 p-1.5 bg-red-50 dark:bg-red-900/20 rounded transition-colors"><i class="fas fa-info-circle mt-0.5 flex-shrink-0"></i><span class="break-all">${source.error || '未知错误'}</span></div>`;
+                    }
                 } else {
                     statusBadge = `<span class="text-[9px] md:text-[10px] bg-blue-50 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/30 px-1.5 py-0.5 rounded-full border border-blue-100 flex items-center gap-1 transition-colors whitespace-nowrap"><i class="fas fa-circle-notch fa-spin"></i>加载...</span>`;
                 }
@@ -12465,6 +12478,7 @@ async function renderCustomSources() {
                         <span class="t-bg-main t-text-muted px-1.5 py-0.5 rounded-lg shrink-0 transition-colors font-mono pointer-events-none border t-border-main text-[9px] md:text-[10px] whitespace-nowrap">${source.version ? (/^v/i.test(source.version) ? source.version : 'v' + source.version) : '未知'}</span>
                         ${statusBadge}
                     </div>
+                    ${updateAlertBanner}
                     ${supportedBadges}
                 </div>
                 

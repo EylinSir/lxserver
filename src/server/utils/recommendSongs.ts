@@ -46,7 +46,7 @@ export const fetchRecommendedSongs = async (size = 20): Promise<any[]> => {
                     songMap.set(id, { ...s, id, source: 'tx' })
                 }
             } catch (e) {
-                console.error(`[RecommendSongs] 专辑 ${mid} 取歌失败:`, e)
+                console.error(`[歌曲推荐] 专辑 ${mid} 取歌失败:`, e)
             }
         }))
 
@@ -67,7 +67,7 @@ export const fetchRecommendedSongs = async (size = 20): Promise<any[]> => {
         recommendSongsCache.set('daily', { date: dateKey, songs: all })
         return all.slice(0, safeSize)
     } catch (e) {
-        console.error('[RecommendSongs] 获取每日推荐歌曲出错:', e)
+        console.error('[歌曲推荐] 获取每日推荐歌曲出错:', e)
         // 抓取失败：回退到过期缓存（哪怕已跨天），避免每日推荐直接空白
         if (cached && cached.songs.length > 0) return cached.songs.slice(0, safeSize)
         return []

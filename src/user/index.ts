@@ -37,7 +37,7 @@ export const getUserSpace = (userName: string) => {
 
   let user = users.get(userName)
   if (!user) {
-    console.log('new user data manage:', userName)
+    console.log('[用户空间] 初始化用户数据管理器:', userName)
     const dataManage = new UserDataManage(userName)
     const listManage = new ListManage(dataManage)
     const dislikeManage = new DislikeManage(dataManage)
@@ -82,5 +82,18 @@ export const finishRenameUserSpace = (oldName: string) => {
   renamingUsers.delete(oldName)
 }
 
+/**
+ * 动态更新所有用户空间的快照存储路径（热迁移无需重启）
+ * @param newBackupPath 新的 snapshot.backupPath 配置
+ */
+export const updateAllUserSnapshotDirs = (newBackupPath?: string) => {
+  for (const [name, space] of users.entries()) {
+    try {
+      space.listManage.snapshotDataManage.updateSnapshotDir(newBackupPath)
+    } catch (e) {
+      console.error(`[Snapshot] Failed to hot-update snapshot dir for user ${name}:`, e)
+    }
+  }
+}
 
 export * from './data'

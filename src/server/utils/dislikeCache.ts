@@ -76,10 +76,10 @@ export async function getCachedDislikeRuleSet(
         }
       }
     } catch (err: any) {
-      console.warn('[DislikeCache] Merge library failed:', err.message)
+      console.warn('[黑名单缓存] 合并音乐库失败:', err.message)
     }
   } catch (e) {
-    console.error('[Subsonic] 读取 dislike 规则失败:', e)
+    console.error('[黑名单] 读取黑名单规则失败:', e)
     return cached?.set ?? null
   }
   cache.set(username, { ts: Date.now(), mutatedAt: mutated, set })

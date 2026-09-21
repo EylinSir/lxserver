@@ -125,7 +125,7 @@ export class ElFinderConnector {
 
     // 处理请求
     public async handle(cmd: string, params: any): Promise<any> {
-        console.log(`[ElFinder] Handle command: ${cmd}`, params)
+        console.log(`[文件管理] 处理命令: ${cmd}`, params)
         try {
             switch (cmd) {
                 case 'open':
@@ -175,11 +175,11 @@ export class ElFinderConnector {
                 case 'zipdl':
                     return await this.cmdZipdl(params)
                 default:
-                    console.log('Unknown command:', cmd)
+                    console.error('[文件管理] 未知命令:', cmd)
                     return { error: ['Unknown command'] }
             }
         } catch (error: any) {
-            console.error('Command error:', cmd, error)
+            console.error('[文件管理] 命令执行异常:', cmd, error)
             return { error: [error.message || 'Internal error'] }
         }
     }
@@ -188,14 +188,14 @@ export class ElFinderConnector {
     private async cmdOpen(params: any): Promise<any> {
         const target = params.target ? this.decode(params.target) : this.root
         const init = params.init === '1'
-        console.log(`[ElFinder] cmdOpen target: ${target}, init: ${init}`)
+        console.log(`[文件管理] cmdOpen 目标: ${target}, init: ${init}`)
 
         const targetInfo = await this.getFileInfo(target)
         if (!targetInfo) {
-            console.error(`[ElFinder] Target not found: ${target}`)
+            console.error(`[文件管理] 目标未找到: ${target}`)
             return { error: ['errOpen', 'Directory not found'] }
         }
-        console.log(`[ElFinder] Target info:`, targetInfo)
+        console.log(`[文件管理] 目标信息:`, targetInfo)
 
         const result: any = {
             cwd: targetInfo,

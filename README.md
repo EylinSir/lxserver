@@ -8,7 +8,7 @@
   <h1>LX Sync Server</h1> -->
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.1.0-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v2.1.1-blue?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
@@ -236,7 +236,7 @@ npm start
 ### 3. 访问说明
 
 - **Web 播放器**: `http://your-ip:9527` (默认路径，可通过 `PLAYER_PATH` 修改)
-- **同步管理后台**: `http://your-ip:9527/music` (默认路径，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
+- **同步管理后台**: `http://your-ip:9527/admin` (默认路径，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
 
 ---
 
@@ -246,7 +246,7 @@ npm start
 
 - **Backend (Express + WebSocket)**: 核心同步逻辑与 WebDAV 备份。
 - **WebPlayer (Vanilla JS)**: 负责音乐播放业务，默认访问路径为根路径 `/`。
-- **Console (Vanilla JS)**: 位于 `/music` 路径，负责用户与数据管理。
+- **Console (Vanilla JS)**: 位于 `/admin` 路径，负责用户与数据管理。
 
 ---
 
@@ -257,13 +257,11 @@ npm start
 | 环境变量                                | 对应配置项                           | 说明                                                               | 默认值             |
 | --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------ | ------------------ |
 | `PORT`                                | `port`                             | 服务端口                                                           | `9527`           |
-| `BIND_IP`                             | `bindIP`                           | 绑定 IP                                                            | `0.0.0.0`        |
 | `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径                                              | `/admin`           |
 | `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为根路径 `/`)                             | `/`                |
-| `SUBSONIC_ENABLE`                     | `subsonic.enable`                  | 是否启用 Subsonic 协议支持 (服务默认开启)                          | `true`           |
-| `SUBSONIC_PATH`                       | `subsonic.path`                    | Subsonic 访问路径 (默认为 `/rest`)                               | `/rest`          |
 | `FRONTEND_PASSWORD`                   | `frontend.password`                | Web 管理界面访问密码                                               | `123456`         |
 | `SERVER_NAME`                         | `serverName`                       | 同步服务名称                                                       | `lxserver`       |
+| `ENABLE_DEBUG`                        | `debug.enabled`                    | 是否启用 DEBUG 模式 (开启后输出详细调试日志与音源内部日志，默认关闭) | `false`          |
 | `MAX_SNAPSHOT_NUM`                    | `maxSnapshotNum`                   | 保留的最大快照数量                                                 | `10`             |
 | `CONFIG_PATH`                         | -                                    | 指定外部配置文件的绝对路径 (默认使用 `data/config.js`)             | -                  |
 | `DATA_PATH`                           | -                                    | 指定数据存储目录的绝对路径                                         | `./data`         |
@@ -290,13 +288,21 @@ npm start
 | `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `user.enablePublicNonAdminServerCache` | 是否开启非管理员服务器缓存 (允许未登录管理员的公开/普通账号将歌曲缓存到服务器) | `false` |
 | `ENABLE_PUBLIC_FAVORITES`             | `user.enablePublicFavorites`       | 是否开启公开收藏和歌曲 (开启后允许公开/未登录用户查看及播放公开收藏) | `false`          |
 | `ENABLE_PUBLIC_NON_ADMIN_ACCESS`      | `user.enablePublicNonAdminAccess`  | 是否开启非管理员访问公开收藏和歌曲 (允许未登录管理员的公开账号查看) | `false`          |
+| `ENABLE_CUSTOM_MUSIC_DIR`             | `user.enableCustomMusicDir`        | 是否开启自定义歌曲目录总开关                                       | `false`          |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | 是否启用登录用户缓存限制 (开启后限非管理员登录用户的缓存设置)      | `false`          |
 | `ENABLE_CACHE_SIZE_LIMIT`             | `user.enableCacheSizeLimit`        | 是否启用缓存空间限制 (开启后超出容量将按 LRU 自动清理)             | `false`          |
 | `CACHE_SIZE_LIMIT`                    | `user.cacheSizeLimit`              | 缓存空间限制大小 (单位: MB)                                        | `2000`           |
+| `CONFIG_BACKUP_ENABLE`                | `configBackup.enable`              | 是否启用配置文件自动备份功能 (每天生成一份历史配置副本)           | `true`           |
+| `CONFIG_BACKUP_RETENTION_DAYS`        | `configBackup.retentionDays`       | 配置文件备份保留天数 (自动清理过期备份)                             | `7`              |
+| `CONFIG_BACKUP_DIR`                   | `configBackup.dir`                 | 配置文件备份存储目录路径 (支持绝对路径或相对 `./data`)              | `backups`        |
+| `SNAPSHOT_BACKUP_PATH`                | `snapshot.backupPath`              | 歌单快照自定义存储路径 (支持绝对路径或相对 `./data`，各用户独立隔离)| -                |
 | `LIST_ADD_MUSIC_LOCATION_TYPE`        | `list.addMusicLocationType`        | 添加歌曲到列表时的位置 (`top` / `bottom`)                      | `top`            |
 | `PROXY_ALL_ENABLED`                   | `proxy.all.enabled`                | 是否启用外发请求代理 (针对 Music SDK)                              | `false`          |
 | `PROXY_ALL_ADDRESS`                   | `proxy.all.address`                | 代理地址 (支持 http:// 或 socks5://)                               | -                  |
 | `SINGER_SOURCE_PRIORITY`              | `singer.sourcePriority`            | 歌手信息获取来源优先级 (如 `tx,wy` 或 `wy,tx`)                 | `tx,wy`          |
+| `SUBSONIC_ENABLE`                     | `subsonic.enable`                  | 是否启用 Subsonic 协议支持                                         | `true`           |
+| `SUBSONIC_PATH`                       | `subsonic.path`                    | Subsonic 接口访问路径 (默认为 `/rest`)                              | `/rest`          |
+| `SUBSONIC_PORT`                       | `subsonic.port`                    | Subsonic 独立监听端口 (`0` 为关闭独立端口，与主服务共用端口)       | `0`              |
 | `SUBSONIC_ENABLE_DEBUG`               | `subsonic.enableDebug`             | 是否开启 Subsonic 调试日志模式                                     | `false`          |
 | `SUBSONIC_ONLINE_SEARCH`              | `subsonic.onlineSearch`            | 是否开启 Subsonic 在线全网搜索                                     | `true`           |
 | `SUBSONIC_ONLINE_SEARCH_MODE`         | `subsonic.onlineSearchMode`        | Subsonic 在线搜索模式 (`fallback` / `merge` / `local_only`)        | `fallback`       |
@@ -306,6 +312,8 @@ npm start
 | `SUBSONIC_LYRIC_TRANSLATION`          | `subsonic.lyricTranslation`        | Subsonic 歌词中是否包含翻译                                        | `true`           |
 | `SUBSONIC_CACHE_ON_PLAY`            | `subsonic.cacheOnPlay`             | Subsonic 播放时是否触发服务器自动缓存保存 (落盘到用户目录)          | `false`          |
 | `SUBSONIC_PLAY_CACHE_FIRST`          | `subsonic.playCacheFirst`          | Subsonic 播放时是否优先使用服务器已有的本地缓存/下载文件直接传输      | `true`           |
+| `SUBSONIC_QUALITY_ENABLED`            | `subsonic.quality.enabled`         | Subsonic 是否开启音质优选                                          | `true`           |
+| `SUBSONIC_QUALITY_PRIORITY`           | `subsonic.quality.priority`        | Subsonic 音质优选优先级列表 (如 `flac,320k,128k`)                  | `flac,320k,128k` |
 | `ARTIST_MAX_FETCH_PAGES`              | `artist.maxFetchPages`             | 歌手歌曲最大抓取页数                                               | `20`             |
 | `CACHE_NAMING_PATTERN`                | `cache.namingPattern`              | 缓存文件命名规则 (`simple` / `custom`)                            | `simple`         |
 | `SYSTEM_ALLOW_UNSAFE_VM`              | `system.allowUnsafeVM`             | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                  | `false`          |

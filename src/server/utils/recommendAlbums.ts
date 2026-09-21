@@ -100,7 +100,7 @@ export const fetchRecommendedAlbums = async (type: string, size: number = 20) =>
             }
         })
     } catch (e) {
-        console.error('[RecommendAlbums] Fetch error:', e)
+        console.error('[专辑推荐] 获取出错:', e)
         return []
     }
 }

@@ -590,6 +590,7 @@ window.LocalMusicManager = {
     },
 
     saveFilters() {
+        const locationEl = document.getElementById('lm-location-select');
         const filters = {
             searchKeyword: this.searchKeyword,
             filterFolder: this.filterFolder,
@@ -598,7 +599,9 @@ window.LocalMusicManager = {
             filterSource: Array.from(this.filterSource),
             sortBy: this.sortBy,
             sortOrder: this.sortOrder,
-            selectedSubPath: this.selectedSubPath
+            selectedSubPath: this.selectedSubPath,
+            // 持久化目录位置选择（root/data），默认 root
+            location: locationEl ? locationEl.value : 'root'
         };
         localStorage.setItem(this.cacheKey, JSON.stringify(filters));
     },
@@ -606,6 +609,8 @@ window.LocalMusicManager = {
     loadFilters() {
         try {
             const cached = localStorage.getItem(this.cacheKey);
+            // 恢复目录位置（root/data），默认 root
+            const locationEl = document.getElementById('lm-location-select');
             if (cached) {
                 const filters = JSON.parse(cached);
                 this.searchKeyword = filters.searchKeyword || '';
@@ -621,6 +626,15 @@ window.LocalMusicManager = {
                 this.sortBy = filters.sortBy || 'mtime';
                 this.sortOrder = filters.sortOrder || 'desc';
                 this.selectedSubPath = filters.selectedSubPath || '';
+
+                // 恢复目录位置（优先本地存储，默认 root）
+                if (locationEl) {
+                    locationEl.value = filters.location || 'root';
+                    this._syncSelectActive('lm-location-select');
+                    if (window.CustomSelectManager && typeof window.CustomSelectManager.syncUI === 'function') {
+                        window.CustomSelectManager.syncUI(locationEl);
+                    }
+                }
 
                 // Update UI elements
                 if (document.getElementById('lm-search-input')) this.setRichInputValue(document.getElementById('lm-search-input'), this.searchKeyword);
@@ -648,6 +662,12 @@ window.LocalMusicManager = {
                     if (this.selectedSubPath === '') displayText = '全部';
                     else if (this.selectedSubPath === '__ROOT__') displayText = '根目录';
                     subPathText.innerText = displayText;
+                }
+            } else {
+                // 没有本地缓存时，默认显示根目录
+                if (locationEl) {
+                    locationEl.value = 'root';
+                    this._syncSelectActive('lm-location-select');
                 }
             }
         } catch (e) {
@@ -777,6 +797,22 @@ window.LocalMusicManager = {
 
     async syncLocationSelector() {
         try {
+            // 本地 localStorage 是用户的明确选择，优先于后端全局配置
+            // 只有在没有本地存储记录时，才从后端同步
+            const cached = localStorage.getItem(this.cacheKey);
+            if (cached) {
+                const filters = JSON.parse(cached);
+                if (filters.location) {
+                    // 本地有存储的偏好，直接使用，不请求后端
+                    const el = document.getElementById('lm-location-select');
+                    if (el && el.value !== filters.location) {
+                        el.value = filters.location;
+                        this._syncSelectActive('lm-location-select');
+                    }
+                    return;
+                }
+            }
+            // 无本地记录时从后端读取（仅首次）
             const headers = window.getUserAuthHeaders ? window.getUserAuthHeaders() : {};
             if (this.isViewingPublicSongs) headers['x-user-name'] = '_open';
             const url = '/api/music/cache/directories' + (this.isViewingPublicSongs ? '?user=_open' : '');
@@ -787,6 +823,7 @@ window.LocalMusicManager = {
                     const el = document.getElementById('lm-location-select');
                     if (el && el.value !== result.data.location) {
                         el.value = result.data.location;
+                        this._syncSelectActive('lm-location-select');
                     }
                 }
             }
@@ -3033,21 +3070,50 @@ window.LocalMusicManager = {
             container.innerHTML = `<div class="h-36 flex items-center justify-center text-xs t-text-muted">${emptyText}</div>`;
         } else {
             const isCustomDir = this.remasterSource === 'custom';
+            const username = isCustomDir
+                ? ((window.getCurrentUser && window.getCurrentUser()) || localStorage.getItem('lx_user_username') || 'default')
+                : this.getCurrentUsername();
+            const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
+
             container.innerHTML = pageItems.map(item => {
                 const selected = this.remasterSelectedItems.has(item.filename);
                 const qualityName = window.QualityManager?.getQualityDisplayName(item.quality) || item.quality || '未知音质';
                 const subPathBadge = item.subPath ? `<span class="text-[9px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/40 rounded px-1 mr-1 inline-block font-mono" title="${this.escapeAttr(item.subPath)}">${this.escapeHtml(item.subPath)}</span>` : '';
+
+                const displayedSource = item.downloadSource || item.source;
+                const isCustomOrUnknown = !displayedSource || displayedSource === 'unknown' || displayedSource === 'local' || displayedSource === 'custom';
+                const safeSource = isCustomOrUnknown ? '' : this.escapeHtml(String(displayedSource).toUpperCase());
+                const sourceBadge = safeSource ? `<span class="px-1 py-0.2 bg-gray-100 dark:bg-gray-800 border t-border-main rounded text-[9px] font-bold uppercase tracking-tight t-text-muted mr-1 inline-block shrink-0 leading-tight" title="平台：${this.escapeAttr(displayedSource)}">${safeSource}</span>` : '';
+
+                let coverHtml = `<div class="w-8 h-8 rounded bg-gray-100 dark:bg-gray-800 flex-shrink-0 flex items-center justify-center border t-border-main">
+                                    <i class="fas fa-music t-text-muted text-[10px]"></i>
+                                 </div>`;
+                if (item.hasCover || (item.img && typeof item.img === 'string' && /^https?:\/\//i.test(item.img))) {
+                    const coverUrl = item.hasCover
+                        ? (isCustomDir
+                            ? `/api/music/custom/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}&v=${encodeURIComponent([Math.round(item.mtime || 0), item.size || 0].join('-'))}`
+                            : `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}&v=${encodeURIComponent([item.coverCheckedVersion || 0, Math.round(item.coverCheckedMtime || item.mtime || 0), item.coverCheckedSize || item.size || 0, 1].join('-'))}`)
+                        : item.img;
+                    const fallbackAttr = item.img && item.img !== coverUrl ? `data-fallback-src="${this.escapeAttr(item.img)}"` : '';
+                    coverHtml = `<img data-src="${this.escapeAttr(coverUrl)}" ${fallbackAttr} src="/music/assets/logo.svg" loading="lazy" fetchpriority="low" class="lazy-image lm-remaster-cover is-placeholder w-8 h-8 rounded object-cover shadow-sm flex-shrink-0 border t-border-main" onerror="if(this.dataset.fallbackSrc && !this.dataset.fallbackTried){this.dataset.fallbackTried='true';this.src=this.dataset.fallbackSrc;}else{this.src='/music/assets/logo.svg';}">`;
+                }
+
                 return `
                     <label class="min-h-12 px-3 py-2 flex items-center gap-3 border-b last:border-b-0 t-border-main ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:t-bg-track'}">
                         <input type="checkbox" data-remaster-filename="${this.escapeAttr(item.filename)}" ${selected ? 'checked' : ''} ${disabled ? 'disabled' : ''}
                             class="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 shrink-0">
+                        ${coverHtml}
                         <span class="min-w-0 flex-1">
                             <span class="block text-xs font-bold t-text-main truncate">${this.escapeHtml(item.name || item.filename)}</span>
-                            <span class="block text-[10px] t-text-muted truncate mt-0.5">${subPathBadge}${this.escapeHtml(item.singer || '未知歌手')} · ${this.escapeHtml(item.album || '未知专辑')}</span>
+                            <span class="block text-[10px] t-text-muted truncate mt-0.5 flex items-center flex-wrap">${subPathBadge}${sourceBadge}<span>${this.escapeHtml(item.singer || '未知歌手')} · ${this.escapeHtml(item.album || '未知专辑')}</span></span>
                         </span>
                         <span class="shrink-0 text-[10px] t-text-muted">${this.escapeHtml(qualityName)}</span>
                     </label>`;
             }).join('');
+
+            if (typeof window.lazyLoadImages === 'function') {
+                window.lazyLoadImages(container);
+            }
         }
 
         this.updateRemasterSelectionControls();
@@ -3512,7 +3578,7 @@ window.toggleLmBatchMode = () => {
 };
 
 // 当处于自定义目录模式时，将通用动作自动转发给 CustomDirManager
-['toggleBatchMode', 'selectAll', 'deselectAll', 'batchDelete', 'batchDownloadToDevice', 'batchAddToPlaylist', 'batchFetchLyrics', 'batchEmbedLyric', 'batchUpdateMetadata', 'applyFilters', 'refresh', 'resetFilters', 'clearFilters'].forEach(method => {
+['toggleBatchMode', 'selectAll', 'deselectAll', 'batchDelete', 'batchDownloadToDevice', 'batchAddToPlaylist', 'batchFetchLyrics', 'batchEmbedLyric', 'batchUpdateMetadata', 'applyFilters', 'refresh', 'resetFilters', 'clearFilters', 'toggleFilterTag'].forEach(method => {
     if (window.LocalMusicManager && typeof window.LocalMusicManager[method] === 'function') {
         const orig = window.LocalMusicManager[method];
         window.LocalMusicManager[method] = function(...args) {

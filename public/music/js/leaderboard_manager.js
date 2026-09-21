@@ -197,7 +197,7 @@ window.LeaderboardManager = (function () {
 
             const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(song));
 
-            let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 p-3 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer ';
+            let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 px-3 py-2.5 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer items-center border border-transparent ';
             if (isDisliked) rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
             if (isCurrentMatch) rowClass += 'search-current ';
             else if (isMatched) rowClass += 'search-match ';
@@ -222,7 +222,7 @@ window.LeaderboardManager = (function () {
                     ` : `<span class="${rankClass}">${rank}</span>`}
                 </div>
                 <!-- 封面 + 歌名 -->
-                <div class="col-span-9 sm:col-span-7 md:col-span-5 lg:col-span-4 flex items-center gap-3 min-w-0">
+                <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center gap-3 min-w-0 pr-2">
                     <div class="w-10 h-10 md:w-12 md:h-12 flex-shrink-0 relative rounded-lg overflow-hidden shadow-sm border t-border-main group-hover:shadow-md transition-all group-hover:scale-105 duration-300">
                         <img data-src="${imgUrl}" src="/music/assets/logo.svg"
                              class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder"
@@ -245,38 +245,41 @@ window.LeaderboardManager = (function () {
                     </div>
                 </div>
                 <!-- 歌手 -->
-                <div class="hidden md:flex md:col-span-3 items-center text-xs t-text-muted overflow-hidden">
+                <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center text-xs md:text-sm t-text-muted overflow-hidden min-w-0">
                     ${window.createMarqueeHtml ? window.createMarqueeHtml(song.singer) : `<span class="truncate">${song.singer || '--'}</span>`}
                 </div>
                 <!-- 专辑 -->
-                <div class="hidden lg:flex lg:col-span-2 items-center text-xs t-text-muted truncate">
-                    ${song.albumName || '--'}
+                <div class="hidden lg:flex lg:col-span-2 items-center text-xs md:text-sm t-text-muted overflow-hidden min-w-0" title="${window.getSongAlbumName ? window.getSongAlbumName(song) : (song.albumName || (typeof song.album === 'string' ? song.album : (song.album?.name || '')))}">
+                    ${(() => {
+                        const alb = (window.getSongAlbumName ? window.getSongAlbumName(song) : (song.albumName || (typeof song.album === 'string' ? song.album : (song.album?.name || '')))) || '-';
+                        return window.createMarqueeHtml ? window.createMarqueeHtml(alb) : `<span class="truncate">${alb}</span>`;
+                    })()}
                 </div>
                 <!-- 时长 -->
-                <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-end text-xs font-mono t-text-muted">
+                <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-xs md:text-sm font-mono t-text-muted min-w-0 text-center">
                     ${song.interval || '--:--'}
                 </div>
                 <!-- 操作 -->
-                <div class="col-span-2 sm:col-span-1 md:col-span-1 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors"
                             title="播放"
                             onclick="event.stopPropagation(); window.LeaderboardManager.playSong(${index})">
-                        <i class="fas fa-play w-3.5 h-3.5"></i>
+                        <i class="fas fa-play w-3.5 h-3.5 flex items-center justify-center"></i>
                     </button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors"
                             title="下载"
                             onclick="event.stopPropagation(); downloadSong(${JSON.stringify(song).replace(/"/g, '&quot;')})">
-                        <i class="fas fa-download w-3.5 h-3.5"></i>
+                        <i class="fas fa-download w-3.5 h-3.5 flex items-center justify-center"></i>
                     </button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors"
                             title="添加到歌单"
                             onclick="event.stopPropagation(); window.LeaderboardManager.addSongToPlaylist(${index})">
-                        <i class="fas fa-plus w-3.5 h-3.5"></i>
+                        <i class="fas fa-plus w-3.5 h-3.5 flex items-center justify-center"></i>
                     </button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-red-50 rounded-lg ${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? 'text-red-500' : 'text-gray-400'} transition-colors"
                             title="${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? '取消不喜欢' : '不喜欢'}"
                             onclick="event.stopPropagation(); window.LeaderboardManager.dislikeSong(${index})">
-                        <i class="fas fa-thumbs-down w-3.5 h-3.5"></i>
+                        <i class="fas fa-thumbs-down w-3.5 h-3.5 flex items-center justify-center"></i>
                     </button>
                 </div>
             </div>

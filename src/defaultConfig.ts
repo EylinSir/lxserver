@@ -1,6 +1,7 @@
 
 const config: LX.Config = {
   serverName: 'lxserver', // 同步服务名称
+  'debug.enabled': false, // 是否启用 DEBUG 模式 (开发人员使用)
   'proxy.enabled': false, // 是否使用代理转发请求到本服务器
   'proxy.header': 'x-real-ip', // 代理转发的请求头 原始IP
   bindIP: '0.0.0.0', // 绑定IP
@@ -53,6 +54,14 @@ const config: LX.Config = {
   'webdav.excludeMusic': false, // 是否排除音乐下载目录 (data/<user>/music) 的同步与备份
 
 
+  // 本地配置备份（config.js 每日一份本地副本）
+  'configBackup.enable': true, // 是否启用本地配置备份
+  'configBackup.retentionDays': 7, // 本地备份保留天数
+  'configBackup.dir': '', // 备份目录，留空则用 <data>/backups，相对路径基于 data 目录，绝对路径直接使用
+
+  // 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot，相对路径基于 data 目录，绝对路径直接使用）
+  'snapshot.backupPath': '',
+
   // Web播放器配置
   'player.enableAuth': false,
   'player.password': '123456',
@@ -61,17 +70,29 @@ const config: LX.Config = {
   'proxy.all.enabled': false,
   'proxy.all.address': '',
 
+  // 细分代理：音乐平台 / 自定义音源 / 应用。
+  // enabled 为 undefined 表示该类别「沿用上面的统一开关」，显式 true/false 才独立生效。
+  'proxy.music.enabled': undefined,
+  'proxy.music.address': '',
+  'proxy.customSource.enabled': undefined,
+  'proxy.customSource.address': '',
+  'proxy.app.enabled': undefined,
+  'proxy.app.address': '',
+
   // 访问路径配置
   'admin.path': '/admin', // 后台管理路径
   'player.path': '/', // 播放器路径，默认为根路径 /
   'subsonic.enable': true, // 是否启用 Subsonic 服务
   'subsonic.path': '/rest', // Subsonic 访问路径
+  'subsonic.port': 0, // Subsonic 独立端口: 0=不启用(走主端口 subsonic.path); >0 时单独监听该端口, 只允许通过 Subsonic 鉴权的用户访问
   'subsonic.enableDebug': false, // 是否开启 Subsonic 调试日志模式
   'subsonic.onlineSearch': true, // 是否开启 Subsonic 在线全网搜索
   'subsonic.onlineSearchMode': 'fallback', // 在线搜索模式: fallback | merge | local_only
   'subsonic.onlineSearchSources': 'wy,tx,kw,kg,mg', // 在线搜索默认平台
   'subsonic.publicLeaderboards': false, // 是否在 Subsonic 中公开在线排行榜(只读虚拟播放列表)
   'subsonic.leaderboardSource': 'tx', // 在线排行榜平台: tx | wy | kg | kw | mg
+  'subsonic.sharedListMode': 'leaderboard', // 共享歌单内容模式: leaderboard | playlist | both
+  'subsonic.sharedListSort': 'hot', // 共享歌单排序: hot | new
   'subsonic.dislikeRating': 1, // 评分联动 dislike 阈值: 0 < rating <= 该值 视为不喜欢(写回原生 dislike 规则); 设为 0 关闭联动
   'subsonic.linkRatingToDislike': false, // 解耦开关(正向): 评星 -> 不喜欢 是否自动联动; false=不联动(仅记录评分)
   'subsonic.linkDislikeToRating': false, // 解耦开关(反向): 不喜欢 -> 评星 是否自动联动; false=不联动(仅记录不喜欢)
@@ -91,6 +112,10 @@ const config: LX.Config = {
   'subsonic.source.priority': 'kw,tx,wy,mg,kg', // 跨平台优选顺序(逗号分隔, 客户端所选源始终优先)
   'subsonic.source.crossPlatform': true, // 是否允许跨平台优选(按歌名+歌手在其它平台搜索替身)
   'subsonic.source.autoSwitchCustom': true, // 同源是否切换其它自定义源脚本(callUserApiGetMusicUrl 内部循环同平台候选脚本)
+  'subsonic.transcode.enabled': false, // 服务端转码总开关(需安装 ffmpeg);音源无客户端请求音质时降码率转发以省客户端流量
+  'subsonic.transcode.onQualityMiss': true, // 仅音源缺失对应低音质时才转码;关闭则永不转码
+  'subsonic.transcode.format': 'mp3', // 转码目标格式: mp3 | opus | aac
+  'subsonic.transcode.maxConcurrent': 2, // 转码并发上限,防 CPU 过载
   'singer.sourcePriority': ['tx', 'wy'], // 歌手信息源优先级
   'artist.maxFetchPages': 20, // 歌手歌曲最大抓取页数
   'cache.namingPattern': 'simple', // 缓存命名规则
