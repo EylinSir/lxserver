@@ -45,12 +45,12 @@ for (const [name, options] of [
     ['iPod without the shared detector', { device: { userAgent: 'Mozilla/5.0 (iPod)', platform: 'iPod', maxTouchPoints: 5 } }],
     ['iPadOS desktop mode without the shared detector', { device: { userAgent: 'Mozilla/5.0 (Macintosh)', platform: 'MacIntel', maxTouchPoints: 5 } }],
 ]) {
-    test(`${name} keeps track metadata stable while lyrics continue to highlight and scroll`, () => {
+    test(`${name} honors SMTC lyric metadata while lyrics continue to highlight and scroll`, () => {
         const p = player(options);
         for (let index = 0; index < p.lines.length; index++) {
             p.context.syncLyricByLineNum(index);
-            assert.equal(p.context.navigator.mediaSession.metadata.title, 'Track');
-            assert.equal(p.context.navigator.mediaSession.metadata.artist, 'Artist');
+            assert.equal(p.context.navigator.mediaSession.metadata.title, p.context.currentLyricLines[index].text);
+            assert.equal(p.context.navigator.mediaSession.metadata.artist, 'Track - Artist');
             assert(p.lines[index].classList.contains('active'));
             assert.equal(p.lines.filter(line => line.classList.contains('active')).length, 1);
         }

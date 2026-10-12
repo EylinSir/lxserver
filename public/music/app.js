@@ -8055,20 +8055,6 @@ const mediaSessionArtworkCache = new Map();
 let mediaSessionMetadataSongKey = '';
 let mediaSessionArtworkRequest = 0;
 
-function isIOSMediaSessionDevice() {
-    if (window.iOSBackgroundAudio && typeof window.iOSBackgroundAudio.isIOS === 'function') {
-        return window.iOSBackgroundAudio.isIOS();
-    }
-    const ua = navigator.userAgent || '';
-    return /iPhone|iPad|iPod/i.test(ua) ||
-        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-
-function shouldSyncMediaSessionLyrics() {
-    // iOS 的系统/蓝牙播放器需要稳定的歌曲名与歌手；网页歌词仍照常更新。
-    return settings && settings.enableSmtcLyric && !isIOSMediaSessionDevice();
-}
-
 function resolveMediaSessionArtwork(imgUrl) {
     const fallback = { src: new URL('/music/assets/logo.png', window.location.href).href, sizes: '512x512', type: 'image/png' };
     let sourceUrl;
@@ -8179,7 +8165,7 @@ function updateMediaSessionMetadata(song) {
         // 如果开启了 SMTC 歌词且当前 title 已被歌词同步（不等于歌曲原标题），保留现有歌词 title 与 artist 避免延迟刷新时被冲掉
         let targetTitle = songTitle;
         let targetArtist = songArtist;
-        if (sameSong && currentMeta && shouldSyncMediaSessionLyrics() && currentMeta.title && currentMeta.title !== songTitle) {
+        if (sameSong && currentMeta && settings && settings.enableSmtcLyric && currentMeta.title && currentMeta.title !== songTitle) {
             targetTitle = currentMeta.title;
             targetArtist = currentMeta.artist || songArtist;
         }
@@ -8194,12 +8180,8 @@ function updateMediaSessionMetadata(song) {
             if (artworkRequest !== mediaSessionArtworkRequest || mediaSessionMetadataSongKey !== songKey) return;
             const latest = navigator.mediaSession.metadata;
             if (!latest) return;
-            const canonicalMetadata = isIOSMediaSessionDevice();
             navigator.mediaSession.metadata = new MediaMetadata({
-                title: canonicalMetadata ? songTitle : latest.title,
-                artist: canonicalMetadata ? songArtist : latest.artist,
-                album: latest.album,
-                artwork: [image]
+                title: latest.title, artist: latest.artist, album: latest.album, artwork: [image]
             });
         }).catch(e => console.warn('[MediaSession] Failed to prepare artwork:', e));
         // Reset playback state logic is handled by event listeners, but metadata update often implies new song start
@@ -10204,7 +10186,7 @@ function syncLyricByLineNum(lineNum) {
         }
 
         // SMTC 歌词显示：将当前歌词行写入 MediaSession metadata.title，artist 显示「歌曲名 - 歌手名」
-        if ('mediaSession' in navigator && navigator.mediaSession.metadata && shouldSyncMediaSessionLyrics()) {
+        if ('mediaSession' in navigator && navigator.mediaSession.metadata && settings.enableSmtcLyric) {
             try {
                 const lyricText = (lineNum >= 0 && currentLyricLines && currentLyricLines[lineNum])
                     ? currentLyricLines[lineNum].text

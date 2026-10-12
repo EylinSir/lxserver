@@ -110,22 +110,22 @@ for (const [deviceName, options] of [
     ['iPhone with the shared detector', { isIOS: true }],
     ['iPadOS without the shared detector', { device: { userAgent: 'Mozilla/5.0 (Macintosh)', platform: 'MacIntel', maxTouchPoints: 5 } }],
 ]) {
-    test(`${deviceName} keeps canonical title and artist through synchronous and asynchronous cover refreshes`, async () => {
+    test(`${deviceName} honors enabled SMTC lyrics through synchronous and asynchronous cover refreshes`, async () => {
         const p = player(options);
         const song = { id: 'a', name: 'Track', singer: 'Artist', img: '/cover.png' };
         p.sandbox.settings.enableSmtcLyric = true;
         p.update(song);
-        p.sandbox.navigator.mediaSession.metadata.title = 'Previous lyric';
+        p.sandbox.navigator.mediaSession.metadata.title = 'Current lyric';
         p.sandbox.navigator.mediaSession.metadata.artist = 'Track - Artist';
         p.update(song);
-        assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Track');
-        assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Artist');
-        p.sandbox.navigator.mediaSession.metadata.title = 'Another stale lyric';
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Current lyric');
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Track - Artist');
+        p.sandbox.navigator.mediaSession.metadata.title = 'Next lyric';
         p.sandbox.navigator.mediaSession.metadata.artist = 'Track - Artist';
         p.images[0].onload();
         await flush();
-        assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Track');
-        assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Artist');
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Next lyric');
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Track - Artist');
         assert.equal(p.sandbox.navigator.mediaSession.metadata.artwork[0].type, 'image/jpeg');
         assert.equal(p.sandbox.settings.enableSmtcLyric, true);
     });
@@ -145,6 +145,29 @@ test('desktop metadata retains lyrics during same-song and asynchronous artwork 
     assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Current lyric');
     assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Track - Artist');
 });
+
+for (const [deviceName, options] of [
+    ['iPhone', { isIOS: true, device: { userAgent: 'Mozilla/5.0 (iPhone)', platform: 'iPhone', maxTouchPoints: 5 } }],
+    ['iPadOS', { device: { userAgent: 'Mozilla/5.0 (Macintosh)', platform: 'MacIntel', maxTouchPoints: 5 } }],
+    ['desktop', { isIOS: false }],
+]) {
+    test(`${deviceName} retains canonical song metadata when SMTC lyrics are disabled`, async () => {
+        const p = player(options);
+        const song = { id: 'a', name: 'Track', singer: 'Artist', img: '/cover.png' };
+        p.sandbox.settings.enableSmtcLyric = false;
+        p.update(song);
+        p.sandbox.navigator.mediaSession.metadata.title = 'Old lyric';
+        p.sandbox.navigator.mediaSession.metadata.artist = 'Track - Artist';
+        p.update(song);
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Track');
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Artist');
+        p.images[0].onload();
+        await flush();
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Track');
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Artist');
+        assert.equal(p.sandbox.settings.enableSmtcLyric, false);
+    });
+}
 
 test('repeated metadata updates share a single artwork decode', async () => {
     const p = player();
