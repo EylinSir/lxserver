@@ -1,14 +1,16 @@
 /**
- * Music Visualizer Integration using Wave.js & Accuphase Vintage Dual VU Meter
+ * Music Visualizer Integration using Wave.js & LX Studio Reference Dual VU Meter
  * Manages independent footer and detail view canvases and syncs with theme color.
  */
 
 /**
- * Accuphase A-48S Vintage Dual VU Meter Animation
- * Faithful recreation of the classic Japanese high-end stereo power amplifier
- * with champagne gold brushed faceplate, backlit meters, and analog ballistics.
+ * LX Studio Reference Dual VU Meter Animation
+ * Bespoke audiophile stereo VU meter console designed for LX Music.
+ * Features brushed dark titanium faceplate, ambient incandescent lamp glow,
+ * high-precision dB scales, dynamic peak overload LEDs, and IEC ballistic needles.
+ * Fully stretchable and responsive for mobile and desktop window resizing.
  */
-class AccuphaseVUMeterAnimation {
+class LXStudioVUMeterAnimation {
     constructor(options = {}) {
         this.options = options;
         this.isCompact = !!options.isCompact;
@@ -44,13 +46,12 @@ class AccuphaseVUMeterAnimation {
         const audio = document.getElementById('audio-player');
         const isPlaying = audio && !audio.paused;
 
-        // Calculate dynamic targets from audio analysis or realistic simulation
+        // Calculate dynamic targets
         if (isPlaying) {
             let hasValidData = false;
             let rmsL = 0;
             let rmsR = 0;
 
-            // 1. Try dedicated stereo analysers if present
             if (this.options.analyserL && this.options.analyserR) {
                 const arrL = new Uint8Array(this.options.analyserL.frequencyBinCount);
                 const arrR = new Uint8Array(this.options.analyserR.frequencyBinCount);
@@ -69,7 +70,6 @@ class AccuphaseVUMeterAnimation {
                 hasValidData = rmsL > 0.01 || rmsR > 0.01;
             }
 
-            // 2. Try single analyser data splitting (Bass for Left, Mids/Treble for Right)
             if (!hasValidData && data && data.length > 0) {
                 const binCount = data.length;
                 let sumL = 0, countL = 0;
@@ -96,22 +96,20 @@ class AccuphaseVUMeterAnimation {
             }
 
             if (hasValidData) {
-                this.targetL = Math.min(1.0, rmsL * 1.8);
-                this.targetR = Math.min(1.0, rmsR * 1.8);
+                this.targetL = Math.min(1.0, rmsL * 1.85);
+                this.targetR = Math.min(1.0, rmsR * 1.85);
             } else {
-                // Organic simulation synchronized with playback time
                 const t = now / 1000;
                 const beat = Math.sin(t * 3.8) * 0.28 + Math.sin(t * 7.4) * 0.18 + Math.cos(t * 1.9) * 0.22 + 0.38;
                 this.targetL = Math.max(0, Math.min(1.0, beat + Math.sin(t * 11) * 0.06));
                 this.targetR = Math.max(0, Math.min(1.0, beat * 0.95 + Math.cos(t * 9.2) * 0.08));
             }
         } else {
-            // Idle / paused: needles drop gracefully back to resting -∞ position
             this.targetL = 0;
             this.targetR = 0;
         }
 
-        // VU meter ballistics: snappy attack (~150ms rise), smooth damped decay (~350ms fall)
+        // IEC ballistic response: snappy rise (~150ms), smooth damped decay (~350ms)
         const attackRate = 18.0;
         const decayRate = 4.5;
         const speedL = this.targetL > this.needleL ? attackRate : decayRate;
@@ -120,639 +118,411 @@ class AccuphaseVUMeterAnimation {
         this.needleL += (this.targetL - this.needleL) * Math.min(1, speedL * dt);
         this.needleR += (this.targetR - this.needleR) * Math.min(1, speedR * dt);
 
-        if (this.isCompact) {
-            this.drawCompact(ctx, width, height, this.needleL, this.needleR);
+        this.renderConsole(ctx, width, height, this.needleL, this.needleR, this.isCompact);
+    }
+
+    renderConsole(ctx, width, height, levelL, levelR, isCompact) {
+        ctx.save();
+
+        const themeColor = getComputedStyle(document.documentElement).getPropertyValue('--c-500').trim() || '#10b981';
+
+        let consoleW, consoleH, consoleX, consoleY;
+
+        if (isCompact) {
+            // Footer bar mode: Stretches directly across the entire width of the player
+            const marginX = Math.min(6, width * 0.02);
+            const marginY = 2;
+            consoleW = width - marginX * 2;
+            consoleH = height - marginY * 2;
+            consoleX = marginX;
+            consoleY = marginY;
         } else {
-            this.drawFullAmp(ctx, width, height, this.needleL, this.needleR);
+            // Detail / Backdrop mode: Dynamically adapts to viewport aspect ratio
+            const maxW = Math.min(width * 0.96, 1200);
+            const maxH = Math.min(height * 0.85, 520);
+            const isMobile = width < 600;
+            const targetRatio = isMobile ? 2.0 : 2.5;
+
+            consoleW = maxW;
+            consoleH = consoleW / targetRatio;
+            if (consoleH > maxH) {
+                consoleH = maxH;
+                consoleW = consoleH * targetRatio;
+            }
+
+            consoleX = (width - consoleW) / 2;
+            consoleY = (height - consoleH) / 2;
         }
-    }
 
-    drawFullAmp(ctx, width, height, levelL, levelR) {
+        const scale = Math.min(consoleW / (isCompact ? 460 : 640), consoleH / (isCompact ? 60 : 220));
+        const cornerR = (isCompact ? 4 : 8) * scale;
+
+        // 1. Chassis Outer Shadow
         ctx.save();
-
-        // High-fidelity amplifier aspect ratio (~1.72:1)
-        const maxW = Math.min(width * 0.94, 940);
-        const maxH = height * 0.88;
-        let ampW = maxW;
-        let ampH = ampW / 1.72;
-        if (ampH > maxH) {
-            ampH = maxH;
-            ampW = ampH * 1.72;
-        }
-        const ampX = (width - ampW) / 2;
-        const ampY = (height - ampH) / 2;
-        const scale = ampW / 680;
-
-        // 1. Chassis Drop Shadow
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
-        ctx.shadowBlur = 35 * scale;
-        ctx.shadowOffsetY = 15 * scale;
-        ctx.fillStyle = '#111';
-        ctx.fillRect(ampX + 10 * scale, ampY + 10 * scale, ampW - 20 * scale, ampH - 10 * scale);
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
+        ctx.shadowBlur = (isCompact ? 6 : 24) * scale;
+        ctx.shadowOffsetY = (isCompact ? 2 : 8) * scale;
+        ctx.fillStyle = '#0a0b0d';
+        this.roundRect(ctx, consoleX, consoleY, consoleW, consoleH, cornerR);
+        ctx.fill();
         ctx.restore();
 
-        // 2. Vibration Isolator Feet
-        const footW = 54 * scale;
-        const footH = 14 * scale;
-        const footY = ampY + ampH - 2 * scale;
-        [ampX + 40 * scale, ampX + ampW - 40 * scale - footW].forEach(fx => {
-            const footGrad = ctx.createLinearGradient(fx, footY, fx + footW, footY);
-            footGrad.addColorStop(0, '#1c1c1e');
-            footGrad.addColorStop(0.5, '#3a3a3c');
-            footGrad.addColorStop(1, '#1c1c1e');
-            ctx.fillStyle = footGrad;
-            this.roundRect(ctx, fx, footY, footW, footH, 4 * scale);
-            ctx.fill();
-            ctx.fillStyle = '#111113';
-            ctx.fillRect(fx + 6 * scale, footY + footH - 4 * scale, footW - 12 * scale, 3 * scale);
-        });
-
-        // 3. Top Heatsink Fins (Behind Chassis)
-        const finY = ampY - 14 * scale;
-        const finH = 16 * scale;
-        const finW = ampW - 80 * scale;
-        const finX = ampX + 40 * scale;
-        ctx.fillStyle = '#18191c';
-        this.roundRect(ctx, finX, finY, finW, finH, 4 * scale);
-        ctx.fill();
-        ctx.fillStyle = '#0d0e10';
-        const louverCount = 28;
-        const louverW = (finW - 40 * scale) / louverCount;
-        for (let i = 0; i < louverCount; i++) {
-            ctx.fillRect(finX + 20 * scale + i * louverW + 2 * scale, finY + 3 * scale, louverW - 4 * scale, finH - 6 * scale);
-        }
-
-        // 4. Main Champagne Gold Faceplate
-        const r = 6 * scale;
-        const faceGrad = ctx.createLinearGradient(ampX, ampY, ampX + ampW, ampY + ampH);
-        faceGrad.addColorStop(0, '#e5d7c0');
-        faceGrad.addColorStop(0.2, '#f0e2cd');
-        faceGrad.addColorStop(0.4, '#dcceb4');
-        faceGrad.addColorStop(0.6, '#eddcc7');
-        faceGrad.addColorStop(0.85, '#d0bea2');
-        faceGrad.addColorStop(1, '#e3d5be');
-
-        ctx.fillStyle = faceGrad;
-        this.roundRect(ctx, ampX, ampY, ampW, ampH, r);
+        // 2. Chassis Brushed Dark Titanium Faceplate
+        const chassisGrad = ctx.createLinearGradient(consoleX, consoleY, consoleX + consoleW, consoleY + consoleH);
+        chassisGrad.addColorStop(0, '#1c1e24');
+        chassisGrad.addColorStop(0.3, '#2a2d36');
+        chassisGrad.addColorStop(0.5, '#22252e');
+        chassisGrad.addColorStop(0.8, '#2d303b');
+        chassisGrad.addColorStop(1, '#181a20');
+        ctx.fillStyle = chassisGrad;
+        this.roundRect(ctx, consoleX, consoleY, consoleW, consoleH, cornerR);
         ctx.fill();
 
-        // Top and Left Edge Metallic Highlight
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.lineWidth = 1.5 * scale;
+        // Top-Edge Metallic Light Reflection
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.lineWidth = 1 * scale;
         ctx.beginPath();
-        ctx.moveTo(ampX + r, ampY);
-        ctx.lineTo(ampX + ampW - r, ampY);
-        ctx.moveTo(ampX, ampY + r);
-        ctx.lineTo(ampX, ampY + ampH - r);
+        ctx.moveTo(consoleX + cornerR, consoleY + 1 * scale);
+        ctx.lineTo(consoleX + consoleW - cornerR, consoleY + 1 * scale);
         ctx.stroke();
 
-        // Bottom and Right Edge Bevel Shadow
-        ctx.strokeStyle = 'rgba(60, 50, 35, 0.45)';
+        // Bottom-Edge Shadow Bevel
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
         ctx.beginPath();
-        ctx.moveTo(ampX + r, ampY + ampH);
-        ctx.lineTo(ampX + ampW - r, ampY + ampH);
-        ctx.moveTo(ampX + ampW, ampY + r);
-        ctx.lineTo(ampX + ampW, ampY + ampH - r);
+        ctx.moveTo(consoleX + cornerR, consoleY + consoleH - 1 * scale);
+        ctx.lineTo(consoleX + consoleW - cornerR, consoleY + consoleH - 1 * scale);
         ctx.stroke();
 
-        // Fine Brushed Hairline Texture
-        ctx.save();
-        ctx.strokeStyle = 'rgba(120, 95, 60, 0.04)';
-        ctx.lineWidth = 1;
-        for (let y = ampY + 4; y < ampY + ampH - 4; y += 3) {
-            ctx.beginPath();
-            ctx.moveTo(ampX + 4, y);
-            ctx.lineTo(ampX + ampW - 4, y);
-            ctx.stroke();
-        }
-        ctx.restore();
-
-        // 5. Corner Hex Inset Screws
-        const screwInset = 16 * scale;
-        const screwR = 4 * scale;
-        [[ampX + screwInset, ampY + screwInset],
-         [ampX + ampW - screwInset, ampY + screwInset],
-         [ampX + screwInset, ampY + ampH - screwInset],
-         [ampX + ampW - screwInset, ampY + ampH - screwInset]].forEach(([sx, sy]) => {
-            ctx.save();
-            ctx.fillStyle = '#bfae92';
-            ctx.beginPath();
-            ctx.arc(sx, sy, screwR, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = '#7c6a50';
-            ctx.lineWidth = 1 * scale;
-            ctx.stroke();
-            ctx.strokeStyle = '#5a4a35';
-            ctx.beginPath();
-            ctx.moveTo(sx - screwR * 0.6, sy - screwR * 0.6);
-            ctx.lineTo(sx + screwR * 0.6, sy + screwR * 0.6);
-            ctx.stroke();
-            ctx.restore();
-        });
-
-        // 6. Upper Display Window (Smoked Glass Housing)
-        const winMarginX = 36 * scale;
-        const winMarginTop = 32 * scale;
-        const winW = ampW - winMarginX * 2;
-        const winH = ampH * 0.52;
-        const winX = ampX + winMarginX;
-        const winY = ampY + winMarginTop;
-
-        // Window Outer Recess Bevel
-        ctx.save();
-        ctx.fillStyle = '#1b1b1e';
-        this.roundRect(ctx, winX - 2 * scale, winY - 2 * scale, winW + 4 * scale, winH + 4 * scale, 4 * scale);
-        ctx.fill();
-        ctx.restore();
-
-        // Window Smoked Glass Frame
-        const winGrad = ctx.createLinearGradient(winX, winY, winX, winY + winH);
-        winGrad.addColorStop(0, '#0d0e11');
-        winGrad.addColorStop(0.5, '#121317');
-        winGrad.addColorStop(1, '#0a0b0d');
-        ctx.fillStyle = winGrad;
-        this.roundRect(ctx, winX, winY, winW, winH, 3 * scale);
-        ctx.fill();
-
-        // Inner Glass Shadow
-        ctx.save();
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.lineWidth = 3 * scale;
-        this.roundRect(ctx, winX + 1 * scale, winY + 1 * scale, winW - 2 * scale, winH - 2 * scale, 3 * scale);
+        // Subtle Theme-Tinted Anodized Accent Trim
+        ctx.strokeStyle = themeColor;
+        ctx.globalAlpha = 0.45;
+        ctx.lineWidth = 1 * scale;
+        this.roundRect(ctx, consoleX + 2 * scale, consoleY + 2 * scale, consoleW - 4 * scale, consoleH - 4 * scale, Math.max(2, cornerR - 2));
         ctx.stroke();
-        ctx.restore();
+        ctx.globalAlpha = 1.0;
 
-        // 7. Meter Windows & Center Column Layout
-        const centerColW = Math.max(68 * scale, winW * 0.14);
-        const meterPad = 12 * scale;
-        const meterW = (winW - centerColW - meterPad * 4) / 2;
-        const meterH = winH - meterPad * 2;
-        const meterY = winY + meterPad;
+        // 3. Fluid Stretchable Dual Meter + Center Partitioning
+        const padX = (isCompact ? 5 : 12) * scale;
+        const padY = (isCompact ? 4 : 10) * scale;
+        const innerW = consoleW - padX * 2;
+        const innerH = consoleH - padY * 2;
+        const innerX = consoleX + padX;
+        const innerY = consoleY + padY;
 
-        const leftMeterX = winX + meterPad;
-        const centerColX = leftMeterX + meterW + meterPad;
-        const rightMeterX = centerColX + centerColW + meterPad;
+        const centerW = Math.min(Math.max(54 * scale, innerW * (isCompact ? 0.16 : 0.18)), (isCompact ? 90 : 140) * scale);
+        const gap = (isCompact ? 4 : 8) * scale;
+        const meterW = (innerW - centerW - gap * 2) / 2;
+        const meterH = innerH;
 
-        // Draw Left Meter Dial (Channel 1)
-        this.drawSingleMeter(ctx, leftMeterX, meterY, meterW, meterH, levelL, scale, 'LEFT');
+        const leftX = innerX;
+        const centerX = leftX + meterW + gap;
+        const rightX = centerX + centerW + gap;
 
-        // Draw Center Status Column (Logo & Status Lamps)
-        this.drawCenterBadge(ctx, centerColX, meterY, centerColW, meterH, scale);
+        // 4. Render Left Meter (CH 1 · LEFT)
+        this.drawMeterPod(ctx, leftX, innerY, meterW, meterH, levelL, scale, 'CH 1 · LEFT', isCompact);
 
-        // Draw Right Meter Dial (Channel 2)
-        this.drawSingleMeter(ctx, rightMeterX, meterY, meterW, meterH, levelR, scale, 'RIGHT');
+        // 5. Render Center Console (LX-AUDIO Studio Brand Badge & Status LEDs)
+        this.drawCenterConsole(ctx, centerX, innerY, centerW, meterH, scale, themeColor, levelL, levelR, isCompact);
 
-        // 8. Model Name Text Below Glass
-        const modelTextY = winY + winH + 18 * scale;
-        ctx.save();
-        ctx.font = `${Math.round(11 * scale)}px "Copperplate", "Cinzel", "Times New Roman", serif`;
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#5a4933';
-        ctx.fillText('stereo power amplifier A-48S', ampX + ampW / 2, modelTextY);
-        ctx.restore();
-
-        // 9. Lower Control Section (Knobs, Switch, Class A)
-        const controlsY = modelTextY + 28 * scale;
-        this.drawControls(ctx, ampX, controlsY, ampW, ampH - (controlsY - ampY), scale);
+        // 6. Render Right Meter (CH 2 · RIGHT)
+        this.drawMeterPod(ctx, rightX, innerY, meterW, meterH, levelR, scale, 'CH 2 · RIGHT', isCompact);
 
         ctx.restore();
     }
 
-    drawSingleMeter(ctx, x, y, w, h, level, scale, channelName) {
+    drawMeterPod(ctx, x, y, w, h, level, scale, channelTitle, isCompact) {
         ctx.save();
+
+        const cornerR = (isCompact ? 3 : 5) * scale;
 
         // Clip to meter window
         ctx.beginPath();
-        this.roundRect(ctx, x, y, w, h, 3 * scale);
+        this.roundRect(ctx, x, y, w, h, cornerR);
         ctx.clip();
 
-        // Dial background: deep charcoal black
-        ctx.fillStyle = '#0c0d10';
+        // 1. Deep Smoked Velvet Background
+        const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
+        bgGrad.addColorStop(0, '#0d0f13');
+        bgGrad.addColorStop(0.5, '#111318');
+        bgGrad.addColorStop(1, '#090a0d');
+        ctx.fillStyle = bgGrad;
         ctx.fillRect(x, y, w, h);
 
-        // Warm vintage incandescent backlight glow
-        const glow = ctx.createRadialGradient(x + w / 2, y + h * 0.35, 10 * scale, x + w / 2, y + h * 0.35, w * 0.65);
-        glow.addColorStop(0, 'rgba(255, 218, 140, 0.14)');
-        glow.addColorStop(0.45, 'rgba(255, 185, 90, 0.05)');
-        glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = glow;
+        // 2. Warm Incandescent Backlit Lamp Glow
+        const glowX = x + w / 2;
+        const glowY = y + h * 0.35;
+        const glowR = Math.max(w * 0.65, h * 0.85);
+        const lampGlow = ctx.createRadialGradient(glowX, glowY, 4 * scale, glowX, glowY, glowR);
+        lampGlow.addColorStop(0, 'rgba(255, 215, 130, 0.18)');
+        lampGlow.addColorStop(0.35, 'rgba(255, 185, 80, 0.08)');
+        lampGlow.addColorStop(0.7, 'rgba(240, 160, 50, 0.02)');
+        lampGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = lampGlow;
         ctx.fillRect(x, y, w, h);
 
-        // Meter scale geometry: pivot at bottom center
-        const pcx = x + w / 2;
-        const pcy = y + h * 1.15;
-        const arcR = h * 0.95;
-
-        // Primary dB Arc: from -48° to +46° where 0° is straight up (-Math.PI / 2)
-        const startAng = (-90 - 48) * Math.PI / 180;
-        const zeroAng = (-90 + 24) * Math.PI / 180;
-        const endAng = (-90 + 46) * Math.PI / 180;
-
-        // 1. Draw Amber/Cream Arc (-∞ to 0 dB)
-        ctx.strokeStyle = '#d4c29c';
-        ctx.lineWidth = 1.6 * scale;
-        ctx.beginPath();
-        ctx.arc(pcx, pcy, arcR, startAng, zeroAng);
+        // 3. Inner Bezel Recess Shadow
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.lineWidth = 2 * scale;
+        this.roundRect(ctx, x + 1, y + 1, w - 2, h - 2, cornerR);
         ctx.stroke();
 
-        // 2. Draw Red Overload Arc (0 dB to +)
-        ctx.strokeStyle = '#ff3333';
-        ctx.lineWidth = 2.4 * scale;
+        // 4. Geometry for Curved Scales & Needle
+        const pivotX = x + w / 2;
+        const pivotY = y + h * (isCompact ? 1.25 : 1.15);
+        const arcRadius = Math.min(w * 0.58, h * (isCompact ? 1.05 : 0.95));
+
+        // Studio VU Angle Range: -46° to +44°
+        const startAng = (-90 - 46) * Math.PI / 180;
+        const zeroAng = (-90 + 20) * Math.PI / 180;
+        const endAng = (-90 + 44) * Math.PI / 180;
+
+        // Arc Stroke (Warm Gold up to 0dB, Vivid Coral Red from 0dB to +3dB)
+        ctx.strokeStyle = '#d5c49f';
+        ctx.lineWidth = (isCompact ? 1.4 : 1.8) * scale;
         ctx.beginPath();
-        ctx.arc(pcx, pcy, arcR, zeroAng, endAng);
+        ctx.arc(pivotX, pivotY, arcRadius, startAng, zeroAng);
         ctx.stroke();
 
-        // Major ticks definitions
-        const ticks = [
-            { deg: -48, label: '-∞' },
-            { deg: -40, label: '50' },
-            { deg: -32, label: '40' },
-            { deg: -24, label: '30' },
-            { deg: -15, label: '20' },
-            { deg: -5,  label: '10' },
-            { deg: +8,  label: '5' },
-            { deg: +24, label: '0', isRed: true },
-            { deg: +36, label: '3', isRed: true },
-            { deg: +46, label: '+', isRed: true }
+        ctx.strokeStyle = '#ff3838';
+        ctx.lineWidth = (isCompact ? 2.0 : 2.5) * scale;
+        ctx.beginPath();
+        ctx.arc(pivotX, pivotY, arcRadius, zeroAng, endAng);
+        ctx.stroke();
+
+        // Studio Standard dB Scale Ticks
+        const dbTicks = [
+            { deg: -46, label: '-20' },
+            { deg: -38, label: '-10' },
+            { deg: -30, label: '-7' },
+            { deg: -22, label: '-5' },
+            { deg: -13, label: '-3' },
+            { deg: -4,  label: '-1' },
+            { deg: +8,  label: '0', isRed: true },
+            { deg: +20, label: '+1', isRed: true },
+            { deg: +32, label: '+2', isRed: true },
+            { deg: +44, label: '+3', isRed: true }
         ];
 
-        ctx.font = `${Math.round(8.5 * scale)}px "Helvetica Neue", Arial, sans-serif`;
+        const fontSize = Math.max(7, Math.round((isCompact ? 7.5 : 9.5) * scale));
+        ctx.font = `600 ${fontSize}px "Helvetica Neue", -apple-system, Arial, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        ticks.forEach(t => {
+        dbTicks.forEach(t => {
             const rad = (-90 + t.deg) * Math.PI / 180;
             const cos = Math.cos(rad);
             const sin = Math.sin(rad);
 
-            const tickLen = 7 * scale;
-            const x1 = pcx + cos * arcR;
-            const y1 = pcy + sin * arcR;
-            const x2 = pcx + cos * (arcR + tickLen);
-            const y2 = pcy + sin * (arcR + tickLen);
+            const tickLen = (isCompact ? 4.5 : 6.5) * scale;
+            const x1 = pivotX + cos * arcRadius;
+            const y1 = pivotY + sin * arcRadius;
+            const x2 = pivotX + cos * (arcRadius + tickLen);
+            const y2 = pivotY + sin * (arcRadius + tickLen);
 
-            ctx.strokeStyle = t.isRed ? '#ff3333' : '#d4c29c';
-            ctx.lineWidth = (t.isRed ? 2 : 1.5) * scale;
+            ctx.strokeStyle = t.isRed ? '#ff3838' : '#d5c49f';
+            ctx.lineWidth = (t.isRed ? 1.8 : 1.2) * scale;
             ctx.beginPath();
             ctx.moveTo(x1, y1);
             ctx.lineTo(x2, y2);
             ctx.stroke();
 
-            // Label above tick
-            const labelR = arcR + tickLen + 8 * scale;
-            const lx = pcx + cos * labelR;
-            const ly = pcy + sin * labelR;
+            const labelR = arcRadius + tickLen + (isCompact ? 6 : 8) * scale;
+            const lx = pivotX + cos * labelR;
+            const ly = pivotY + sin * labelR;
 
-            ctx.fillStyle = t.isRed ? '#ff4d4d' : '#e6d8b8';
+            if (isCompact && scale < 0.85 && (t.label === '-7' || t.label === '+1')) return;
+
+            ctx.fillStyle = t.isRed ? '#ff4d4d' : '#e2d3b5';
             ctx.fillText(t.label, lx, ly);
         });
 
-        // Sub-ticks between major ticks
-        ctx.strokeStyle = '#8a7d66';
-        ctx.lineWidth = 1 * scale;
-        for (let d = -46; d <= 44; d += 2) {
-            if (ticks.some(t => Math.abs(t.deg - d) < 1.2)) continue;
+        // Sub-ticks
+        ctx.strokeStyle = '#7c6f59';
+        ctx.lineWidth = 0.9 * scale;
+        for (let d = -44; d <= 42; d += 2) {
+            if (dbTicks.some(t => Math.abs(t.deg - d) < 1.5)) continue;
             const rad = (-90 + d) * Math.PI / 180;
             const cos = Math.cos(rad);
             const sin = Math.sin(rad);
-            const isRed = d > 24;
-            ctx.strokeStyle = isRed ? '#cc2a2a' : '#8a7d66';
+            const isRed = d > 8;
+            ctx.strokeStyle = isRed ? '#cc2e2e' : '#7c6f59';
             ctx.beginPath();
-            ctx.moveTo(pcx + cos * arcR, pcy + sin * arcR);
-            ctx.lineTo(pcx + cos * (arcR + 4 * scale), pcy + sin * (arcR + 4 * scale));
+            ctx.moveTo(pivotX + cos * arcRadius, pivotY + sin * arcRadius);
+            ctx.lineTo(pivotX + cos * (arcRadius + 3 * scale), pivotY + sin * (arcRadius + 3 * scale));
             ctx.stroke();
         }
 
-        // Secondary Inner Arc: Power % Scale
-        const innerArcR = arcR * 0.86;
-        ctx.strokeStyle = 'rgba(180, 160, 125, 0.45)';
-        ctx.lineWidth = 1 * scale;
-        ctx.beginPath();
-        ctx.arc(pcx, pcy, innerArcR, startAng + 0.08, endAng);
-        ctx.stroke();
-
-        const percentTicks = [
-            { deg: -38, label: '0.001' },
-            { deg: -26, label: '0.01' },
-            { deg: -14, label: '0.1' },
-            { deg: -2,  label: '1' },
-            { deg: +12, label: '10' },
-            { deg: +26, label: '100' },
-            { deg: +38, label: '200%' }
-        ];
-
-        ctx.font = `${Math.round(6.5 * scale)}px "Helvetica Neue", Arial, sans-serif`;
-        percentTicks.forEach(pt => {
-            const rad = (-90 + pt.deg) * Math.PI / 180;
-            const cos = Math.cos(rad);
-            const sin = Math.sin(rad);
-
-            ctx.strokeStyle = 'rgba(200, 180, 140, 0.6)';
-            ctx.lineWidth = 1 * scale;
+        // Secondary % Modulation Arc (when space allows)
+        if (h > 65 * scale) {
+            const innerR = arcRadius * 0.88;
+            ctx.strokeStyle = 'rgba(180, 160, 120, 0.35)';
+            ctx.lineWidth = 0.8 * scale;
             ctx.beginPath();
-            ctx.moveTo(pcx + cos * innerArcR, pcy + sin * innerArcR);
-            ctx.lineTo(pcx + cos * (innerArcR - 4 * scale), pcy + sin * (innerArcR - 4 * scale));
+            ctx.arc(pivotX, pivotY, innerR, startAng, endAng);
             ctx.stroke();
 
-            const lx = pcx + cos * (innerArcR - 8 * scale);
-            const ly = pcy + sin * (innerArcR - 8 * scale);
-            ctx.fillStyle = 'rgba(215, 195, 160, 0.75)';
-            ctx.fillText(pt.label, lx, ly);
-        });
+            const pctTicks = [
+                { deg: -38, label: '10%' },
+                { deg: -22, label: '30%' },
+                { deg: -4,  label: '50%' },
+                { deg: +8,  label: '100%' },
+                { deg: +32, label: '150%' }
+            ];
 
-        // Center Dial Labels: "dB" & "PEAK POWER LEVEL"
-        const textY = y + h * 0.65;
-        ctx.font = `bold ${Math.round(11 * scale)}px "Times New Roman", Georgia, serif`;
-        ctx.fillStyle = '#e8d8b8';
-        ctx.fillText('dB', pcx, textY);
+            ctx.font = `${Math.max(5.5, Math.round(6.5 * scale))}px Arial, sans-serif`;
+            pctTicks.forEach(pt => {
+                const rad = (-90 + pt.deg) * Math.PI / 180;
+                const cos = Math.cos(rad);
+                const sin = Math.sin(rad);
+                ctx.fillStyle = 'rgba(210, 190, 150, 0.6)';
+                ctx.fillText(pt.label, pivotX + cos * (innerR - 6 * scale), pivotY + sin * (innerR - 6 * scale));
+            });
+        }
 
-        ctx.font = `${Math.round(6 * scale)}px "Helvetica Neue", Arial, sans-serif`;
-        ctx.fillStyle = 'rgba(200, 180, 140, 0.65)';
-        ctx.fillText('PEAK POWER LEVEL', pcx, textY + 9 * scale);
+        // Channel Inscription
+        ctx.font = `bold ${Math.max(6.5, Math.round((isCompact ? 7.5 : 9) * scale))}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.fillStyle = 'rgba(230, 215, 185, 0.85)';
+        ctx.fillText(channelTitle, pivotX, y + h * (isCompact ? 0.72 : 0.64));
 
-        // Subtle Rating / Channel label
-        ctx.font = `${Math.round(5.5 * scale)}px monospace`;
-        ctx.fillStyle = 'rgba(160, 140, 110, 0.4)';
-        const bottomLabel = channelName === 'RIGHT' ? '0dB=50WATTS AT 8OHMS' : 'HIGH FIDELITY STEREO';
-        ctx.fillText(bottomLabel, pcx, y + h - 8 * scale);
+        ctx.font = `${Math.max(5.5, Math.round(6.5 * scale))}px monospace`;
+        ctx.fillStyle = 'rgba(160, 145, 120, 0.5)';
+        ctx.fillText('VU · STUDIO REFERENCE', pivotX, y + h * (isCompact ? 0.86 : 0.74));
 
-        // Dynamic Needle
+        // 5. Dynamic Needle Pointer
         const norm = Math.pow(Math.max(0, Math.min(1.0, level)), 0.65);
-        const needleDeg = -48 + norm * 94;
+        const needleDeg = -46 + norm * 90;
         const needleRad = (-90 + needleDeg) * Math.PI / 180;
-        const needleLen = arcR + 10 * scale;
+        const needleLen = arcRadius + (isCompact ? 7 : 10) * scale;
 
         const cosN = Math.cos(needleRad);
         const sinN = Math.sin(needleRad);
 
-        // Needle drop shadow
+        // Moving Drop Shadow
         ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
         ctx.shadowBlur = 4 * scale;
-        ctx.shadowOffsetX = 2 * scale;
+        ctx.shadowOffsetX = 1.5 * scale;
         ctx.shadowOffsetY = 2 * scale;
 
-        // Tapered fluorescent red needle
-        ctx.strokeStyle = '#ff2c2c';
-        ctx.lineWidth = 1.8 * scale;
+        // Tapered Fluorescent Needle
+        ctx.strokeStyle = '#ff2b2b';
+        ctx.lineWidth = (isCompact ? 1.5 : 1.9) * scale;
         ctx.beginPath();
-        ctx.moveTo(pcx, pcy);
-        ctx.lineTo(pcx + cosN * needleLen, pcy + sinN * needleLen);
+        ctx.moveTo(pivotX, pivotY);
+        ctx.lineTo(pivotX + cosN * needleLen, pivotY + sinN * needleLen);
+        ctx.stroke();
+
+        // Counterweight tail
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 2.2 * scale;
+        ctx.beginPath();
+        ctx.moveTo(pivotX, pivotY);
+        ctx.lineTo(pivotX - cosN * (12 * scale), pivotY - sinN * (12 * scale));
         ctx.stroke();
         ctx.restore();
 
-        // Circular Pivot Hub
-        const hubR = 10 * scale;
-        const hubGrad = ctx.createRadialGradient(pcx, pcy, 2 * scale, pcx, pcy, hubR);
-        hubGrad.addColorStop(0, '#444');
-        hubGrad.addColorStop(0.5, '#1e1f24');
+        // Turned Metal Pivot Cap
+        const hubR = (isCompact ? 7 : 9.5) * scale;
+        const hubGrad = ctx.createRadialGradient(pivotX, pivotY, 1 * scale, pivotX, pivotY, hubR);
+        hubGrad.addColorStop(0, '#555');
+        hubGrad.addColorStop(0.6, '#222');
         hubGrad.addColorStop(1, '#0e0f12');
         ctx.fillStyle = hubGrad;
         ctx.beginPath();
-        ctx.arc(pcx, pcy, hubR, 0, Math.PI * 2);
+        ctx.arc(pivotX, pivotY, hubR, 0, Math.PI * 2);
         ctx.fill();
 
-        // Center metallic rivet dot
         ctx.fillStyle = '#bbb';
         ctx.beginPath();
-        ctx.arc(pcx, pcy, 2.5 * scale, 0, Math.PI * 2);
+        ctx.arc(pivotX, pivotY, 2 * scale, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.restore();
     }
 
-    drawCenterBadge(ctx, x, y, w, h, scale) {
+    drawCenterConsole(ctx, x, y, w, h, scale, themeColor, levelL, levelR, isCompact) {
         ctx.save();
-        ctx.fillStyle = '#0b0c0f';
-        this.roundRect(ctx, x, y, w, h, 3 * scale);
+
+        const cornerR = (isCompact ? 3 : 5) * scale;
+        ctx.fillStyle = '#0b0d10';
+        this.roundRect(ctx, x, y, w, h, cornerR);
         ctx.fill();
+
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.lineWidth = 1.5 * scale;
+        this.roundRect(ctx, x + 1, y + 1, w - 2, h - 2, cornerR);
+        ctx.stroke();
 
         const cx = x + w / 2;
 
-        // 1. Glowing Accuphase Cursive Script Logo
-        const logoY = y + h * 0.26;
+        // 1. Bespoke "LX-AUDIO" Studio Brand Emblem
+        const logoY = y + h * (isCompact ? 0.32 : 0.28);
         ctx.save();
-        ctx.font = `italic bold ${Math.round(15 * scale)}px "Brush Script MT", "Palatino", "Apple Chancery", cursive, serif`;
+        ctx.font = `900 ${Math.max(8, Math.round((isCompact ? 10.5 : 14) * scale))}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.shadowColor = '#10b981';
-        ctx.shadowBlur = 10 * scale;
-        ctx.fillStyle = '#34d399';
-        ctx.fillText('Accuphase', cx, logoY);
+        ctx.letterSpacing = `${1.5 * scale}px`;
+        ctx.shadowColor = themeColor;
+        ctx.shadowBlur = (isCompact ? 6 : 10) * scale;
+        ctx.fillStyle = themeColor;
+        ctx.fillText('LX-AUDIO', cx, logoY);
         ctx.restore();
 
-        // 2. Vertical Status Indicator Badges
-        const badgeW = w * 0.78;
-        const badgeH = 12 * scale;
-        const startY = y + h * 0.46;
-        const gap = 4 * scale;
+        ctx.font = `600 ${Math.max(5.5, Math.round((isCompact ? 5.5 : 7) * scale))}px monospace`;
+        ctx.fillStyle = 'rgba(200, 200, 200, 0.45)';
+        ctx.textAlign = 'center';
+        ctx.fillText(isCompact ? 'DUAL VU' : 'PRECISION MONITOR', cx, logoY + (isCompact ? 10 : 13) * scale);
 
-        const indicators = [
-            { text: 'BRIDGE', active: false },
-            { text: 'DUAL MONO', active: false },
-            { text: 'BALANCED', active: true },
-            { text: 'LINE', active: false }
-        ];
+        // 2. Dynamic Overload & Status Indicators
+        const isPeakOverload = levelL > 0.82 || levelR > 0.82;
+        const badgeW = w * 0.82;
+        const badgeH = Math.max(9, (isCompact ? 10 : 13) * scale);
+        const startY = logoY + (isCompact ? 18 : 28) * scale;
+        const gap = (isCompact ? 3 : 5) * scale;
+
+        const indicators = isCompact 
+            ? [
+                { text: 'STEREO', active: true, color: themeColor },
+                { text: 'PEAK', active: isPeakOverload, color: '#ff3b30' }
+              ]
+            : [
+                { text: 'STEREO', active: true, color: themeColor },
+                { text: 'HI-RES 96k', active: true, color: '#f59e0b' },
+                { text: 'PEAK DYN', active: isPeakOverload, color: '#ff3b30' },
+                { text: 'STUDIO REF', active: false, color: '#6b7280' }
+              ];
 
         indicators.forEach((ind, i) => {
             const by = startY + i * (badgeH + gap);
+            if (by + badgeH > y + h - 2) return;
+
             const bx = cx - badgeW / 2;
 
-            ctx.fillStyle = ind.active ? '#200808' : '#141518';
+            ctx.fillStyle = ind.active ? '#15171d' : '#0e1014';
             this.roundRect(ctx, bx, by, badgeW, badgeH, 2 * scale);
             ctx.fill();
 
-            ctx.strokeStyle = ind.active ? '#661414' : '#22242a';
-            ctx.lineWidth = 1 * scale;
+            ctx.strokeStyle = ind.active ? 'rgba(255,255,255,0.15)' : '#1a1c22';
+            ctx.lineWidth = 0.8 * scale;
             this.roundRect(ctx, bx, by, badgeW, badgeH, 2 * scale);
             ctx.stroke();
 
             ctx.save();
-            ctx.font = `bold ${Math.round(6.5 * scale)}px "Helvetica Neue", Arial, sans-serif`;
+            ctx.font = `bold ${Math.max(5.5, Math.round((isCompact ? 6 : 7) * scale))}px Arial, sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
             if (ind.active) {
-                ctx.shadowColor = '#ff4433';
-                ctx.shadowBlur = 6 * scale;
-                ctx.fillStyle = '#ff4433';
+                ctx.shadowColor = ind.color;
+                ctx.shadowBlur = 5 * scale;
+                ctx.fillStyle = ind.color;
             } else {
-                ctx.fillStyle = '#3a3d45';
+                ctx.fillStyle = '#374151';
             }
 
             ctx.fillText(ind.text, cx, by + badgeH / 2);
             ctx.restore();
         });
-
-        ctx.restore();
-    }
-
-    drawControls(ctx, ampX, controlsY, ampW, controlsH, scale) {
-        ctx.save();
-        const cx = ampX + ampW / 2;
-
-        // Left Knob: SPEAKER
-        const k1x = ampX + ampW * 0.16;
-        const k1y = controlsY + 12 * scale;
-        this.drawKnob(ctx, k1x, k1y, 16 * scale, scale, 'SPEAKER', ['A', 'B', 'A+B'], 1);
-
-        // Knob 2: METER
-        const k2x = ampX + ampW * 0.32;
-        this.drawKnob(ctx, k2x, k1y, 16 * scale, scale, 'METER', ['OFF', 'NORM', '3 SEC', '∞'], 1);
-
-        // Center: Rectangular POWER Switch
-        const pBtnW = 40 * scale;
-        const pBtnH = 26 * scale;
-        const pBtnX = cx - pBtnW / 2;
-        const pBtnY = k1y - pBtnH / 2;
-
-        ctx.fillStyle = '#2a2218';
-        this.roundRect(ctx, pBtnX - 2 * scale, pBtnY - 2 * scale, pBtnW + 4 * scale, pBtnH + 4 * scale, 3 * scale);
-        ctx.fill();
-
-        const btnGrad = ctx.createLinearGradient(pBtnX, pBtnY, pBtnX + pBtnW, pBtnY + pBtnH);
-        btnGrad.addColorStop(0, '#f2e4cf');
-        btnGrad.addColorStop(0.5, '#d4c2a5');
-        btnGrad.addColorStop(1, '#ebdcc3');
-        ctx.fillStyle = btnGrad;
-        this.roundRect(ctx, pBtnX, pBtnY, pBtnW, pBtnH, 2 * scale);
-        ctx.fill();
-
-        // Power Indicator LED
-        ctx.save();
-        ctx.shadowColor = '#10b981';
-        ctx.shadowBlur = 4 * scale;
-        ctx.fillStyle = '#34d399';
-        ctx.fillRect(pBtnX + 6 * scale, pBtnY + pBtnH / 2 - 1 * scale, pBtnW - 12 * scale, 2 * scale);
-        ctx.restore();
-
-        ctx.font = `bold ${Math.round(7.5 * scale)}px Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#5c4832';
-        ctx.fillText('POWER', cx, pBtnY - 6 * scale);
-
-        // Right script: "Class A"
-        const classAX = ampX + ampW * 0.68;
-        ctx.font = `italic ${Math.round(16 * scale)}px "Times New Roman", Georgia, serif`;
-        ctx.fillStyle = '#5a4630';
-        ctx.textAlign = 'center';
-        ctx.fillText('Class A', classAX, k1y + 6 * scale);
-
-        // Right: INPUT button
-        const inBtnX = ampX + ampW * 0.77;
-        const inBtnW = 12 * scale;
-        const inBtnH = 12 * scale;
-        ctx.fillStyle = '#2a2218';
-        ctx.fillRect(inBtnX - 1 * scale, k1y - inBtnH / 2 - 1 * scale, inBtnW + 2 * scale, inBtnH + 2 * scale);
-        ctx.fillStyle = '#d5c5aa';
-        ctx.fillRect(inBtnX, k1y - inBtnH / 2, inBtnW, inBtnH);
-        ctx.font = `${Math.round(6.5 * scale)}px Arial, sans-serif`;
-        ctx.fillStyle = '#5c4832';
-        ctx.fillText('INPUT', inBtnX + inBtnW / 2, k1y - inBtnH / 2 - 6 * scale);
-
-        // Right Knob: GAIN
-        const k3x = ampX + ampW * 0.88;
-        this.drawKnob(ctx, k3x, k1y, 16 * scale, scale, 'GAIN', ['MAX', '-3dB', '-6dB', '-12dB'], 0);
-
-        ctx.restore();
-    }
-
-    drawKnob(ctx, x, y, r, scale, label, ticks, activeIdx) {
-        ctx.save();
-        ctx.font = `bold ${Math.round(7 * scale)}px Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#5c4832';
-        ctx.fillText(label, x, y - r - 8 * scale);
-
-        if (ticks && ticks.length > 0) {
-            ctx.font = `${Math.round(5.5 * scale)}px Arial, sans-serif`;
-            const startDeg = -135;
-            const endDeg = -45;
-            const step = (endDeg - startDeg) / Math.max(1, ticks.length - 1);
-            ticks.forEach((t, i) => {
-                const rad = (startDeg + i * step) * Math.PI / 180;
-                const lx = x + Math.cos(rad) * (r + 7 * scale);
-                const ly = y + Math.sin(rad) * (r + 7 * scale);
-                ctx.fillStyle = i === activeIdx ? '#7a6042' : '#99856c';
-                ctx.fillText(t, lx, ly);
-            });
-        }
-
-        ctx.save();
-        ctx.shadowColor = 'rgba(0,0,0,0.3)';
-        ctx.shadowBlur = 4 * scale;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fillStyle = '#bfae92';
-        ctx.fill();
-        ctx.restore();
-
-        const knobGrad = ctx.createLinearGradient(x - r, y - r, x + r, y + r);
-        knobGrad.addColorStop(0, '#f2e4cf');
-        knobGrad.addColorStop(0.5, '#cbb898');
-        knobGrad.addColorStop(1, '#eedec7');
-        ctx.fillStyle = knobGrad;
-        ctx.beginPath();
-        ctx.arc(x, y, r - 1 * scale, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = '#5c4832';
-        ctx.lineWidth = 1.5 * scale;
-        ctx.beginPath();
-        ctx.moveTo(x, y - r * 0.4);
-        ctx.lineTo(x, y - r * 0.9);
-        ctx.stroke();
-
-        ctx.restore();
-    }
-
-    drawCompact(ctx, width, height, levelL, levelR) {
-        ctx.save();
-        // Compact Panoramic Dual VU Console for Bottom Playback Bar
-        const scale = Math.min(width / 600, height / 85);
-        const consoleH = Math.min(height, 88 * scale);
-        const consoleW = Math.min(width * 0.98, consoleH * 4.6);
-        const consoleX = (width - consoleW) / 2;
-        const consoleY = (height - consoleH) / 2;
-
-        // Champagne gold outer framing
-        const r = 4 * scale;
-        const bezelGrad = ctx.createLinearGradient(consoleX, consoleY, consoleX + consoleW, consoleY + consoleH);
-        bezelGrad.addColorStop(0, '#e5d7c0');
-        bezelGrad.addColorStop(0.5, '#eddcc7');
-        bezelGrad.addColorStop(1, '#d0bea2');
-        ctx.fillStyle = bezelGrad;
-        this.roundRect(ctx, consoleX, consoleY, consoleW, consoleH, r);
-        ctx.fill();
-
-        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-        ctx.lineWidth = 1 * scale;
-        ctx.stroke();
-
-        // Smoked glass window inside bezel
-        const innerPad = 4 * scale;
-        const winX = consoleX + innerPad;
-        const winY = consoleY + innerPad;
-        const winW = consoleW - innerPad * 2;
-        const winH = consoleH - innerPad * 2;
-
-        ctx.fillStyle = '#0c0d10';
-        this.roundRect(ctx, winX, winY, winW, winH, 2 * scale);
-        ctx.fill();
-
-        const centerW = Math.max(54 * scale, winW * 0.16);
-        const meterW = (winW - centerW - 8 * scale) / 2;
-        const meterH = winH - 4 * scale;
-        const meterY = winY + 2 * scale;
-
-        const leftX = winX + 2 * scale;
-        const centerX = leftX + meterW + 2 * scale;
-        const rightX = centerX + centerW + 2 * scale;
-
-        this.drawSingleMeter(ctx, leftX, meterY, meterW, meterH, levelL, scale * 0.95, 'LEFT');
-        this.drawCenterBadge(ctx, centerX, meterY, centerW, meterH, scale * 0.85);
-        this.drawSingleMeter(ctx, rightX, meterY, meterW, meterH, levelR, scale * 0.95, 'RIGHT');
 
         ctx.restore();
     }
@@ -811,14 +581,14 @@ const musicVisualizer = (function () {
             }
 
             if (needFooter) {
-                if (!standaloneFooterVU) standaloneFooterVU = new AccuphaseVUMeterAnimation({ isCompact: true, analyserL, analyserR });
+                if (!standaloneFooterVU) standaloneFooterVU = new LXStudioVUMeterAnimation({ isCompact: true, analyserL, analyserR });
                 const ctx = footerCanvas.getContext('2d');
                 ctx.clearRect(0, 0, footerCanvas.width, footerCanvas.height);
                 standaloneFooterVU.draw(null, ctx);
             }
 
             if (needDetail) {
-                if (!standaloneDetailVU) standaloneDetailVU = new AccuphaseVUMeterAnimation({ isCompact: false, analyserL, analyserR });
+                if (!standaloneDetailVU) standaloneDetailVU = new LXStudioVUMeterAnimation({ isCompact: false, analyserL, analyserR });
                 const ctx = detailCanvas.getContext('2d');
                 ctx.clearRect(0, 0, detailCanvas.width, detailCanvas.height);
                 standaloneDetailVU.draw(null, ctx);
@@ -907,14 +677,13 @@ const musicVisualizer = (function () {
             applySettings();
         } catch (e) {
             console.error('[Visualizer] Initialization failed:', e);
-            // Fallback to standalone loop
             syncSize();
             triggerStandaloneLoop();
         }
     }
 
     /**
-     * Sync canvas resolutions.
+     * Sync canvas resolutions with DPR.
      */
     function syncSize() {
         [footerCanvas, detailCanvas].forEach(canvas => {
@@ -922,8 +691,8 @@ const musicVisualizer = (function () {
             const rect = canvas.getBoundingClientRect();
             if (rect.width === 0) return;
             const dpr = window.devicePixelRatio || 1;
-            canvas.width = rect.width * dpr;
-            canvas.height = rect.height * dpr;
+            canvas.width = Math.round(rect.width * dpr);
+            canvas.height = Math.round(rect.height * dpr);
         });
     }
 
@@ -940,13 +709,12 @@ const musicVisualizer = (function () {
         const globalGap = globalStyle === 'blocks' ? 2 : 0;
         const visualizerContainer = document.getElementById('visualizer-container');
 
-        // Check if Wave or standalone loop handles it
         if (!isInitialized) {
             triggerStandaloneLoop();
             if (s.showFooterVisualizer && footerCanvas && visualizerContainer) {
                 if (s.footerVisualizerStyle === 'vumeter') {
                     footerCanvas.style.opacity = Math.max(opacity, 0.95);
-                    visualizerContainer.style.height = window.innerHeight <= 845 ? '64px' : '96px';
+                    visualizerContainer.style.height = window.innerHeight <= 845 ? '52px' : '72px';
                     visualizerContainer.style.display = 'flex';
                 }
             }
@@ -972,7 +740,7 @@ const musicVisualizer = (function () {
                 footerCanvas.style.width = '100%';
                 footerCanvas.style.height = '100%';
                 syncSize();
-                waveFooter.addAnimation(new AccuphaseVUMeterAnimation({ isCompact: true, analyserL, analyserR }));
+                waveFooter.addAnimation(new LXStudioVUMeterAnimation({ isCompact: true, analyserL, analyserR }));
                 footerCanvas.style.opacity = Math.max(opacity, 0.95);
             } else {
                 if (globalStyle === 'blocks') {
@@ -1022,13 +790,13 @@ const musicVisualizer = (function () {
 
             const footerIsHidden = playerFooter && playerFooter.classList.contains('translate-y-[110%]');
             const isShortWindow = window.innerHeight <= 845;
-            visualizerContainer.style.height = isShortWindow ? (style === 'vumeter' ? '64px' : '40px') : (style === 'vumeter' ? '96px' : '100px');
+            visualizerContainer.style.height = isShortWindow ? (style === 'vumeter' ? '52px' : '40px') : (style === 'vumeter' ? '72px' : '100px');
             visualizerContainer.style.zIndex = '1';
             visualizerContainer.style.display = 'flex';
             if (playerFooter) {
                 playerFooter.style.transition = 'height 0.3s ease';
                 if (window.innerWidth >= 768) {
-                    playerFooter.style.height = isShortWindow ? '90px' : '150px';
+                    playerFooter.style.height = isShortWindow ? '90px' : (style === 'vumeter' ? '125px' : '150px');
                     playerFooter.style.justifyContent = 'center';
                 } else {
                     playerFooter.style.height = '';
@@ -1097,7 +865,7 @@ const musicVisualizer = (function () {
         if (s.showDetailVisualizer && detailCanvas) {
             const style = s.detailVisualizerStyle || 'pulse';
             if (style === 'vumeter') {
-                waveDetail.addAnimation(new AccuphaseVUMeterAnimation({ isCompact: false, analyserL, analyserR }));
+                waveDetail.addAnimation(new LXStudioVUMeterAnimation({ isCompact: false, analyserL, analyserR }));
                 detailCanvas.style.opacity = Math.max(opacity, 0.95);
             } else {
                 const options = {
@@ -1162,10 +930,22 @@ const musicVisualizer = (function () {
         });
     }
 
+    // Window & Orientation resize listeners
     window.addEventListener('resize', () => {
         syncSize();
         applySettings();
     });
+
+    // Native ResizeObserver for instant zero-lag stretching when window/container changes
+    if (typeof window !== 'undefined' && window.ResizeObserver) {
+        const resizeObserver = new ResizeObserver(() => {
+            syncSize();
+        });
+        if (footerCanvas) resizeObserver.observe(footerCanvas);
+        if (detailCanvas) resizeObserver.observe(detailCanvas);
+        const vContainer = document.getElementById('visualizer-container');
+        if (vContainer) resizeObserver.observe(vContainer);
+    }
 
     return { init, applySettings, syncSize, clear };
 })();
