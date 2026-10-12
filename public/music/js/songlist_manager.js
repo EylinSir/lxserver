@@ -252,25 +252,31 @@ window.SongListManager = (function () {
             // Clear old data to prevent flickering
             detailState.info = null;
             detailState.list = [];
-            document.getElementById('sl-detail-name').innerText = '正在加载...';
-            document.getElementById('sl-detail-title').innerText = '加载中...';
-            if (window.setImg) window.setImg('sl-detail-cover', '/music/assets/logo.svg');
-            else document.getElementById('sl-detail-cover').src = '/music/assets/logo.svg';
-            document.getElementById('sl-detail-author').innerText = '';
-            document.getElementById('sl-detail-subtitle').innerText = '正在加载歌单详情...';
+            const nameEl = document.getElementById('sl-detail-name');
+            if (nameEl) nameEl.innerText = '正在加载...';
+            const titleEl = document.getElementById('sl-detail-title');
+            if (titleEl) titleEl.innerText = '加载中...';
+            if (window.setImg) {
+                window.setImg('sl-detail-cover', '/music/assets/logo.svg');
+                window.setImg('sl-mini-cover', '/music/assets/logo.svg');
+            } else {
+                const cover = document.getElementById('sl-detail-cover');
+                if (cover) cover.src = '/music/assets/logo.svg';
+                const miniCover = document.getElementById('sl-mini-cover');
+                if (miniCover) miniCover.src = '/music/assets/logo.svg';
+            }
+            const authorEl = document.getElementById('sl-detail-author');
+            if (authorEl) authorEl.innerText = '';
+            const subTitleEl = document.getElementById('sl-detail-subtitle');
+            if (subTitleEl) subTitleEl.innerText = '正在加载歌单详情...';
             const descEl = document.getElementById('sl-detail-desc');
             if (descEl) descEl.innerText = '正在拉取详情，请稍后...';
             const statsEl = document.getElementById('sl-detail-stats');
             if (statsEl) statsEl.innerHTML = '';
 
-            // Reset header collapse state
-            const header = document.getElementById('sl-detail-header');
-            const icon = document.getElementById('sl-detail-collapse-icon');
-            if (header && icon && header.classList.contains('is-collapsed')) {
-                header.classList.remove('is-collapsed', 'max-h-0', 'opacity-0', 'py-0', 'border-b-0', 'pointer-events-none');
-                header.classList.add('max-h-[1000px]', 'p-4', 'md:p-6', 'border-b');
-                icon.style.transform = 'rotate(0deg)';
-            }
+            // Reset header collapse state & bind scroll listener
+            expandSongListDetailHeader();
+            initSongListScrollListener();
 
         }
 
@@ -516,8 +522,26 @@ window.SongListManager = (function () {
             titleEl.innerHTML = window.createMarqueeHtml ? window.createMarqueeHtml(info.name) : info.name;
         }
 
-        if (window.setImg) window.setImg('sl-detail-cover', info.img || info.cover || '/music/assets/logo.svg');
-        else document.getElementById('sl-detail-cover').src = info.img || info.cover || '/music/assets/logo.svg';
+        const coverUrl = info.img || info.cover || '/music/assets/logo.svg';
+        if (window.setImg) {
+            window.setImg('sl-detail-cover', coverUrl);
+            window.setImg('sl-mini-cover', coverUrl);
+        } else {
+            const cover = document.getElementById('sl-detail-cover');
+            if (cover) cover.src = coverUrl;
+            const miniCover = document.getElementById('sl-mini-cover');
+            if (miniCover) miniCover.src = coverUrl;
+        }
+
+        const sourceNames = { kw: '酷我音乐', kg: '酷狗音乐', tx: 'QQ音乐', wy: '网易云音乐', mg: '咪咕音乐' };
+        const sourceLabel = sourceNames[detailState.source] || (detailState.source ? detailState.source.toUpperCase() : '歌单推荐');
+        const sourceTag = document.getElementById('sl-detail-source-tag');
+        if (sourceTag) sourceTag.textContent = sourceLabel;
+        const miniSourceBadge = document.getElementById('sl-mini-source-badge');
+        if (miniSourceBadge) {
+            miniSourceBadge.textContent = sourceLabel;
+            miniSourceBadge.classList.remove('hidden');
+        }
 
         const authorEl = document.getElementById('sl-detail-author');
         if (authorEl) {
@@ -527,13 +551,13 @@ window.SongListManager = (function () {
         // Render stats (time, song count, play count)
         const statsHtml = [];
         const totalSongs = detailState.total || info.total || detailState.list.length;
-        statsHtml.push(`<span><i class="fas fa-music text-[10px] mr-1"></i>${totalSongs} 首歌曲</span>`);
+        statsHtml.push(`<span class="px-2 py-0.5 rounded-md bg-gray-500/10 border t-border-main"><i class="fas fa-music text-[10px] mr-1 text-emerald-500"></i>${totalSongs} 首歌曲</span>`);
 
         if (info.play_count || info.playCount) {
-            statsHtml.push(`<span><i class="fas fa-headphones text-[10px] mr-1"></i>${info.play_count || formatPlayCount(info.playCount)}</span>`);
+            statsHtml.push(`<span class="px-2 py-0.5 rounded-md bg-gray-500/10 border t-border-main"><i class="fas fa-headphones text-[10px] mr-1 text-emerald-500"></i>${info.play_count || formatPlayCount(info.playCount)}</span>`);
         }
         if (info.time) {
-            statsHtml.push(`<span><i class="far fa-calendar text-[10px] mr-1"></i>${info.time}</span>`);
+            statsHtml.push(`<span class="px-2 py-0.5 rounded-md bg-gray-500/10 border t-border-main"><i class="far fa-calendar text-[10px] mr-1 text-emerald-500"></i>${info.time}</span>`);
         }
 
         const statsEl = document.getElementById('sl-detail-stats');
@@ -545,27 +569,32 @@ window.SongListManager = (function () {
         const countEl = document.getElementById('sl-detail-count');
         if (countEl) countEl.style.display = 'none';
 
-        document.getElementById('sl-detail-subtitle').innerText = `${info.author ? info.author + ' · ' : ''}${totalSongs} 首`;
+        const subTitleEl = document.getElementById('sl-detail-subtitle');
+        if (subTitleEl) {
+            subTitleEl.innerText = `${info.author ? info.author + ' · ' : ''}${totalSongs} 首${(info.play_count || info.playCount) ? ' · ' + (info.play_count || formatPlayCount(info.playCount)) + '播放' : ''}`;
+        }
 
         const descEl = document.getElementById('sl-detail-desc');
         const descBtn = document.getElementById('sl-detail-desc-btn');
-        descEl.innerText = info.desc || '暂无介绍';
-
-        // Reset description styles
-        descEl.classList.add('line-clamp-3', 'md:line-clamp-4');
-        descEl.dataset.expanded = 'false';
+        if (descEl) {
+            descEl.innerText = info.desc || '暂无介绍';
+            descEl.classList.add('line-clamp-2', 'md:line-clamp-3');
+            descEl.dataset.expanded = 'false';
+        }
         if (descBtn) {
             descBtn.innerHTML = '展开全部 <i class="fas fa-chevron-down text-[10px] ml-0.5"></i>';
             descBtn.classList.add('hidden');
 
             // Wait for next frame to check if text overflows
             requestAnimationFrame(() => {
-                // If scrollHeight is greater than clientHeight, it means it is truncated
-                if (descEl.scrollHeight > descEl.clientHeight) {
+                if (descEl && descEl.scrollHeight > descEl.clientHeight) {
                     descBtn.classList.remove('hidden');
                 }
             });
         }
+
+        // Update favorite buttons
+        updateSongListFavButtons(isSongListFavorited(detailState.id, detailState.source));
 
         // --- Unified Search & Filtering Logic ---
         const displayList = window.ListSearch.getDisplayList(detailState.list);
@@ -801,9 +830,15 @@ window.SongListManager = (function () {
             loadDetail(id, source);
         },
         closeDetail: function () {
+            removeSongListScrollListener();
             const detailView = document.getElementById('songlist-detail-view');
-            detailView.classList.add('translate-x-full');
-            setTimeout(() => detailView.classList.add('hidden'), 300);
+            if (detailView) {
+                detailView.classList.add('translate-x-full');
+                setTimeout(() => {
+                    detailView.classList.add('hidden');
+                    expandSongListDetailHeader();
+                }, 300);
+            }
         },
         toggleTagSelector,
         playSong: function (index) {
@@ -1215,24 +1250,201 @@ function formatPlayCount(count) {
 
 /**
  * Toggle the visibility of the song list detail header (cover, description, etc.)
- * to allow more space for the song list itself.
  */
-function toggleSlDetailHeader() {
-    const header = document.getElementById('sl-detail-header');
-    const icon = document.getElementById('sl-detail-collapse-icon');
-    if (!header || !icon) return;
+let slScrollRaf = null;
+let slMiniBarHideTimeout = null;
 
-    const isCollapsed = header.classList.contains('is-collapsed');
+function updateSlMiniExpandButton(st) {
+    const btn = document.getElementById('sl-mini-expand-btn');
+    if (!btn) return;
+    const atTop = st <= 20;
+    btn.title = atTop ? '展开歌单详情卡片' : '回到列表顶部';
+    const iconEl = btn.querySelector('i');
+    const textEl = btn.querySelector('span');
+    if (iconEl) iconEl.className = atTop ? 'fas fa-chevron-down text-[10px]' : 'fas fa-arrow-up text-[10px]';
+    if (textEl) textEl.textContent = atTop ? '展开' : '顶部';
+}
 
-    if (isCollapsed) {
-        // Restore
-        header.classList.remove('is-collapsed', 'max-h-0', 'opacity-0', 'py-0', 'border-b-0', 'pointer-events-none');
-        header.classList.add('max-h-[1000px]', 'p-4', 'md:p-6', 'border-b');
-        icon.style.transform = 'rotate(0deg)';
+function handleSongListMiniExpandClick() {
+    const listContainer = document.getElementById('sl-detail-list');
+    const st = listContainer ? listContainer.scrollTop : 0;
+    if (st > 20) {
+        listContainer.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
-        // Collapse
-        header.classList.remove('max-h-[1000px]', 'p-4', 'md:p-6', 'border-b');
-        header.classList.add('is-collapsed', 'max-h-0', 'opacity-0', 'py-0', 'border-b-0', 'pointer-events-none');
-        icon.style.transform = 'rotate(180deg)';
+        expandSongListDetailHeader();
     }
 }
+window.handleSongListMiniExpandClick = handleSongListMiniExpandClick;
+
+function handleSongListScrollEvent() {
+    if (slScrollRaf) return;
+    slScrollRaf = requestAnimationFrame(() => {
+        slScrollRaf = null;
+        const listContainer = document.getElementById('sl-detail-list');
+        const header = document.getElementById('sl-detail-header');
+        const miniBar = document.getElementById('sl-mini-bar');
+        if (!header && !miniBar) return;
+
+        const st = listContainer ? listContainer.scrollTop : 0;
+        const collapseThreshold = 35;
+
+        updateSlMiniExpandButton(st);
+
+        if (st > collapseThreshold) {
+            collapseSongListDetailHeader();
+        }
+    });
+}
+
+function collapseSongListDetailHeader() {
+    if (slMiniBarHideTimeout) {
+        clearTimeout(slMiniBarHideTimeout);
+        slMiniBarHideTimeout = null;
+    }
+    const header = document.getElementById('sl-detail-header');
+    const miniBar = document.getElementById('sl-mini-bar');
+    if (header && !header.classList.contains('sl-hero-collapsed')) {
+        header.classList.add('sl-hero-collapsed');
+        header.style.maxHeight = '0px';
+        header.style.opacity = '0';
+        header.style.overflow = 'hidden';
+        header.style.transform = 'translateY(-10px)';
+        header.style.pointerEvents = 'none';
+    }
+    if (miniBar) {
+        miniBar.classList.remove('hidden');
+        requestAnimationFrame(() => {
+            miniBar.classList.remove('opacity-0', '-translate-y-2', 'pointer-events-none');
+            miniBar.classList.add('opacity-100', 'translate-y-0', 'pointer-events-auto');
+        });
+    }
+}
+window.collapseSongListDetailHeader = collapseSongListDetailHeader;
+
+function expandSongListDetailHeader() {
+    const header = document.getElementById('sl-detail-header');
+    const miniBar = document.getElementById('sl-mini-bar');
+    const listContainer = document.getElementById('sl-detail-list');
+
+    if (slMiniBarHideTimeout) {
+        clearTimeout(slMiniBarHideTimeout);
+        slMiniBarHideTimeout = null;
+    }
+
+    if (header) {
+        header.classList.remove('sl-hero-collapsed');
+        header.style.maxHeight = '1000px';
+        header.style.opacity = '1';
+        header.style.overflow = '';
+        header.style.transform = 'translateY(0)';
+        header.style.pointerEvents = 'auto';
+    }
+
+    if (miniBar && !miniBar.classList.contains('opacity-0')) {
+        miniBar.classList.add('opacity-0', '-translate-y-2', 'pointer-events-none');
+        miniBar.classList.remove('opacity-100', 'translate-y-0', 'pointer-events-auto');
+        slMiniBarHideTimeout = setTimeout(() => {
+            if (miniBar.classList.contains('opacity-0')) {
+                miniBar.classList.add('hidden');
+            }
+        }, 300);
+    }
+
+    if (listContainer) {
+        listContainer.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+window.expandSongListDetailHeader = expandSongListDetailHeader;
+
+function initSongListScrollListener() {
+    const listContainer = document.getElementById('sl-detail-list');
+    if (listContainer) {
+        listContainer.removeEventListener('scroll', handleSongListScrollEvent);
+        listContainer.addEventListener('scroll', handleSongListScrollEvent, { passive: true });
+    }
+}
+
+function removeSongListScrollListener() {
+    if (slMiniBarHideTimeout) {
+        clearTimeout(slMiniBarHideTimeout);
+        slMiniBarHideTimeout = null;
+    }
+    const listContainer = document.getElementById('sl-detail-list');
+    if (listContainer) {
+        listContainer.removeEventListener('scroll', handleSongListScrollEvent);
+    }
+    const miniBar = document.getElementById('sl-mini-bar');
+    if (miniBar) {
+        miniBar.classList.add('hidden', 'opacity-0', '-translate-y-2', 'pointer-events-none');
+        miniBar.classList.remove('opacity-100', 'translate-y-0', 'pointer-events-auto');
+    }
+}
+
+function toggleSlDetailHeader() {
+    const header = document.getElementById('sl-detail-header');
+    if (!header) return;
+    if (header.classList.contains('sl-hero-collapsed')) {
+        expandSongListDetailHeader();
+    } else {
+        collapseSongListDetailHeader();
+    }
+}
+window.toggleSlDetailHeader = toggleSlDetailHeader;
+
+function isSongListFavorited(id, source) {
+    if (!id) return false;
+    const activeListData = (typeof isUserLoggedIn === 'function' && isUserLoggedIn())
+        ? (window.myPersonalListData || window.currentListData)
+        : window.currentListData;
+    if (!activeListData || !activeListData.userList) return false;
+    return activeListData.userList.some(l => 
+        (String(l.sourceListId) === String(id) || String(l.id) === String(id)) && 
+        (!source || l.source === source)
+    );
+}
+window.isSongListFavorited = isSongListFavorited;
+
+function updateSongListFavButtons(favd) {
+    // 1. Header absolute top-right heart button
+    const headerFavBtn = document.getElementById('sl-header-fav-btn');
+    if (headerFavBtn) {
+        headerFavBtn.className = `absolute top-2 right-4 md:top-4 md:right-6 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90 ${favd ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main'}`;
+        headerFavBtn.title = favd ? '取消收藏' : '收藏歌单';
+        const icon = headerFavBtn.querySelector('i');
+        if (icon) icon.className = `fas fa-heart ${favd ? 'text-white' : 'text-rose-500'}`;
+    }
+
+    // 2. Toolbar collect button
+    const collectBtn = document.getElementById('sl-detail-collect');
+    const collectText = document.getElementById('sl-detail-collect-text');
+    const collectIcon = collectBtn?.querySelector('i');
+    if (collectBtn) {
+        if (favd) {
+            collectBtn.className = 'px-3.5 py-2 rounded-xl border border-rose-500 bg-rose-500 text-white font-medium text-xs md:text-sm flex items-center gap-2 transition-all shadow-md shadow-rose-500/20 active:scale-95';
+            if (collectIcon) collectIcon.className = 'fas fa-heart text-white';
+            if (collectText) collectText.textContent = '已收藏';
+            collectBtn.title = '取消收藏';
+        } else {
+            collectBtn.className = 'px-3.5 py-2 rounded-xl border t-border-main t-bg-main hover:t-bg-track t-text-main font-medium text-xs md:text-sm flex items-center gap-2 transition-all shadow-sm active:scale-95';
+            if (collectIcon) collectIcon.className = 'fas fa-heart text-rose-500';
+            if (collectText) collectText.textContent = '收藏歌单';
+            collectBtn.title = '收藏歌单';
+        }
+    }
+
+    // 3. Mini bar favorite button
+    const miniFavBtn = document.getElementById('sl-mini-fav-btn');
+    const miniIcon = miniFavBtn?.querySelector('i');
+    if (miniFavBtn) {
+        if (favd) {
+            miniFavBtn.className = 'w-7 h-7 md:w-8 md:h-8 rounded-lg border border-rose-500 bg-rose-500 text-white flex items-center justify-center transition-all shadow-sm active:scale-95 shadow-rose-500/20';
+            if (miniIcon) miniIcon.className = 'fas fa-heart text-xs text-white';
+            miniFavBtn.title = '取消收藏';
+        } else {
+            miniFavBtn.className = 'w-7 h-7 md:w-8 md:h-8 rounded-lg border t-border-main t-bg-main hover:t-bg-track text-rose-500 flex items-center justify-center transition-all shadow-sm active:scale-95';
+            if (miniIcon) miniIcon.className = 'fas fa-heart text-xs text-rose-500';
+            miniFavBtn.title = '收藏歌单';
+        }
+    }
+}
+window.updateSongListFavButtons = updateSongListFavButtons;

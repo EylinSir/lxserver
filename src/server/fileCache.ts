@@ -632,6 +632,23 @@ const needsQualityCorrection = (quality: string | undefined, container: string) 
     !!quality && losslessQualitySet.has(quality) && (container === 'mp3' || container === 'ogg')
 )
 
+export const parseDurationSeconds = (value: unknown): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value > 10000 ? Math.round(value / 1000) : Math.round(value)
+    }
+    const text = String(value || '').trim()
+    if (!text) return 0
+    if (/^\d+(?:\.\d+)?$/.test(text)) {
+        const parsed = Number(text)
+        return parsed > 10000 ? Math.round(parsed / 1000) : Math.round(parsed)
+    }
+    const parts = text.split(':').map(Number)
+    if (parts.some(p => !Number.isFinite(p))) return 0
+    if (parts.length === 2) return Math.round(parts[0] * 60 + parts[1])
+    if (parts.length === 3) return Math.round(parts[0] * 3600 + parts[1] * 60 + parts[2])
+    return 0
+}
+
 const inspectAudioFile = (filePath: string, requestedQuality?: string) => {
     const audioContainer = detectAudioContainer(filePath)
     const ext = audioContainer === 'unknown' || audioContainer === 'encrypted'
@@ -643,6 +660,7 @@ const inspectAudioFile = (filePath: string, requestedQuality?: string) => {
         tagger.loadPath(filePath)
         const bitrate = Number(tagger.bitRate) || undefined
         const detectedQuality = detectQualityFromBitrate(bitrate, ext, tagger)
+        const duration = Number(tagger.duration) || undefined
         return {
             audioContainer,
             extension: ext,
@@ -650,6 +668,7 @@ const inspectAudioFile = (filePath: string, requestedQuality?: string) => {
             bitrate,
             sampleRate: Number(tagger.sampleRate) || undefined,
             bitDepth: Number(tagger.bitDepth) || undefined,
+            duration,
         }
     } catch (e) {
         const detectedQuality = detectQualityFromBitrate(undefined, ext)
@@ -660,6 +679,7 @@ const inspectAudioFile = (filePath: string, requestedQuality?: string) => {
             bitrate: undefined,
             sampleRate: undefined,
             bitDepth: undefined,
+            duration: undefined,
         }
     } finally {
         try { if (tagger) tagger.dispose() } catch (e) { }
@@ -1676,6 +1696,19 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
                 if (!fileName) continue
                 const filePath = path.join(dir, fileName)
                 if (fs.existsSync(filePath)) {
+                    // [防投毒] 如果已知期望时长 > 60s，且缓存记录的时长/文件大小明显属于试听片段，忽略并清理脏缓存
+                    const expectedSec = parseDurationSeconds(songInfo.interval || songInfo.meta?.interval)
+                    if (expectedSec > 60 && !isLyricCheck) {
+                        const cachedDurSec = parseDurationSeconds(cached.interval)
+                        const isCachedTeaser = (cachedDurSec > 0 && (cachedDurSec < 60 || cachedDurSec < expectedSec * 0.5)) ||
+                            (cached.size && cached.size < 750 * 1024 && expectedSec > 120 && cached.quality === '128k')
+                        if (isCachedTeaser) {
+                            console.warn(`[文件缓存] 命中损坏的试听片段缓存 (${cached.filename})，予以忽略并剔除`)
+                            indexManager.remove(normalizedUsername, id, folder, cached.quality)
+                            try { fs.unlinkSync(filePath) } catch { }
+                            continue
+                        }
+                    }
                     return {
                         exists: true,
                         path: filePath,
@@ -1729,6 +1762,18 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
                     const fileName = cachedAny.filename
                     const filePath = path.join(dir, fileName)
                     if (fs.existsSync(filePath)) {
+                        const expectedSec = parseDurationSeconds(songInfo.interval || songInfo.meta?.interval)
+                        if (expectedSec > 60) {
+                            const cachedDurSec = parseDurationSeconds(cachedAny.interval)
+                            const isCachedTeaser = (cachedDurSec > 0 && (cachedDurSec < 60 || cachedDurSec < expectedSec * 0.5)) ||
+                                (cachedAny.size && cachedAny.size < 750 * 1024 && expectedSec > 120 && cachedAny.quality === '128k')
+                            if (isCachedTeaser) {
+                                console.warn(`[文件缓存] 命中损坏的试听片段缓存 (${cachedAny.filename})，予以忽略并剔除`)
+                                indexManager.remove(normalizedUsername, id, folder, cachedAny.quality)
+                                try { fs.unlinkSync(filePath) } catch { }
+                                continue
+                            }
+                        }
                         return {
                             exists: true,
                             path: filePath,
@@ -2402,6 +2447,32 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                 const inspection = inspectAudioFile(tempPath, quality)
                 ext = inspection.extension || ext
                 const actualQuality = inspection.quality || quality || 'unknown'
+
+                // 试听片段 / 残缺音频防御检查：
+                // 如果期望时长 > 60s，但下载到的音频时长过短（如网易云等平台返回的 30s-45s 试听片段），拒绝写入缓存
+                const expectedDurationSec = parseDurationSeconds(songInfo.interval || songInfo.meta?.interval)
+                const actualDurationSec = inspection.duration ? Math.round(inspection.duration / 1000) : 0
+                if (expectedDurationSec > 60 && actualDurationSec > 0) {
+                    const isTeaser = actualDurationSec < 60 ||
+                        (actualDurationSec < expectedDurationSec * 0.5) ||
+                        (actualDurationSec <= 90 && (expectedDurationSec - actualDurationSec) > 45)
+                    if (isTeaser) {
+                        console.warn(`[文件缓存] 检测到试听片段/音频残缺 (${actualDurationSec}s vs 预期 ${expectedDurationSec}s)，拒绝写入缓存: ${songInfo.name || getFileName(songInfo, actualQuality, isOnlyDownload, username)}`)
+                        safeUnlink(fileStream, tempPath)
+                        fail(new Error(`试听片段 (${actualDurationSec}s / 预期 ${expectedDurationSec}s)，已拒绝写入缓存`))
+                        return
+                    }
+                }
+                if (expectedDurationSec > 120 && actualDurationSec === 0) {
+                    const stat = fs.existsSync(tempPath) ? fs.statSync(tempPath) : null
+                    if (stat && stat.size < 300 * 1024) {
+                        console.warn(`[文件缓存] 检测到异常过小音频文件 (${stat.size} bytes vs 预期时长 ${expectedDurationSec}s)，拒绝写入缓存: ${songInfo.name || getFileName(songInfo, actualQuality, isOnlyDownload, username)}`)
+                        safeUnlink(fileStream, tempPath)
+                        fail(new Error(`音频文件过小 (${stat.size} bytes / 预期 ${expectedDurationSec}s)，已拒绝写入缓存`))
+                        return
+                    }
+                }
+
                 const finalBaseName = getFileName(songInfo, actualQuality, isOnlyDownload, username)
                 const finalPath = path.join(dir, finalBaseName + ext)
                 fs.rename(tempPath, finalPath, async (err) => {
@@ -2828,33 +2899,73 @@ export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerRespon
     for (const loc of locations) {
         for (const folder of roots) {
             const dir = getCacheDir(normalizedUsername, folder === 'music', loc)
-            const checkPath = path.join(dir, filename) // [Fix] Allow subfolders
-            if (fs.existsSync(checkPath)) { filePath = checkPath; break }
+            // 允许子目录，但只读取当前缓存目录内的普通文件（包括目录内的符号链接）。
+            const checkPath = path.resolve(dir, filename)
+            const relativePath = path.relative(path.resolve(dir), checkPath)
+            if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) continue
+            try {
+                const realDir = fs.realpathSync(dir)
+                const realPath = fs.realpathSync(checkPath)
+                const realRelativePath = path.relative(realDir, realPath)
+                if (!realRelativePath || realRelativePath === '..' || realRelativePath.startsWith(`..${path.sep}`) || path.isAbsolute(realRelativePath)) continue
+                if (fs.statSync(realPath).isFile()) { filePath = realPath; break }
+            } catch { /* 文件被删除或目录不可用时继续查找备用位置。 */ }
         }
         if (filePath) break
     }
     if (!filePath) { res.writeHead(404); res.end('Not Found'); return }
-    const stat = fs.statSync(filePath)
+    let stat: Stats
+    try { stat = fs.statSync(filePath) }
+    catch { res.writeHead(404); res.end('Not Found'); return }
     const ext = path.extname(filePath).toLowerCase()
     const mimeTypes: Record<string, string> = {
         '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.wav': 'audio/wav'
     }
     const contentType = mimeTypes[ext] || 'application/octet-stream'
-    const range = req.headers.range
+    // HEAD 不发送响应体；Range 只适用于 GET。
+    if (req.method === 'HEAD') {
+        res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': contentType, 'Accept-Ranges': 'bytes' })
+        res.end()
+        return
+    }
+    const range = req.headers.range && /^bytes=/i.test(req.headers.range) ? req.headers.range : undefined
+    let stream: fs.ReadStream
     if (range) {
-        const parts = range.replace(/bytes=/, "").split("-")
-        const start = parseInt(parts[0], 10)
-        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+        const parts = /^bytes=(\d*)-(\d*)$/i.exec(range)
+        let start = 0
+        let end = stat.size - 1
+        let valid = !!parts && !!(parts[1] || parts[2]) && stat.size > 0
+        if (valid && parts) {
+            if (!parts[1]) {
+                const suffixLength = Number(parts[2])
+                valid = Number.isSafeInteger(suffixLength) && suffixLength > 0
+                start = Math.max(0, stat.size - suffixLength)
+            } else {
+                start = Number(parts[1])
+                const requestedEnd = parts[2] ? Number(parts[2]) : end
+                valid = Number.isSafeInteger(start) && Number.isSafeInteger(requestedEnd) && start < stat.size && requestedEnd >= start
+                end = Math.min(requestedEnd, end)
+            }
+        }
+        if (!valid) {
+            res.writeHead(416, { 'Content-Range': `bytes */${stat.size}`, 'Accept-Ranges': 'bytes', 'Content-Length': 0 })
+            res.end()
+            return
+        }
         const chunksize = (end - start) + 1
         res.writeHead(206, {
             'Content-Range': `bytes ${start}-${end}/${stat.size}`,
             'Accept-Ranges': 'bytes', 'Content-Length': chunksize, 'Content-Type': contentType,
         })
-        fs.createReadStream(filePath, { start, end }).pipe(res)
+        stream = fs.createReadStream(filePath, { start, end })
     } else {
         res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': contentType, 'Accept-Ranges': 'bytes' })
-        fs.createReadStream(filePath).pipe(res)
+        stream = fs.createReadStream(filePath)
     }
+    // 读取失败时关闭响应，并在客户端中断/离开时释放文件描述符。
+    stream.once('error', () => res.destroy())
+    res.once('close', () => stream.destroy())
+    stream.pipe(res)
 }
 
 export const getCacheStats = (username?: string) => {

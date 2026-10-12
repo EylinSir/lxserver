@@ -22,6 +22,12 @@ const musicVisualizer = (function () {
         return /iPhone|iPod/.test(ua) || isIPad;
     }
 
+    function isMobileDevice() {
+        if (isIOSDevice()) return true;
+        const ua = navigator.userAgent;
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    }
+
     /**
      * Initialize AudioContext and AnalyserNode.
      */
@@ -40,11 +46,11 @@ const musicVisualizer = (function () {
             return;
         }
 
-        // [iOS Fix] On iOS (Safari/WebKit), creating Web Audio createMediaElementSource silences native audio output.
-        // WebKit automatically suspends all AudioContexts when Safari is minimized or locked, killing background playback.
-        // To preserve native background and lock-screen playback on iOS, skip Web Audio hijacking when no external DSP is active.
-        if (isIOSDevice() && !hasEffectsAnalyser) {
-            console.log('[Visualizer] iOS device detected. Skipping AudioContext capture to preserve native background playback.');
+        // [Mobile Fix] On mobile devices (iOS & Android), creating Web Audio createMediaElementSource silences native audio output,
+        // suspends when backgrounded/locked, and causes severe sample rate / pitch mismatch drift when minimizing and reopening.
+        // To preserve native background playback and true pitch on all mobile devices, skip Web Audio hijacking when no external DSP is active.
+        if (isMobileDevice() && !hasEffectsAnalyser) {
+            console.log('[Visualizer] Mobile device detected. Skipping AudioContext capture to preserve native background playback and true pitch.');
             return;
         }
 
@@ -118,8 +124,9 @@ const musicVisualizer = (function () {
         // --- Handle Footer Visualizer ---
         waveFooter.clearAnimations();
         const visualizerContainer = document.getElementById('visualizer-container');
+        const isFooterOn = s.showFooterVisualizer !== false;
 
-        if (s.showFooterVisualizer && footerCanvas && visualizerContainer) {
+        if (isFooterOn && footerCanvas && visualizerContainer) {
             const style = s.footerVisualizerStyle || 'bars';
             // 获取容器实际宽度而不是 Canvas 宽度
             const containerRect = visualizerContainer.getBoundingClientRect();
@@ -318,13 +325,15 @@ const musicVisualizer = (function () {
     }
 
     if (audio) {
-        audio.addEventListener('play', () => {
+        const ensureVisualizerRunning = () => {
             if (!isInitialized) {
                 init();
             } else if (audioContext && audioContext.state === 'suspended') {
-                audioContext.resume();
+                audioContext.resume().catch(() => {});
             }
-        });
+        };
+        audio.addEventListener('play', ensureVisualizerRunning);
+        audio.addEventListener('playing', ensureVisualizerRunning);
     }
 
     window.addEventListener('resize', () => {

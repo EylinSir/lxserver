@@ -22,6 +22,45 @@ window.iOSBackgroundAudio = (function () {
     let anchorAudio = null;
     let isActive = false;
     let _audioContext = null;
+    let _analyserNode = null;
+    let _mainAudio = null;
+
+    function attachOutput(analyserNode) {
+        // Web Audio 忽略同一对节点的重复连接；每次都重连，以恢复外部重建的音频图。
+        analyserNode.connect(streamDestination);
+        try { analyserNode.disconnect(_audioContext.destination); } catch (_) { }
+        if (_analyserNode && _analyserNode !== analyserNode) {
+            try { _analyserNode.disconnect(streamDestination); } catch (_) { }
+        }
+        _analyserNode = analyserNode;
+    }
+
+    function resetBridge() {
+        if (_analyserNode && _audioContext) {
+            if (streamDestination) {
+                try { _analyserNode.disconnect(streamDestination); } catch (_) { }
+            }
+            // 桥接失败时恢复原生输出，不能让正在播放的主音频陷入静音。
+            try { _analyserNode.connect(_audioContext.destination); } catch (_) { }
+        }
+        if (_mainAudio) {
+            _mainAudio.removeEventListener('play', onMainPlay);
+            _mainAudio.removeEventListener('pause', onMainPause);
+        }
+        if (_audioContext) _audioContext.removeEventListener('statechange', onContextStateChange);
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        if (anchorAudio) {
+            try { anchorAudio.pause(); } catch (_) { }
+            try { anchorAudio.srcObject = null; } catch (_) { }
+            anchorAudio.remove();
+        }
+        isActive = false;
+        streamDestination = null;
+        anchorAudio = null;
+        _audioContext = null;
+        _analyserNode = null;
+        _mainAudio = null;
+    }
 
     /**
      * 初始化 iOS 后台播放保活桥接。
@@ -31,25 +70,26 @@ window.iOSBackgroundAudio = (function () {
      */
     function init(audioContext, analyserNode) {
         if (!isIOS()) return;
-        if (isActive) return;
+        if (!audioContext || !analyserNode) return;
+
+        if (isActive && _audioContext === audioContext) {
+            try {
+                attachOutput(analyserNode);
+                syncAnchorWithContext();
+            } catch (e) {
+                console.error('[iOSAudio] Failed to reconnect bridge:', e);
+                resetBridge();
+            }
+            return;
+        }
+        if (isActive) resetBridge();
 
         _audioContext = audioContext;
+        _analyserNode = analyserNode;
 
         try {
-            // 1. [核心优化] 在 iOS 上断开默认输出，强制所有音频流向 MediaStreamDest
-            // 这能防止系统在后台时因 AudioContext.destination 的调度冲突而挂起
-            if (analyserNode && audioContext.destination) {
-                try {
-                    analyserNode.disconnect(audioContext.destination);
-                    console.log('[iOSAudio] 🌐 Disconnected Analyser from default destination for exclusive routing.');
-                } catch (e) {
-                    console.warn('[iOSAudio] Could not disconnect default destination:', e);
-                }
-            }
-
-            // 2. 创建 MediaStreamDestination
+            // 先完成桥接准备，成功连接后才移除默认输出。
             streamDestination = audioContext.createMediaStreamDestination();
-            analyserNode.connect(streamDestination);
 
             // 3. 创建隐藏的 anchor <audio> 元素，作为 iOS 媒体会话锚点
             anchorAudio = document.createElement('audio');
@@ -63,12 +103,13 @@ window.iOSBackgroundAudio = (function () {
 
             // 4. 赋值 srcObject
             anchorAudio.srcObject = streamDestination.stream;
+            attachOutput(analyserNode);
 
             // 5. 同步主音频播放/暂停状态
-            const mainAudio = document.getElementById('audio-player');
-            if (mainAudio) {
-                mainAudio.addEventListener('play', onMainPlay);
-                mainAudio.addEventListener('pause', onMainPause);
+            _mainAudio = document.getElementById('audio-player');
+            if (_mainAudio) {
+                _mainAudio.addEventListener('play', onMainPlay);
+                _mainAudio.addEventListener('pause', onMainPause);
             }
 
             // 6. 监听 AudioContext 状态（处理 iOS 系统中断恢复）
@@ -85,19 +126,34 @@ window.iOSBackgroundAudio = (function () {
 
         } catch (e) {
             console.error('[iOSAudio] Failed to initialize:', e);
+            resetBridge();
+        }
+    }
+
+    function resumeContextForPlayback() {
+        if (!_audioContext) return;
+        const mainAudio = document.getElementById('audio-player');
+        const needsResume = _audioContext.state === 'suspended' || _audioContext.state === 'interrupted';
+        if (!mainAudio || mainAudio.paused || !needsResume) {
+            syncAnchorWithContext();
+            return;
+        }
+
+        try {
+            return Promise.resolve(_audioContext.resume())
+                .then(syncAnchorWithContext)
+                .catch(e => {
+                    console.warn('[iOSAudio] AudioContext resume failed:', e);
+                    syncAnchorWithContext();
+                });
+        } catch (e) {
+            console.warn('[iOSAudio] AudioContext resume failed:', e);
+            syncAnchorWithContext();
         }
     }
 
     function onMainPlay() {
-        if (!_audioContext) return;
-        if (_audioContext.state === 'suspended') {
-            _audioContext.resume().then(() => {
-                console.log('[iOSAudio] AudioContext resumed on play.');
-                syncAnchorWithContext();
-            });
-        } else {
-            syncAnchorWithContext();
-        }
+        return resumeContextForPlayback();
     }
 
     function onMainPause() {
@@ -112,9 +168,8 @@ window.iOSBackgroundAudio = (function () {
     }
 
     function onVisibilityChange() {
-        if (document.visibilityState === 'visible' && _audioContext && _audioContext.state === 'suspended') {
-            console.log('[iOSAudio] Page visible, attempting to resume AudioContext...');
-            _audioContext.resume().then(syncAnchorWithContext);
+        if (document.visibilityState === 'visible') {
+            return resumeContextForPlayback();
         }
     }
 
@@ -130,9 +185,16 @@ window.iOSBackgroundAudio = (function () {
 
         if (shouldPlay) {
             if (anchorAudio.paused) {
-                const p = anchorAudio.play();
+                const anchor = anchorAudio;
+                const p = anchor.play();
                 if (p) {
                     p.then(() => {
+                        if (anchor !== anchorAudio) return;
+                        // 恢复尚未完成时用户可能已暂停；不应再次启动媒体锚点。
+                        if (_audioContext.state !== 'running' || mainAudio.paused) {
+                            anchor.pause();
+                            return;
+                        }
                         console.log('[iOSAudio] Anchor playing - buffer flowing.');
                         // 启动后立即触发一次全局进度同步，纠正 iOS 可能产生的直播流偏见
                         if (typeof window.updatePositionState === 'function') {
@@ -141,7 +203,11 @@ window.iOSBackgroundAudio = (function () {
                             setTimeout(window.updatePositionState, 500);
                         }
                     }).catch(e => {
-                        if (e.name !== 'NotAllowedError') console.warn('[iOSAudio] Play failed:', e);
+                        if (anchor !== anchorAudio) return;
+                        // 自动播放限制可由后续用户手势解除；保留锚点与监听器以便重试。
+                        if (e.name === 'NotAllowedError') return;
+                        console.warn('[iOSAudio] Play failed:', e);
+                        if (_audioContext.state === 'running' && !mainAudio.paused) resetBridge();
                     });
                 }
             }
