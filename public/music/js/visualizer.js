@@ -8,7 +8,7 @@
  * Bespoke audiophile stereo VU meter console designed for LX Music.
  * Features brushed dark titanium faceplate, ambient incandescent lamp glow,
  * high-precision dB scales, dynamic peak overload LEDs, and IEC ballistic needles.
- * Fully stretchable and responsive for mobile and desktop window resizing.
+ * Fully stretchable and responsive for mobile and desktop window resizing with zero clipping.
  */
 class LXStudioVUMeterAnimation {
     constructor(options = {}) {
@@ -46,72 +46,87 @@ class LXStudioVUMeterAnimation {
         const audio = document.getElementById('audio-player');
         const isPlaying = audio && !audio.paused;
 
-        // Calculate dynamic targets
+        // 1. Calculate dynamic targets from real-time audio analysis
         if (isPlaying) {
             let hasValidData = false;
-            let rmsL = 0;
-            let rmsR = 0;
+            let rawL = 0;
+            let rawR = 0;
 
+            // Priority A: Dedicated Stereo Analysers (true L/R separation)
             if (this.options.analyserL && this.options.analyserR) {
                 const arrL = new Uint8Array(this.options.analyserL.frequencyBinCount);
                 const arrR = new Uint8Array(this.options.analyserR.frequencyBinCount);
                 this.options.analyserL.getByteFrequencyData(arrL);
                 this.options.analyserR.getByteFrequencyData(arrR);
 
-                let sumL = 0, sumR = 0;
+                // Left Channel: Bass & Low-Mids punch (bins 1 to 20, ~60Hz - 1.7kHz) + overall RMS
+                let bassL = 0, totalL = 0;
                 for (let i = 0; i < arrL.length; i++) {
-                    const vL = arrL[i] / 255;
-                    const vR = arrR[i] / 255;
-                    sumL += vL * vL;
-                    sumR += vR * vR;
+                    const v = arrL[i] / 255;
+                    totalL += v * v;
+                    if (i >= 1 && i <= 20) bassL += v * v;
                 }
-                rmsL = Math.sqrt(sumL / arrL.length);
-                rmsR = Math.sqrt(sumR / arrR.length);
-                hasValidData = rmsL > 0.01 || rmsR > 0.01;
+                const rmsL = Math.sqrt(totalL / arrL.length);
+                const bEnergyL = Math.sqrt(bassL / 20);
+
+                // Right Channel: Mids & Highs clarity (bins 8 to 64, ~700Hz - 5.5kHz) + overall RMS
+                let midR = 0, totalR = 0;
+                for (let i = 0; i < arrR.length; i++) {
+                    const v = arrR[i] / 255;
+                    totalR += v * v;
+                    if (i >= 8 && i <= 64) midR += v * v;
+                }
+                const rmsR = Math.sqrt(totalR / arrR.length);
+                const mEnergyR = Math.sqrt(midR / 56);
+
+                if (totalL > 0.0001 || totalR > 0.0001) {
+                    rawL = rmsL * 0.55 + bEnergyL * 0.45;
+                    rawR = rmsR * 0.55 + mEnergyR * 0.45;
+                    hasValidData = true;
+                }
             }
 
+            // Priority B: Single Analyser (bass on left, mid/high on right)
             if (!hasValidData && data && data.length > 0) {
-                const binCount = data.length;
-                let sumL = 0, countL = 0;
-                let sumR = 0, countR = 0;
-
-                const splitIdx1 = Math.floor(binCount * 0.35);
-                for (let i = 0; i < splitIdx1; i++) {
+                let bass = 0, mids = 0, total = 0;
+                const len = data.length;
+                for (let i = 0; i < len; i++) {
                     const v = data[i] / 255;
-                    sumL += v * v;
-                    countL++;
+                    total += v * v;
+                    if (i >= 1 && i <= 20) bass += v * v;
+                    if (i >= 8 && i <= 64) mids += v * v;
                 }
+                const rms = Math.sqrt(total / len);
+                const bEnergy = Math.sqrt(bass / 20);
+                const mEnergy = Math.sqrt(mids / 56);
 
-                const startIdx2 = Math.floor(binCount * 0.15);
-                const endIdx2 = Math.floor(binCount * 0.85);
-                for (let i = startIdx2; i < endIdx2; i++) {
-                    const v = data[i] / 255;
-                    sumR += v * v;
-                    countR++;
+                if (total > 0.0001) {
+                    rawL = rms * 0.5 + bEnergy * 0.5;
+                    rawR = rms * 0.5 + mEnergy * 0.5;
+                    hasValidData = true;
                 }
-
-                rmsL = countL > 0 ? Math.sqrt(sumL / countL) : 0;
-                rmsR = countR > 0 ? Math.sqrt(sumR / countR) : 0;
-                hasValidData = rmsL > 0.01 || rmsR > 0.01;
             }
 
             if (hasValidData) {
-                this.targetL = Math.min(1.0, rmsL * 1.85);
-                this.targetR = Math.min(1.0, rmsR * 1.85);
+                // Perceptual audio loudness expansion (maps real audio into 0.0 - 1.0 VU meter scale)
+                this.targetL = Math.min(1.0, Math.pow(rawL * 2.3, 0.75));
+                this.targetR = Math.min(1.0, Math.pow(rawR * 2.3, 0.75));
             } else {
+                // Gentle fallback if audio stream is cross-origin restricted
                 const t = now / 1000;
                 const beat = Math.sin(t * 3.8) * 0.28 + Math.sin(t * 7.4) * 0.18 + Math.cos(t * 1.9) * 0.22 + 0.38;
                 this.targetL = Math.max(0, Math.min(1.0, beat + Math.sin(t * 11) * 0.06));
                 this.targetR = Math.max(0, Math.min(1.0, beat * 0.95 + Math.cos(t * 9.2) * 0.08));
             }
         } else {
+            // Idle / paused: needles rest smoothly at -20 dB
             this.targetL = 0;
             this.targetR = 0;
         }
 
-        // IEC ballistic response: snappy rise (~150ms), smooth damped decay (~350ms)
-        const attackRate = 18.0;
-        const decayRate = 4.5;
+        // IEC Ballistic Dynamics: snappy rise (~150ms attack), smooth damped mechanical decay (~350ms)
+        const attackRate = 19.0;
+        const decayRate = 4.8;
         const speedL = this.targetL > this.needleL ? attackRate : decayRate;
         const speedR = this.targetR > this.needleR ? attackRate : decayRate;
 
@@ -129,7 +144,7 @@ class LXStudioVUMeterAnimation {
         let consoleW, consoleH, consoleX, consoleY;
 
         if (isCompact) {
-            // Footer bar mode: Stretches directly across the entire width of the player
+            // Footer bar mode: Stretches directly across player width
             const marginX = Math.min(6, width * 0.02);
             const marginY = 2;
             consoleW = width - marginX * 2;
@@ -137,11 +152,11 @@ class LXStudioVUMeterAnimation {
             consoleX = marginX;
             consoleY = marginY;
         } else {
-            // Detail / Backdrop mode: Dynamically adapts to viewport aspect ratio
-            const maxW = Math.min(width * 0.96, 1200);
-            const maxH = Math.min(height * 0.85, 520);
+            // Detail view mode: Proportional responsive console centering
+            const maxW = Math.min(width * 0.94, 1100);
+            const maxH = Math.min(height * 0.52, 480);
             const isMobile = width < 600;
-            const targetRatio = isMobile ? 2.0 : 2.5;
+            const targetRatio = isMobile ? 2.1 : 2.5;
 
             consoleW = maxW;
             consoleH = consoleW / targetRatio;
@@ -154,14 +169,14 @@ class LXStudioVUMeterAnimation {
             consoleY = (height - consoleH) / 2;
         }
 
-        const scale = Math.min(consoleW / (isCompact ? 460 : 640), consoleH / (isCompact ? 60 : 220));
+        const scale = Math.min(consoleW / (isCompact ? 460 : 640), consoleH / (isCompact ? 60 : 200));
         const cornerR = (isCompact ? 4 : 8) * scale;
 
         // 1. Chassis Outer Shadow
         ctx.save();
         ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
-        ctx.shadowBlur = (isCompact ? 6 : 24) * scale;
-        ctx.shadowOffsetY = (isCompact ? 2 : 8) * scale;
+        ctx.shadowBlur = (isCompact ? 6 : 20) * scale;
+        ctx.shadowOffsetY = (isCompact ? 2 : 6) * scale;
         ctx.fillStyle = '#0a0b0d';
         this.roundRect(ctx, consoleX, consoleY, consoleW, consoleH, cornerR);
         ctx.fill();
@@ -201,15 +216,15 @@ class LXStudioVUMeterAnimation {
         ctx.stroke();
         ctx.globalAlpha = 1.0;
 
-        // 3. Fluid Stretchable Dual Meter + Center Partitioning
-        const padX = (isCompact ? 5 : 12) * scale;
-        const padY = (isCompact ? 4 : 10) * scale;
+        // 3. Stretchable Dual Meter Windows + Center Console
+        const padX = (isCompact ? 4 : 10) * scale;
+        const padY = (isCompact ? 3 : 8) * scale;
         const innerW = consoleW - padX * 2;
         const innerH = consoleH - padY * 2;
         const innerX = consoleX + padX;
         const innerY = consoleY + padY;
 
-        const centerW = Math.min(Math.max(54 * scale, innerW * (isCompact ? 0.16 : 0.18)), (isCompact ? 90 : 140) * scale);
+        const centerW = Math.min(Math.max(50 * scale, innerW * (isCompact ? 0.15 : 0.17)), (isCompact ? 85 : 130) * scale);
         const gap = (isCompact ? 4 : 8) * scale;
         const meterW = (innerW - centerW - gap * 2) / 2;
         const meterH = innerH;
@@ -221,7 +236,7 @@ class LXStudioVUMeterAnimation {
         // 4. Render Left Meter (CH 1 · LEFT)
         this.drawMeterPod(ctx, leftX, innerY, meterW, meterH, levelL, scale, 'CH 1 · LEFT', isCompact);
 
-        // 5. Render Center Console (LX-AUDIO Studio Brand Badge & Status LEDs)
+        // 5. Render Center Console (LX-AUDIO Studio Badge & Status)
         this.drawCenterConsole(ctx, centerX, innerY, centerW, meterH, scale, themeColor, levelL, levelR, isCompact);
 
         // 6. Render Right Meter (CH 2 · RIGHT)
@@ -235,20 +250,16 @@ class LXStudioVUMeterAnimation {
 
         const cornerR = (isCompact ? 3 : 5) * scale;
 
-        // Clip to meter window
-        ctx.beginPath();
-        this.roundRect(ctx, x, y, w, h, cornerR);
-        ctx.clip();
-
         // 1. Deep Smoked Velvet Background
         const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
         bgGrad.addColorStop(0, '#0d0f13');
         bgGrad.addColorStop(0.5, '#111318');
         bgGrad.addColorStop(1, '#090a0d');
         ctx.fillStyle = bgGrad;
-        ctx.fillRect(x, y, w, h);
+        this.roundRect(ctx, x, y, w, h, cornerR);
+        ctx.fill();
 
-        // 2. Warm Incandescent Backlit Lamp Glow
+        // 2. Warm Incandescent Lamp Backlight Glow
         const glowX = x + w / 2;
         const glowY = y + h * 0.35;
         const glowR = Math.max(w * 0.65, h * 0.85);
@@ -258,25 +269,27 @@ class LXStudioVUMeterAnimation {
         lampGlow.addColorStop(0.7, 'rgba(240, 160, 50, 0.02)');
         lampGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = lampGlow;
-        ctx.fillRect(x, y, w, h);
+        this.roundRect(ctx, x, y, w, h, cornerR);
+        ctx.fill();
 
-        // 3. Inner Bezel Recess Shadow
+        // 3. Inner Bezel Recess Border
         ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.lineWidth = 2 * scale;
+        ctx.lineWidth = 1.5 * scale;
         this.roundRect(ctx, x + 1, y + 1, w - 2, h - 2, cornerR);
         ctx.stroke();
 
-        // 4. Geometry for Curved Scales & Needle
+        // 4. Exact Unclipped Geometry for Curved Scales & Needle
+        // Pivot safely positioned within the meter face (84% from top)
         const pivotX = x + w / 2;
-        const pivotY = y + h * (isCompact ? 1.25 : 1.15);
-        const arcRadius = Math.min(w * 0.58, h * (isCompact ? 1.05 : 0.95));
+        const pivotY = y + h * 0.84;
+        const arcRadius = Math.min(w * 0.40, h * 0.52);
 
         // Studio VU Angle Range: -46° to +44°
         const startAng = (-90 - 46) * Math.PI / 180;
         const zeroAng = (-90 + 20) * Math.PI / 180;
         const endAng = (-90 + 44) * Math.PI / 180;
 
-        // Arc Stroke (Warm Gold up to 0dB, Vivid Coral Red from 0dB to +3dB)
+        // Arc Stroke: Warm Gold up to 0dB, Vivid Coral Red from 0dB to +3dB
         ctx.strokeStyle = '#d5c49f';
         ctx.lineWidth = (isCompact ? 1.4 : 1.8) * scale;
         ctx.beginPath();
@@ -303,7 +316,9 @@ class LXStudioVUMeterAnimation {
             { deg: +44, label: '+3', isRed: true }
         ];
 
-        const fontSize = Math.max(7, Math.round((isCompact ? 7.5 : 9.5) * scale));
+        const tickLen = Math.max(3, 4.5 * scale);
+        const labelOffset = Math.max(4, 6 * scale);
+        const fontSize = Math.max(6.5, Math.round((isCompact ? 7 : 8.5) * scale));
         ctx.font = `600 ${fontSize}px "Helvetica Neue", -apple-system, Arial, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -313,7 +328,6 @@ class LXStudioVUMeterAnimation {
             const cos = Math.cos(rad);
             const sin = Math.sin(rad);
 
-            const tickLen = (isCompact ? 4.5 : 6.5) * scale;
             const x1 = pivotX + cos * arcRadius;
             const y1 = pivotY + sin * arcRadius;
             const x2 = pivotX + cos * (arcRadius + tickLen);
@@ -326,7 +340,8 @@ class LXStudioVUMeterAnimation {
             ctx.lineTo(x2, y2);
             ctx.stroke();
 
-            const labelR = arcRadius + tickLen + (isCompact ? 6 : 8) * scale;
+            // Label above tick
+            const labelR = arcRadius + tickLen + labelOffset;
             const lx = pivotX + cos * labelR;
             const ly = pivotY + sin * labelR;
 
@@ -338,7 +353,7 @@ class LXStudioVUMeterAnimation {
 
         // Sub-ticks
         ctx.strokeStyle = '#7c6f59';
-        ctx.lineWidth = 0.9 * scale;
+        ctx.lineWidth = 0.8 * scale;
         for (let d = -44; d <= 42; d += 2) {
             if (dbTicks.some(t => Math.abs(t.deg - d) < 1.5)) continue;
             const rad = (-90 + d) * Math.PI / 180;
@@ -348,11 +363,11 @@ class LXStudioVUMeterAnimation {
             ctx.strokeStyle = isRed ? '#cc2e2e' : '#7c6f59';
             ctx.beginPath();
             ctx.moveTo(pivotX + cos * arcRadius, pivotY + sin * arcRadius);
-            ctx.lineTo(pivotX + cos * (arcRadius + 3 * scale), pivotY + sin * (arcRadius + 3 * scale));
+            ctx.lineTo(pivotX + cos * (arcRadius + 2.5 * scale), pivotY + sin * (arcRadius + 2.5 * scale));
             ctx.stroke();
         }
 
-        // Secondary % Modulation Arc (when space allows)
+        // Secondary Modulation Arc (rendered when height permits)
         if (h > 65 * scale) {
             const innerR = arcRadius * 0.88;
             ctx.strokeStyle = 'rgba(180, 160, 120, 0.35)';
@@ -369,30 +384,30 @@ class LXStudioVUMeterAnimation {
                 { deg: +32, label: '150%' }
             ];
 
-            ctx.font = `${Math.max(5.5, Math.round(6.5 * scale))}px Arial, sans-serif`;
+            ctx.font = `${Math.max(5.5, Math.round(6 * scale))}px Arial, sans-serif`;
             pctTicks.forEach(pt => {
                 const rad = (-90 + pt.deg) * Math.PI / 180;
                 const cos = Math.cos(rad);
                 const sin = Math.sin(rad);
                 ctx.fillStyle = 'rgba(210, 190, 150, 0.6)';
-                ctx.fillText(pt.label, pivotX + cos * (innerR - 6 * scale), pivotY + sin * (innerR - 6 * scale));
+                ctx.fillText(pt.label, pivotX + cos * (innerR - 5 * scale), pivotY + sin * (innerR - 5 * scale));
             });
         }
 
-        // Channel Inscription
-        ctx.font = `bold ${Math.max(6.5, Math.round((isCompact ? 7.5 : 9) * scale))}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        // Channel Inscription (positioned neatly above the pivot)
+        ctx.font = `bold ${Math.max(6, Math.round((isCompact ? 7 : 8.5) * scale))}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.fillStyle = 'rgba(230, 215, 185, 0.85)';
-        ctx.fillText(channelTitle, pivotX, y + h * (isCompact ? 0.72 : 0.64));
+        ctx.fillText(channelTitle, pivotX, y + h * 0.65);
 
-        ctx.font = `${Math.max(5.5, Math.round(6.5 * scale))}px monospace`;
+        ctx.font = `${Math.max(5, Math.round(6 * scale))}px monospace`;
         ctx.fillStyle = 'rgba(160, 145, 120, 0.5)';
-        ctx.fillText('VU · STUDIO REFERENCE', pivotX, y + h * (isCompact ? 0.86 : 0.74));
+        ctx.fillText('VU · STUDIO REF', pivotX, y + h * 0.74);
 
         // 5. Dynamic Needle Pointer
         const norm = Math.pow(Math.max(0, Math.min(1.0, level)), 0.65);
         const needleDeg = -46 + norm * 90;
         const needleRad = (-90 + needleDeg) * Math.PI / 180;
-        const needleLen = arcRadius + (isCompact ? 7 : 10) * scale;
+        const needleLen = arcRadius + 4 * scale;
 
         const cosN = Math.cos(needleRad);
         const sinN = Math.sin(needleRad);
@@ -400,29 +415,30 @@ class LXStudioVUMeterAnimation {
         // Moving Drop Shadow
         ctx.save();
         ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-        ctx.shadowBlur = 4 * scale;
-        ctx.shadowOffsetX = 1.5 * scale;
-        ctx.shadowOffsetY = 2 * scale;
+        ctx.shadowBlur = 3 * scale;
+        ctx.shadowOffsetX = 1 * scale;
+        ctx.shadowOffsetY = 1.5 * scale;
 
         // Tapered Fluorescent Needle
         ctx.strokeStyle = '#ff2b2b';
-        ctx.lineWidth = (isCompact ? 1.5 : 1.9) * scale;
+        ctx.lineWidth = (isCompact ? 1.4 : 1.8) * scale;
         ctx.beginPath();
         ctx.moveTo(pivotX, pivotY);
         ctx.lineTo(pivotX + cosN * needleLen, pivotY + sinN * needleLen);
         ctx.stroke();
 
         // Counterweight tail
+        const tailLen = Math.max(5, 7 * scale);
         ctx.strokeStyle = '#222';
-        ctx.lineWidth = 2.2 * scale;
+        ctx.lineWidth = 2.0 * scale;
         ctx.beginPath();
         ctx.moveTo(pivotX, pivotY);
-        ctx.lineTo(pivotX - cosN * (12 * scale), pivotY - sinN * (12 * scale));
+        ctx.lineTo(pivotX - cosN * tailLen, pivotY - sinN * tailLen);
         ctx.stroke();
         ctx.restore();
 
-        // Turned Metal Pivot Cap
-        const hubR = (isCompact ? 7 : 9.5) * scale;
+        // Turned Metal Pivot Cap (100% inside meter pod)
+        const hubR = Math.max(4, 6 * scale);
         const hubGrad = ctx.createRadialGradient(pivotX, pivotY, 1 * scale, pivotX, pivotY, hubR);
         hubGrad.addColorStop(0, '#555');
         hubGrad.addColorStop(0.6, '#222');
@@ -434,7 +450,7 @@ class LXStudioVUMeterAnimation {
 
         ctx.fillStyle = '#bbb';
         ctx.beginPath();
-        ctx.arc(pivotX, pivotY, 2 * scale, 0, Math.PI * 2);
+        ctx.arc(pivotX, pivotY, Math.max(1.2, 1.8 * scale), 0, Math.PI * 2);
         ctx.fill();
 
         ctx.restore();
@@ -458,7 +474,7 @@ class LXStudioVUMeterAnimation {
         // 1. Bespoke "LX-AUDIO" Studio Brand Emblem
         const logoY = y + h * (isCompact ? 0.32 : 0.28);
         ctx.save();
-        ctx.font = `900 ${Math.max(8, Math.round((isCompact ? 10.5 : 14) * scale))}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.font = `900 ${Math.max(8, Math.round((isCompact ? 10 : 13) * scale))}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.letterSpacing = `${1.5 * scale}px`;
@@ -468,17 +484,17 @@ class LXStudioVUMeterAnimation {
         ctx.fillText('LX-AUDIO', cx, logoY);
         ctx.restore();
 
-        ctx.font = `600 ${Math.max(5.5, Math.round((isCompact ? 5.5 : 7) * scale))}px monospace`;
+        ctx.font = `600 ${Math.max(5.5, Math.round((isCompact ? 5.5 : 6.5) * scale))}px monospace`;
         ctx.fillStyle = 'rgba(200, 200, 200, 0.45)';
         ctx.textAlign = 'center';
-        ctx.fillText(isCompact ? 'DUAL VU' : 'PRECISION MONITOR', cx, logoY + (isCompact ? 10 : 13) * scale);
+        ctx.fillText(isCompact ? 'DUAL VU' : 'PRECISION MONITOR', cx, logoY + (isCompact ? 9 : 12) * scale);
 
         // 2. Dynamic Overload & Status Indicators
         const isPeakOverload = levelL > 0.82 || levelR > 0.82;
         const badgeW = w * 0.82;
-        const badgeH = Math.max(9, (isCompact ? 10 : 13) * scale);
-        const startY = logoY + (isCompact ? 18 : 28) * scale;
-        const gap = (isCompact ? 3 : 5) * scale;
+        const badgeH = Math.max(8, (isCompact ? 9 : 12) * scale);
+        const startY = logoY + (isCompact ? 17 : 26) * scale;
+        const gap = (isCompact ? 3 : 4) * scale;
 
         const indicators = isCompact 
             ? [
@@ -508,7 +524,7 @@ class LXStudioVUMeterAnimation {
             ctx.stroke();
 
             ctx.save();
-            ctx.font = `bold ${Math.max(5.5, Math.round((isCompact ? 6 : 7) * scale))}px Arial, sans-serif`;
+            ctx.font = `bold ${Math.max(5, Math.round((isCompact ? 5.5 : 6.5) * scale))}px Arial, sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
@@ -544,21 +560,26 @@ const musicVisualizer = (function () {
     const playerFooter = document.getElementById('player-footer');
 
     function isMobileDevice() {
-        if (window.iOSBackgroundAudio && typeof window.iOSBackgroundAudio.isIOS === 'function') {
-            if (window.iOSBackgroundAudio.isIOS()) return true;
-        }
         const ua = navigator.userAgent;
-        const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (isTouch && window.innerWidth < 1024);
+        return /Android|iPhone|iPad|iPod/i.test(ua);
     }
 
     /**
-     * Standalone animation loop for mobile devices or when Wave is bypassed.
+     * Standalone animation loop: ONLY used when Wave is bypassed or not yet initialized
      */
     function triggerStandaloneLoop() {
         const s = window.settings || {};
         const isFooterVU = s.showFooterVisualizer && s.footerVisualizerStyle === 'vumeter' && footerCanvas;
         const isDetailVU = s.showDetailVisualizer && s.detailVisualizerStyle === 'vumeter' && detailCanvas;
+
+        // If Wave is running, do NOT run standalone loop to prevent frame collision
+        if (isInitialized && waveFooter && waveDetail) {
+            if (standaloneRafId) {
+                cancelAnimationFrame(standaloneRafId);
+                standaloneRafId = null;
+            }
+            return;
+        }
 
         if (!isFooterVU && !isDetailVU) {
             if (standaloneRafId) {
@@ -575,23 +596,29 @@ const musicVisualizer = (function () {
             const needFooter = currentSettings.showFooterVisualizer && currentSettings.footerVisualizerStyle === 'vumeter' && footerCanvas;
             const needDetail = currentSettings.showDetailVisualizer && currentSettings.detailVisualizerStyle === 'vumeter' && detailCanvas;
 
-            if (!needFooter && !needDetail) {
+            if (isInitialized || (!needFooter && !needDetail)) {
                 standaloneRafId = null;
                 return;
+            }
+
+            let realData = null;
+            if (audioAnalyser) {
+                realData = new Uint8Array(audioAnalyser.frequencyBinCount);
+                audioAnalyser.getByteFrequencyData(realData);
             }
 
             if (needFooter) {
                 if (!standaloneFooterVU) standaloneFooterVU = new LXStudioVUMeterAnimation({ isCompact: true, analyserL, analyserR });
                 const ctx = footerCanvas.getContext('2d');
                 ctx.clearRect(0, 0, footerCanvas.width, footerCanvas.height);
-                standaloneFooterVU.draw(null, ctx);
+                standaloneFooterVU.draw(realData, ctx);
             }
 
             if (needDetail) {
                 if (!standaloneDetailVU) standaloneDetailVU = new LXStudioVUMeterAnimation({ isCompact: false, analyserL, analyserR });
                 const ctx = detailCanvas.getContext('2d');
                 ctx.clearRect(0, 0, detailCanvas.width, detailCanvas.height);
-                standaloneDetailVU.draw(null, ctx);
+                standaloneDetailVU.draw(realData, ctx);
             }
 
             standaloneRafId = requestAnimationFrame(renderLoop);
@@ -612,15 +639,7 @@ const musicVisualizer = (function () {
         const hasEffectsAnalyser = window.soundEffects && window.soundEffects.getAnalyser && window.soundEffects.getAnalyser();
 
         if (!isAnyVisualizerWanted && !hasEffectsAnalyser) {
-            console.log('[Visualizer] Visualizer disabled. Skipping AudioContext creation to preserve native playback.');
-            return;
-        }
-
-        // On mobile devices, skip Web Audio hijacking to preserve native background playback and true pitch
-        if (isMobileDevice() && !hasEffectsAnalyser) {
-            console.log('[Visualizer] Mobile device detected. Skipping AudioContext capture to preserve native background playback.');
-            syncSize();
-            triggerStandaloneLoop();
+            console.log('[Visualizer] Visualizer disabled. Skipping AudioContext creation.');
             return;
         }
 
@@ -642,25 +661,32 @@ const musicVisualizer = (function () {
                 try { audioAnalyser.disconnect(); } catch (_) { }
                 audioSource.connect(audioAnalyser);
                 audioAnalyser.connect(audioContext.destination);
+
+                // iOS keep-alive bridge
+                if (window.iOSBackgroundAudio && typeof window.iOSBackgroundAudio.init === 'function') {
+                    window.iOSBackgroundAudio.init(audioContext, audioAnalyser);
+                }
             }
 
-            audioAnalyser.smoothingTimeConstant = 0.8;
+            audioAnalyser.smoothingTimeConstant = 0.65; // Snappy, punchy response
             audioAnalyser.fftSize = 512;
 
-            // Stereo channel splitting for independent L & R needle analysis
+            // Stereo channel splitting for independent Left & Right needle dynamics
             try {
                 splitterNode = audioContext.createChannelSplitter(2);
                 analyserL = audioContext.createAnalyser();
                 analyserR = audioContext.createAnalyser();
-                analyserL.smoothingTimeConstant = 0.8;
-                analyserR.smoothingTimeConstant = 0.8;
+                analyserL.smoothingTimeConstant = 0.65;
+                analyserR.smoothingTimeConstant = 0.65;
                 analyserL.fftSize = 512;
                 analyserR.fftSize = 512;
                 audioSource.connect(splitterNode);
                 splitterNode.connect(analyserL, 0);
                 splitterNode.connect(analyserR, 1);
             } catch (err) {
-                console.warn('[Visualizer] Stereo splitter optional setup:', err);
+                console.warn('[Visualizer] Stereo splitter setup fallback to mono:', err);
+                analyserL = audioAnalyser;
+                analyserR = audioAnalyser;
             }
 
             if (audioContext.state === 'suspended') {
@@ -671,7 +697,13 @@ const musicVisualizer = (function () {
             waveDetail = new Wave(audioAnalyser, detailCanvas);
 
             isInitialized = true;
-            console.log('[Visualizer] Initialized successfully');
+            console.log('[Visualizer] Initialized successfully with live audio capture');
+
+            // Cancel any standalone loop now that Wave is handling it
+            if (standaloneRafId) {
+                cancelAnimationFrame(standaloneRafId);
+                standaloneRafId = null;
+            }
 
             syncSize();
             applySettings();
@@ -689,7 +721,7 @@ const musicVisualizer = (function () {
         [footerCanvas, detailCanvas].forEach(canvas => {
             if (!canvas) return;
             const rect = canvas.getBoundingClientRect();
-            if (rect.width === 0) return;
+            if (rect.width === 0 || rect.height === 0) return;
             const dpr = window.devicePixelRatio || 1;
             canvas.width = Math.round(rect.width * dpr);
             canvas.height = Math.round(rect.height * dpr);
@@ -714,13 +746,13 @@ const musicVisualizer = (function () {
             if (s.showFooterVisualizer && footerCanvas && visualizerContainer) {
                 if (s.footerVisualizerStyle === 'vumeter') {
                     footerCanvas.style.opacity = Math.max(opacity, 0.95);
-                    visualizerContainer.style.height = window.innerHeight <= 845 ? '52px' : '72px';
+                    visualizerContainer.style.height = window.innerHeight <= 845 ? '54px' : '72px';
                     visualizerContainer.style.display = 'flex';
                 }
             }
             if (s.showDetailVisualizer && detailCanvas) {
                 if (s.detailVisualizerStyle === 'vumeter') {
-                    detailCanvas.style.opacity = Math.max(opacity, 0.95);
+                    detailCanvas.style.opacity = Math.max(opacity, 0.92);
                 }
             }
             return;
@@ -790,7 +822,7 @@ const musicVisualizer = (function () {
 
             const footerIsHidden = playerFooter && playerFooter.classList.contains('translate-y-[110%]');
             const isShortWindow = window.innerHeight <= 845;
-            visualizerContainer.style.height = isShortWindow ? (style === 'vumeter' ? '52px' : '40px') : (style === 'vumeter' ? '72px' : '100px');
+            visualizerContainer.style.height = isShortWindow ? (style === 'vumeter' ? '54px' : '40px') : (style === 'vumeter' ? '72px' : '100px');
             visualizerContainer.style.zIndex = '1';
             visualizerContainer.style.display = 'flex';
             if (playerFooter) {
@@ -799,7 +831,8 @@ const musicVisualizer = (function () {
                     playerFooter.style.height = isShortWindow ? '90px' : (style === 'vumeter' ? '125px' : '150px');
                     playerFooter.style.justifyContent = 'center';
                 } else {
-                    playerFooter.style.height = '';
+                    // Mobile footer adjustment
+                    playerFooter.style.height = style === 'vumeter' ? '110px' : '';
                     playerFooter.style.justifyContent = '';
                 }
             }
@@ -866,7 +899,7 @@ const musicVisualizer = (function () {
             const style = s.detailVisualizerStyle || 'pulse';
             if (style === 'vumeter') {
                 waveDetail.addAnimation(new LXStudioVUMeterAnimation({ isCompact: false, analyserL, analyserR }));
-                detailCanvas.style.opacity = Math.max(opacity, 0.95);
+                detailCanvas.style.opacity = Math.max(opacity, 0.92);
             } else {
                 const options = {
                     fillColor: themeColor,
@@ -893,8 +926,6 @@ const musicVisualizer = (function () {
         } else if (detailCanvas) {
             detailCanvas.style.opacity = '0';
         }
-
-        triggerStandaloneLoop();
     }
 
     /**
@@ -923,20 +954,14 @@ const musicVisualizer = (function () {
             } else if (audioContext && audioContext.state === 'suspended') {
                 audioContext.resume();
             }
-            triggerStandaloneLoop();
-        });
-        audio.addEventListener('pause', () => {
-            triggerStandaloneLoop();
         });
     }
 
-    // Window & Orientation resize listeners
     window.addEventListener('resize', () => {
         syncSize();
         applySettings();
     });
 
-    // Native ResizeObserver for instant zero-lag stretching when window/container changes
     if (typeof window !== 'undefined' && window.ResizeObserver) {
         const resizeObserver = new ResizeObserver(() => {
             syncSize();
