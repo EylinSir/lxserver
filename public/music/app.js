@@ -124,6 +124,7 @@ const DEFAULT_SETTINGS = {
     enableAutoDegradeQuality: true, // 自动降低音质 (默认开启)
     playbackErrorPriority: 'platform,quality,next', // 播放失败处理优先级
     enablePreloader: true, // 预读机制 (默认开启)
+    disablePreloadSkip: false, // 禁用预读跳过 (默认关闭)
     enableSmtcLyric: true, // SMTC 歌词显示 (默认开启)
     // Visualizer Settings (Refactored)
     showFooterVisualizer: true,
@@ -5866,6 +5867,12 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
     const nextSong = currentPlaylist[targetIndex];
     if (!nextSong) return;
 
+    // 如果这首已经被标记为不可播放（且未启用“禁用预读跳过”），拉下一首
+    if (nextSong._unplayable && !settings.disablePreloadSkip) {
+        const followingIndex = (targetIndex + 1) >= currentPlaylist.length ? 0 : targetIndex + 1;
+        return prefetchNextSong(followingIndex, depth + 1);
+    }
+
     try {
         const targetQual = window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
 
@@ -5890,8 +5897,10 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
         console.log(`[Prefetch] Readied: ${nextSong.name} (${result.quality} / ${sourceDesc})`);
 
     } catch (e) {
-        // 预读失败可能只是临时断网，不能据此让前台播放永久跳过这首歌。
-        console.warn(`[Prefetch] Could not preload [${nextSong.name}]:`, e.message);
+        console.warn(`[Prefetch] Skip unplayable [${nextSong.name}]:`, e.message);
+        if (!settings.disablePreloadSkip) {
+            nextSong._unplayable = true; // 标记
+        }
 
         // 递归探测
         const followingIndex = (targetIndex + 1) >= currentPlaylist.length ? 0 : targetIndex + 1;
@@ -7564,12 +7573,25 @@ function updatePlayButton(isPlaying) {
 }
 
 /**
- * 播放下一首。预读失败不影响前台播放时的解析与错误恢复。
+ * 播放下一首。具备自动跳过被预读器标记为“不可解析”的歌曲的能力。
+ * @param {Number} depth 递归尝试深度，防止死循环
  */
-function playNext() {
+function playNext(depth = 0) {
+    if (depth > 10) {
+        console.warn('[Queue] Too many unplayable songs skipped, stopping.');
+        return;
+    }
+
     const nextIndex = getNextIndex();
     if (nextIndex !== -1 && currentPlaylist[nextIndex]) {
         const nextSong = currentPlaylist[nextIndex];
+
+        // [Logic Fix] 如果这首歌在预读中已经被确认不可解析且未禁用预读跳过，直接跳过到再下一首
+        if (nextSong._unplayable && !settings.disablePreloadSkip && nextIndex !== currentIndex) {
+            console.log(`[Queue] Auto-skipping unplayable song [${nextIndex}]: ${nextSong.name}`);
+            currentIndex = nextIndex; // 更新当前索引以便 getNextIndex() 能找到下一首
+            return playNext(depth + 1);
+        }
 
         playSong(nextSong, nextIndex);
     } else {
@@ -8686,6 +8708,7 @@ const SETTINGS_UI_MAP = {
     enableAutoDegradeQuality: { id: 'setting-auto-degrade-quality', type: 'checkbox' },
     playbackErrorPriority: { id: 'setting-playback-error-priority', type: 'value' },
     enablePreloader: { id: 'setting-enable-preloader', type: 'checkbox' },
+    disablePreloadSkip: { id: 'setting-disable-preload-skip', type: 'checkbox' },
     deduplicatePlaylistByQuality: { id: 'setting-deduplicate-playlist', type: 'checkbox' },
     enableSmtcLyric: {
         id: 'setting-enable-smtc-lyric',
