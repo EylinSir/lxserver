@@ -166,6 +166,7 @@ function normalizeDownloadConcurrency(value) {
 function normalizeStoredSettings(nextSettings) {
     if (!nextSettings || typeof nextSettings !== 'object') return nextSettings;
     delete nextSettings.remasterRetryManifest;
+    nextSettings.enableCrossfade = false;
     if (nextSettings.downloadConcurrency !== undefined) {
         nextSettings.downloadConcurrency = normalizeDownloadConcurrency(nextSettings.downloadConcurrency);
     }
@@ -6845,11 +6846,6 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
     }
 
-    // [Crossfade] 如果开启了淡入淡出，则先执行淡出
-    if (settings.enableCrossfade && !noPlay && audio && !audio.paused && !audio.ended && audio.src) {
-        await fadeVolume(0, 300);
-    }
-
     if (!noPlay) {
         try { audio.pause(); } catch (e) { }
     }
@@ -7013,13 +7009,10 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
 
         try {
-            if (settings.enableCrossfade) audio.volume = 0;
-            else audio.volume = typeof currentVolume !== 'undefined' ? currentVolume : 1;
+            audio.volume = typeof currentVolume !== 'undefined' ? currentVolume : 1;
 
             shouldAutoRecoverPlayback = true;
             await audio.play();
-
-            if (settings.enableCrossfade) fadeVolume(typeof currentVolume !== 'undefined' ? currentVolume : 1, 1000);
 
             setPlayerStatus('', true);
             updatePlayButton(true);
@@ -7537,26 +7530,15 @@ async function togglePlay() {
 
     if (audio.paused) {
         try {
-            // [Crossfade] 如果开启了淡入淡出，先将进度置为 0，播放后再淡入
-            if (settings.enableCrossfade) {
-                audio.volume = 0;
-            }
+            audio.volume = typeof currentVolume !== 'undefined' ? currentVolume : 1;
             shouldAutoRecoverPlayback = true;
             await audio.play();
             updatePlayButton(true);
-
-            if (settings.enableCrossfade) {
-                fadeVolume(typeof currentVolume !== 'undefined' ? currentVolume : 1, 600);
-            }
         } catch (e) {
             shouldAutoRecoverPlayback = false;
             console.error("[Player] Play blocked:", e);
         }
     } else {
-        // [Crossfade] 如果开启了淡入淡出，先淡出再暂停
-        if (settings.enableCrossfade) {
-            await fadeVolume(0, 600);
-        }
         shouldAutoRecoverPlayback = false;
         audio.pause();
         if (window._autoSkipTimer) {
@@ -7633,35 +7615,16 @@ function playPrev() {
     playSong(currentPlaylist[prevIndex], prevIndex);
 }
 
-// 音量淡入淡出辅助函数
+// 音量淡入淡出辅助函数 (已优化为直通无爆音设置)
 let volumeFadeInterval = null;
 function fadeVolume(targetVolume, duration = 800) {
-    if (volumeFadeInterval) clearInterval(volumeFadeInterval);
-
-    const startVolume = audio.volume;
-    const steps = 20;
-    const increment = (targetVolume - startVolume) / steps;
-    const stepTime = duration / steps;
-    let currentStep = 0;
-
-    return new Promise((resolve) => {
-        volumeFadeInterval = setInterval(() => {
-            currentStep++;
-            let nextVolume = startVolume + (increment * currentStep);
-
-            // 边界检查
-            if (nextVolume < 0) nextVolume = 0;
-            if (nextVolume > 1) nextVolume = 1;
-
-            audio.volume = nextVolume;
-
-            if (currentStep >= steps) {
-                clearInterval(volumeFadeInterval);
-                audio.volume = targetVolume;
-                resolve();
-            }
-        }, stepTime);
-    });
+    if (volumeFadeInterval) {
+        clearInterval(volumeFadeInterval);
+        volumeFadeInterval = null;
+    }
+    const finalVol = typeof targetVolume === 'number' ? targetVolume : (typeof currentVolume !== 'undefined' ? currentVolume : 1);
+    audio.volume = Math.max(0, Math.min(1, finalVol));
+    return Promise.resolve();
 }
 
 // Audio Events
@@ -7675,16 +7638,6 @@ audio.addEventListener('timeupdate', () => {
 
     const current = audio.currentTime;
     const duration = audio.duration;
-
-    // [Crossfade] 自然播放接近结束时提前淡出
-    if (settings.enableCrossfade && duration > 5 && (duration - current < 1.0)) {
-        if (!window._isFadingOut) {
-            window._isFadingOut = true;
-            fadeVolume(0, 1000);
-        }
-    } else if (duration - current > 1.5) {
-        window._isFadingOut = false;
-    }
 
     document.getElementById('time-current').innerText = formatTime(current);
     document.getElementById('time-total').innerText = formatTime(duration);
