@@ -158,15 +158,10 @@ class LXStudioVUMeterAnimation {
         const scale = Math.min(panelW / (isCompact ? 520 : 860), panelH / (isCompact ? 72 : 230));
         const cornerR = (isCompact ? 4 : 8) * scale;
 
-        // 1. Chassis Outer Bezel & Shadow
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-        ctx.shadowBlur = (isCompact ? 4 : 16) * scale;
-        ctx.shadowOffsetY = (isCompact ? 2 : 6) * scale;
+        // 1. Chassis Outer Bezel (Crisp hardware bezel without GPU-stalling shadowBlur)
         ctx.fillStyle = theme === 'champagne-gold' ? '#24211a' : '#121418';
         this.roundRect(ctx, panelX, panelY, panelW, panelH, cornerR);
         ctx.fill();
-        ctx.restore();
 
         // Chassis Faceplate Brushed Texture Gradient
         const faceGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
@@ -697,7 +692,8 @@ const musicVisualizer = (function () {
 
         try {
             console.log('[Visualizer] Initializing AudioContext & Visualizer graph...');
-            audioContext = window._sharedAudioContext || (window.soundEffects && window.soundEffects.getContext && window.soundEffects.getContext()) || (window._sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)());
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            audioContext = window._sharedAudioContext || (window.soundEffects && window.soundEffects.getContext && window.soundEffects.getContext()) || (window._sharedAudioContext = new AudioContextClass({ latencyHint: 'playback' }));
 
             if (hasEffectsAnalyser && window.soundEffects && window.soundEffects.isGraphBuilt && window.soundEffects.isGraphBuilt()) {
                 audioAnalyser = window.soundEffects.getAnalyser();
@@ -950,7 +946,10 @@ const musicVisualizer = (function () {
 
         // --- Handle Detail Visualizer ---
         waveDetail.clearAnimations();
-        if (s.showDetailVisualizer && detailCanvas) {
+        const detailViewEl = document.getElementById('view-player-detail');
+        const isDetailViewVisible = detailViewEl && !detailViewEl.classList.contains('hidden') && !detailViewEl.classList.contains('translate-y-[100%]');
+
+        if (s.showDetailVisualizer && detailCanvas && isDetailViewVisible) {
             const style = s.detailVisualizerStyle || 'pulse';
             if (style === 'vumeter') {
                 waveDetail.addAnimation(new LXStudioVUMeterAnimation({ isCompact: false, analyserL, analyserR }));

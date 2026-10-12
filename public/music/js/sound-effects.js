@@ -66,8 +66,10 @@ window.soundEffects = (function () {
             return window.iOSBackgroundAudio.isIOS();
         }
         const ua = navigator.userAgent;
-        const isIPad = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        return /iPhone|iPod/.test(ua) || isIPad;
+        if (/Macintosh/i.test(ua) && !('ontouchend' in document)) return false;
+        if (/Windows|Linux|X11/i.test(ua)) return false;
+        if (/iPhone|iPod/.test(ua)) return true;
+        return (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) && ('ontouchend' in document);
     }
 
     function isMobileDevice() {

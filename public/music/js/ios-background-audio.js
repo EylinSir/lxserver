@@ -11,11 +11,20 @@
  */
 window.iOSBackgroundAudio = (function () {
 
-    // 检测是否为 iOS 设备（含 iPad OS 桌面模式）
+    // 检测是否为真实 iOS 移动设备（严格排除 macOS 桌面系统）
     function isIOS() {
         const ua = navigator.userAgent;
-        const isIPad = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        return /iPhone|iPod/.test(ua) || isIPad;
+        // 排除桌面操作系统 (Mac/Windows/Linux/Unix)
+        const isDesktopMac = /Macintosh/i.test(ua) && !('ontouchend' in document);
+        if (isDesktopMac) return false;
+        if (/Windows|Linux|X11/i.test(ua)) return false;
+
+        // 真实 iPhone / iPod
+        if (/iPhone|iPod/i.test(ua)) return true;
+
+        // 真实 iPad (具有多点触控屏幕事件支持)
+        const isIPad = (/iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) && ('ontouchend' in document);
+        return isIPad;
     }
 
     let streamDestination = null;
