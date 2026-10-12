@@ -2899,33 +2899,73 @@ export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerRespon
     for (const loc of locations) {
         for (const folder of roots) {
             const dir = getCacheDir(normalizedUsername, folder === 'music', loc)
-            const checkPath = path.join(dir, filename) // [Fix] Allow subfolders
-            if (fs.existsSync(checkPath)) { filePath = checkPath; break }
+            // 允许子目录，但只读取当前缓存目录内的普通文件（包括目录内的符号链接）。
+            const checkPath = path.resolve(dir, filename)
+            const relativePath = path.relative(path.resolve(dir), checkPath)
+            if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) continue
+            try {
+                const realDir = fs.realpathSync(dir)
+                const realPath = fs.realpathSync(checkPath)
+                const realRelativePath = path.relative(realDir, realPath)
+                if (!realRelativePath || realRelativePath === '..' || realRelativePath.startsWith(`..${path.sep}`) || path.isAbsolute(realRelativePath)) continue
+                if (fs.statSync(realPath).isFile()) { filePath = realPath; break }
+            } catch { /* 文件被删除或目录不可用时继续查找备用位置。 */ }
         }
         if (filePath) break
     }
     if (!filePath) { res.writeHead(404); res.end('Not Found'); return }
-    const stat = fs.statSync(filePath)
+    let stat: Stats
+    try { stat = fs.statSync(filePath) }
+    catch { res.writeHead(404); res.end('Not Found'); return }
     const ext = path.extname(filePath).toLowerCase()
     const mimeTypes: Record<string, string> = {
         '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.wav': 'audio/wav'
     }
     const contentType = mimeTypes[ext] || 'application/octet-stream'
-    const range = req.headers.range
+    // HEAD 不发送响应体；Range 只适用于 GET。
+    if (req.method === 'HEAD') {
+        res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': contentType, 'Accept-Ranges': 'bytes' })
+        res.end()
+        return
+    }
+    const range = req.headers.range?.startsWith('bytes=') ? req.headers.range : undefined
+    let stream: fs.ReadStream
     if (range) {
-        const parts = range.replace(/bytes=/, "").split("-")
-        const start = parseInt(parts[0], 10)
-        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+        const parts = /^bytes=(\d*)-(\d*)$/.exec(range)
+        let start = 0
+        let end = stat.size - 1
+        let valid = !!parts && !!(parts[1] || parts[2]) && stat.size > 0
+        if (valid && parts) {
+            if (!parts[1]) {
+                const suffixLength = Number(parts[2])
+                valid = Number.isSafeInteger(suffixLength) && suffixLength > 0
+                start = Math.max(0, stat.size - suffixLength)
+            } else {
+                start = Number(parts[1])
+                const requestedEnd = parts[2] ? Number(parts[2]) : end
+                valid = Number.isSafeInteger(start) && Number.isSafeInteger(requestedEnd) && start < stat.size && requestedEnd >= start
+                end = Math.min(requestedEnd, end)
+            }
+        }
+        if (!valid) {
+            res.writeHead(416, { 'Content-Range': `bytes */${stat.size}`, 'Accept-Ranges': 'bytes', 'Content-Length': 0 })
+            res.end()
+            return
+        }
         const chunksize = (end - start) + 1
         res.writeHead(206, {
             'Content-Range': `bytes ${start}-${end}/${stat.size}`,
             'Accept-Ranges': 'bytes', 'Content-Length': chunksize, 'Content-Type': contentType,
         })
-        fs.createReadStream(filePath, { start, end }).pipe(res)
+        stream = fs.createReadStream(filePath, { start, end })
     } else {
         res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': contentType, 'Accept-Ranges': 'bytes' })
-        fs.createReadStream(filePath).pipe(res)
+        stream = fs.createReadStream(filePath)
     }
+    // 读取失败时关闭响应，并在客户端中断/离开时释放文件描述符。
+    stream.once('error', () => res.destroy())
+    res.once('close', () => stream.destroy())
+    stream.pipe(res)
 }
 
 export const getCacheStats = (username?: string) => {
