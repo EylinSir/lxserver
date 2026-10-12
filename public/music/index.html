@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="referrer" content="no-referrer">
     <title>LX Music Web</title>
     <!-- Config MUST be loaded before PostHog -->
@@ -45,7 +45,7 @@
     <link rel="stylesheet" href="css/app.css">
 </head>
 
-<body class="t-bg-main h-screen flex flex-col overflow-hidden t-text-main font-sans">
+<body class="t-bg-main flex flex-col overflow-hidden t-text-main font-sans" style="height: 100dvh;">
 
     <!-- Main Container -->
     <div class="flex flex-1 overflow-hidden relative">
@@ -57,7 +57,7 @@
 
         <!-- Sidebar -->
         <aside id="main-sidebar"
-            class="w-72 md:w-72 t-bg-panel shadow-lg flex flex-col z-[60] fixed inset-y-0 left-0 transform -translate-x-full md:relative md:translate-x-0 md:z-30 h-full pb-28 transition-all duration-300">
+            class="w-72 md:w-72 t-bg-panel shadow-lg flex flex-col z-[60] fixed left-0 top-0 transform -translate-x-full md:relative md:translate-x-0 md:z-30 transition-all duration-300" style="height: 100dvh; padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));">
             <div class="h-16 flex items-center justify-center border-b t-border-main relative">
                 <svg viewBox="0 0 447.942 447.943" class="w-8 h-8 mr-2 rounded-lg shadow-sm"
                     xmlns="http://www.w3.org/2000/svg">
@@ -566,7 +566,7 @@
                         </div>
                         <!-- Pagination -->
                         <div id="search-pagination-bar"
-                            class="h-14 md:h-12 border-t t-border-main flex items-center justify-between px-3 md:px-6 t-bg-main flex-shrink-0">
+                            class="border-t t-border-main flex items-center justify-between px-3 md:px-6 t-bg-main flex-shrink-0" style="min-height: 3.5rem; padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));">
                             <div class="flex items-center gap-2">
                                 <button id="search-btn-first" onclick="firstPage()" title="首页"
                                     class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors text-sm flex items-center gap-1">
@@ -1144,7 +1144,7 @@
 
                             <!-- 分页 -->
                             <div id="lb-pagination"
-                                class="flex-shrink-0 flex items-center justify-center gap-2 md:gap-4 py-3 border-t t-border-main t-bg-panel/80">
+                                class="flex-shrink-0 flex items-center justify-center gap-2 md:gap-4 py-3 border-t t-border-main t-bg-panel/80" style="padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));">
                                 <button id="lb-btn-first" onclick="window.LeaderboardManager.goToBoundary('first')"
                                     disabled title="首页"
                                     class="px-2 md:px-4 py-1.5 text-xs md:text-sm t-bg-main border t-border-main rounded-lg hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
@@ -3798,7 +3798,7 @@
 
     <!-- Player Bar -->
     <footer id="player-footer"
-        class="fixed bottom-0 left-0 w-full h-auto md:min-h-[6rem] py-2 md:py-3 t-bg-panel/90 backdrop-blur-lg border-t t-border-main shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] flex flex-col md:flex-row items-center px-4 md:px-6 z-[60] transition-all duration-300">
+        class="fixed bottom-0 left-0 w-full h-auto md:min-h-[6rem] py-2 md:py-3 t-bg-panel/90 backdrop-blur-lg border-t t-border-main shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] flex flex-col md:flex-row items-center px-4 md:px-6 z-[60] transition-all duration-300" style="padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));">
 
         <!-- Song Info -->
         <div id="player-song-info"

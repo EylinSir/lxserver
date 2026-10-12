@@ -16928,6 +16928,12 @@ function togglePlayerPanel() {
             }
         });
 
+        // 同步侧边栏底部 Padding (播放栏可见时需要给播放栏留空间)
+        const sidebarEl = document.getElementById('main-sidebar');
+        if (sidebarEl) {
+            sidebarEl.style.paddingBottom = 'calc(7rem + env(safe-area-inset-bottom, 0px))';
+        }
+
         // 歌词页: 增加底部 Padding (避开播放栏)
         if (playerDetail) {
             playerDetail.classList.add('pb-24');
@@ -16963,6 +16969,12 @@ function togglePlayerPanel() {
             const el = document.getElementById(id);
             if (el) el.classList.remove('pb-32', 'pb-44', 'md:pb-32');
         });
+
+        // 同步侧边栏底部 Padding (播放栏隐藏时只保留安全区域)
+        const sidebarEl = document.getElementById('main-sidebar');
+        if (sidebarEl) {
+            sidebarEl.style.paddingBottom = 'env(safe-area-inset-bottom, 0px)';
+        }
 
         // 歌词页: 移除底部 Padding (利用底部空间)
         if (playerDetail) {
