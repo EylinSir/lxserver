@@ -301,48 +301,56 @@ i {
     color: #4b5563;
 }
 
+.dark .t-badge-blue,
 [data-appearance="dark"] .t-badge-blue {
     background-color: rgba(59, 130, 246, 0.2);
     color: #60a5fa;
     border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
+.dark .t-badge-purple,
 [data-appearance="dark"] .t-badge-purple {
     background-color: rgba(139, 92, 246, 0.2);
     color: #a78bfa;
     border: 1px solid rgba(139, 92, 246, 0.3);
 }
 
+.dark .t-badge-cyan,
 [data-appearance="dark"] .t-badge-cyan {
     background-color: rgba(6, 182, 212, 0.2);
     color: #22d3ee;
     border: 1px solid rgba(6, 182, 212, 0.3);
 }
 
+.dark .t-badge-yellow,
 [data-appearance="dark"] .t-badge-yellow {
     background-color: rgba(245, 158, 11, 0.2);
     color: #fbbf24;
     border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
+.dark .t-badge-green,
 [data-appearance="dark"] .t-badge-green {
     background-color: rgba(16, 185, 129, 0.2);
     color: #34d399;
     border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
+.dark .t-badge-red,
 [data-appearance="dark"] .t-badge-red {
     background-color: rgba(244, 63, 94, 0.2);
     color: #fb7185;
     border: 1px solid rgba(244, 63, 94, 0.3);
 }
 
+.dark .t-badge-pink,
 [data-appearance="dark"] .t-badge-pink {
     background-color: rgba(236, 72, 153, 0.2);
     color: #f472b6;
     border: 1px solid rgba(236, 72, 153, 0.3);
 }
 
+.dark .t-badge-gray,
 [data-appearance="dark"] .t-badge-gray {
     background-color: rgba(156, 163, 175, 0.2);
     color: #9ca3af;

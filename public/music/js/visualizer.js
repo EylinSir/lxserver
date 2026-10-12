@@ -23,8 +23,6 @@ class LXStudioVUMeterAnimation {
         this.isCompact = !!options.isCompact;
         this.needleNormL = 0.0;
         this.needleNormR = 0.0;
-        this.clipHoldL = 0;
-        this.clipHoldR = 0;
         this.lastTime = performance.now();
     }
 
@@ -85,31 +83,26 @@ class LXStudioVUMeterAnimation {
 
         if (isPlaying) {
             let rmsL = 0, rmsR = 0;
-            let peakL = 0, peakR = 0;
 
-            // 1. Precise Stereo Time-Domain Waveform Analysis (True RMS & Sample Peak)
+            // 1. Precise Stereo Time-Domain Waveform Analysis (True RMS)
             const aL = this.options.analyserL || window._sharedAnalyserL;
             const aR = this.options.analyserR || window._sharedAnalyserR;
             if (aL && aR) {
                 const sizeL = aL.fftSize || 512;
                 const sizeR = aR.fftSize || 512;
-                const timeBufL = new Uint8Array(sizeL);
-                const timeBufR = new Uint8Array(sizeR);
-                aL.getByteTimeDomainData(timeBufL);
-                aR.getByteTimeDomainData(timeBufR);
+                if (!this.timeBufL || this.timeBufL.length !== sizeL) this.timeBufL = new Uint8Array(sizeL);
+                if (!this.timeBufR || this.timeBufR.length !== sizeR) this.timeBufR = new Uint8Array(sizeR);
+                aL.getByteTimeDomainData(this.timeBufL);
+                aR.getByteTimeDomainData(this.timeBufR);
 
                 let sumSqL = 0, sumSqR = 0;
                 for (let i = 0; i < sizeL; i++) {
-                    const vL = (timeBufL[i] - 128) / 128;
+                    const vL = (this.timeBufL[i] - 128) / 128;
                     sumSqL += vL * vL;
-                    const aLVal = Math.abs(vL);
-                    if (aLVal > peakL) peakL = aLVal;
                 }
                 for (let i = 0; i < sizeR; i++) {
-                    const vR = (timeBufR[i] - 128) / 128;
+                    const vR = (this.timeBufR[i] - 128) / 128;
                     sumSqR += vR * vR;
-                    const aRVal = Math.abs(vR);
-                    if (aRVal > peakR) peakR = aRVal;
                 }
                 rmsL = Math.sqrt(sumSqL / sizeL);
                 rmsR = Math.sqrt(sumSqR / sizeR);
@@ -117,22 +110,15 @@ class LXStudioVUMeterAnimation {
 
             // Fallback to frequency data if time domain is flat
             if (rmsL === 0 && rmsR === 0 && data && data.length > 0) {
-                let sumSq = 0, maxVal = 0;
+                let sumSq = 0;
                 for (let i = 0; i < data.length; i++) {
                     const v = data[i] / 255;
                     sumSq += v * v;
-                    if (v > maxVal) maxVal = v;
                 }
                 const rms = Math.sqrt(sumSq / data.length);
                 rmsL = rms;
                 rmsR = rms;
-                peakL = maxVal;
-                peakR = maxVal;
             }
-
-            // Digital Full-Scale Peak Clipping Detection
-            if (peakL >= 0.985) this.clipHoldL = now + 700; // hold LED for 700ms
-            if (peakR >= 0.985) this.clipHoldR = now + 700;
 
             // 2. Calibrated 0 VU = -18 dBFS Reference
             if (rmsL > 1e-5 || rmsR > 1e-5) {
@@ -153,13 +139,10 @@ class LXStudioVUMeterAnimation {
         this.needleNormL += alpha * (targetNormL - this.needleNormL);
         this.needleNormR += alpha * (targetNormR - this.needleNormR);
 
-        const isClipL = now < this.clipHoldL;
-        const isClipR = now < this.clipHoldR;
-
-        this.renderConsole(ctx, width, height, this.needleNormL, this.needleNormR, isClipL, isClipR, this.isCompact);
+        this.renderConsole(ctx, width, height, this.needleNormL, this.needleNormR, this.isCompact);
     }
 
-    renderConsole(ctx, width, height, levelL, levelR, clipL, clipR, isCompact) {
+    renderConsole(ctx, width, height, levelL, levelR, isCompact) {
         ctx.save();
 
         const theme = (window.settings && window.settings.vuMeterTheme) || this.options.theme || 'vintage-amber';
@@ -227,7 +210,7 @@ class LXStudioVUMeterAnimation {
         this.drawMeterPod(ctx, leftX, innerY, meterW, meterH, levelL, scale, 'LEFT', isCompact, theme);
 
         // 3. Render Center Functional Console
-        this.drawCenterConsole(ctx, centerX, innerY, centerW, meterH, scale, clipL, clipR, isCompact, theme);
+        this.drawCenterConsole(ctx, centerX, innerY, centerW, meterH, scale, isCompact, theme);
 
         // 4. Render Right Meter Pod
         this.drawMeterPod(ctx, rightX, innerY, meterW, meterH, levelR, scale, 'RIGHT', isCompact, theme);
@@ -573,7 +556,7 @@ class LXStudioVUMeterAnimation {
         ctx.restore();
     }
 
-    drawCenterConsole(ctx, x, y, w, h, scale, clipL, clipR, isCompact, theme) {
+    drawCenterConsole(ctx, x, y, w, h, scale, isCompact, theme) {
         ctx.save();
         const cornerR = (isCompact ? 2 : 4) * scale;
 
@@ -594,42 +577,17 @@ class LXStudioVUMeterAnimation {
         ctx.fillStyle = (theme === 'vintage-amber' || theme === 'champagne-gold') ? '#d4af37' : '#00e5ff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('LX-AUDIO', cx, isCompact ? (cy - 8 * scale) : (cy - 14 * scale));
+        ctx.fillText('LX-AUDIO', cx, isCompact ? (cy - 7 * scale) : (cy - 12 * scale));
 
         // Functional Calibration Inscription
         ctx.font = `500 ${Math.max(4.5, Math.round((isCompact ? 4.8 : 6.0) * scale))}px monospace`;
         ctx.fillStyle = 'rgba(200, 210, 225, 0.75)';
-        ctx.fillText('0VU=-18dBFS', cx, isCompact ? (cy + 2 * scale) : (cy + 2 * scale));
+        ctx.fillText('0VU=-18dBFS', cx, isCompact ? (cy + 1 * scale) : (cy + 1 * scale));
 
         if (!isCompact) {
             ctx.font = `600 ${Math.max(4.5, Math.round(5.5 * scale))}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
             ctx.fillStyle = 'rgba(150, 165, 185, 0.65)';
-            ctx.fillText('STEREO', cx, cy + 14 * scale);
-        }
-
-        // Per-Channel Digital Clip Indicators (CLIP L & CLIP R)
-        const clipY = isCompact ? (cy + 12 * scale) : (cy + 27 * scale);
-        const ledSpacing = (isCompact ? 10 : 16) * scale;
-        const ledR = (isCompact ? 1.8 : 2.5) * scale;
-
-        // Left Clip LED
-        const ledLX = cx - ledSpacing;
-        ctx.beginPath();
-        ctx.arc(ledLX, clipY, ledR, 0, Math.PI * 2);
-        ctx.fillStyle = clipL ? '#ff2a2a' : '#22262e';
-        ctx.fill();
-
-        // Right Clip LED
-        const ledRX = cx + ledSpacing;
-        ctx.beginPath();
-        ctx.arc(ledRX, clipY, ledR, 0, Math.PI * 2);
-        ctx.fillStyle = clipR ? '#ff2a2a' : '#22262e';
-        ctx.fill();
-
-        if (!isCompact) {
-            ctx.font = `600 ${Math.max(4, Math.round(5.0 * scale))}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
-            ctx.fillStyle = (clipL || clipR) ? '#ff4d5a' : 'rgba(140, 150, 165, 0.5)';
-            ctx.fillText('PEAK CLIP', cx, clipY + 8 * scale);
+            ctx.fillText('STEREO', cx, cy + 13 * scale);
         }
 
         ctx.restore();
@@ -741,10 +699,10 @@ const musicVisualizer = (function () {
             console.log('[Visualizer] Initializing AudioContext & Visualizer graph...');
             audioContext = window._sharedAudioContext || (window.soundEffects && window.soundEffects.getContext && window.soundEffects.getContext()) || (window._sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)());
 
-            if (hasEffectsAnalyser) {
+            if (hasEffectsAnalyser && window.soundEffects && window.soundEffects.isGraphBuilt && window.soundEffects.isGraphBuilt()) {
                 audioAnalyser = window.soundEffects.getAnalyser();
                 audioSource = window.soundEffects.getSourceNode ? window.soundEffects.getSourceNode() : window._sharedAudioSourceNode;
-                console.log('[Visualizer] Using analyser from SoundEffectsManager');
+                console.log('[Visualizer] Using analyser from SoundEffectsManager (exclusive output)');
             } else {
                 audioSource = window._sharedAudioSourceNode || (window._sharedAudioSourceNode = audioContext.createMediaElementSource(audio));
                 audioAnalyser = window._sharedAudioAnalyser || (window._sharedAudioAnalyser = audioContext.createAnalyser());
@@ -777,6 +735,7 @@ const musicVisualizer = (function () {
                 splitterNode.connect(analyserR, 1);
                 window._sharedAnalyserL = analyserL;
                 window._sharedAnalyserR = analyserR;
+                window._sharedSplitterNode = splitterNode;
             } catch (err) {
                 console.warn('[Visualizer] Stereo splitter setup fallback to mono:', err);
                 analyserL = audioAnalyser;

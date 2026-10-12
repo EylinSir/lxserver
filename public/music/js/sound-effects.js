@@ -103,6 +103,9 @@ window.soundEffects = (function () {
         // Disconnect any bypass link (e.g. created previously by visualizer)
         try { mediaSource.disconnect(); } catch (_) { }
         try { analyser.disconnect(); } catch (_) { }
+        if (window._sharedSplitterNode) {
+            try { mediaSource.connect(window._sharedSplitterNode); } catch (_) { }
+        }
 
         // EQ Filters
         eqFilters = freqs.map(freq => {
@@ -690,6 +693,7 @@ window.soundEffects = (function () {
             saveSettings();
             renderUI();
         },
+        isGraphBuilt: () => isGraphBuilt,
         getContext: () => audioContext || window._sharedAudioContext || null,
         getSourceNode: () => mediaSource || window._sharedAudioSourceNode || null,
         getAnalyser: () => analyser || window._sharedAudioAnalyser || null,

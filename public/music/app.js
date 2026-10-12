@@ -111,7 +111,7 @@ const DEFAULT_SETTINGS = {
     autoFilterDislikedSongs: true, // 播放列表自动剔除不喜欢歌曲 (默认开启)
     autoResume: true, // 自动恢复进度 (默认开启)
     showSidebarSongInfo: false, // 展示侧边栏封面
-    enableCrossfade: true, // 音频淡入淡出
+    enableCrossfade: false, // 音频淡入淡出 (默认关闭，保持原声动态范围与稳定音量)
     keepScreenAwake: true, // 保持屏幕唤醒设置
     enableKeyboardShortcuts: true, // 按键快捷方式 (默认开启)
     showLyricTranslation: true, // 显示歌词翻译
@@ -2419,7 +2419,10 @@ async function doSearch(page = 1, append = false) {
             const promises = SOURCES.map(s =>
                 fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${s}&page=1&type=${type}`, { headers })
                     .then(res => res.json())
-                    .then(data => (data.list || []).map(item => ({ ...item, source: s })))
+                    .then(data => {
+                        const arr = Array.isArray(data) ? data : (data && Array.isArray(data.list) ? data.list : []);
+                        return arr.map(item => ({ ...item, source: s }));
+                    })
                     .catch(e => {
                         console.warn(`[聚合搜索] ${s} 源失败:`, e);
                         return [];
@@ -2442,18 +2445,20 @@ async function doSearch(page = 1, append = false) {
 
             const data = await res.json();
 
-            if (!data || !Array.isArray(data.list)) {
+            const songList = Array.isArray(data) ? data : (data && Array.isArray(data.list) ? data.list : null);
+
+            if (!songList) {
                 console.error('[Search] 后端返回数据格式错误:', data);
                 throw new Error((data && (data.error || data.message)) || '搜索返回的数据格式错误');
             }
 
-            list = data.list.map(item => ({ ...item, source }));
+            list = songList.map(item => ({ ...item, source }));
             if (type === 'song') {
                 window.lastSearchMeta = {
-                    total: data.total,
-                    fetchedPages: data.fetchedPages,
-                    pageSize: data.pageSize,
-                    hasMore: data.hasMore,
+                    total: data.total || songList.length,
+                    fetchedPages: data.fetchedPages || 1,
+                    pageSize: data.pageSize || songList.length,
+                    hasMore: data.hasMore || false,
                 };
             }
         }
@@ -2768,7 +2773,7 @@ function getQualityTags(item) {
         hasHiRes = rawTypes.some(t => (t.type === 'flac24bit' || t.type === 'hires') && isConcrete(t));
         hasAtmos = rawTypes.some(t => (t.type === 'atmos' || t.type === 'atmos_plus') && isConcrete(t));
         hasMaster = rawTypes.some(t => t.type === 'master' && isConcrete(t));
-    } else {
+    } else if (rawTypes && typeof rawTypes === 'object') {
         has320 = !!rawTypes['320k'];
         hasFlac = !!rawTypes['flac'];
         hasHiRes = !!(rawTypes['flac24bit'] && !rawTypes['flac24bit'].isPlatformQuality) || !!(rawTypes.hires && !rawTypes.hires.isPlatformQuality);
@@ -7392,6 +7397,7 @@ function updatePlayerInfo(song, actualQuality) {
                 : actualQuality;
             const qualityTags = resolvedQuality ? getQualityTags({ quality: resolvedQuality }) : '';
             sourceEl.innerHTML = getSourceTag(song.source) + qualityTags;
+            sourceEl.className = 'flex-shrink-0 flex items-center gap-1.5';
             sourceEl.classList.remove('hidden');
         } else {
             sourceEl.innerHTML = '';
