@@ -24,7 +24,7 @@ function player(options = {}) {
     const sandbox = {
         Image, URL, Map, Promise, console: { warn() {} },
         window: { location: { href: 'https://player.example/', origin: 'https://player.example', protocol: 'https:' } },
-        navigator: { mediaSession: {} },
+        navigator: { mediaSession: {}, ...options.device },
         settings: { enableSmtcLyric: false },
         getImgUrl: song => song.img || '/music/assets/logo.svg',
         MediaMetadata: class { constructor(value) { Object.assign(this, value); } },
@@ -43,6 +43,7 @@ function player(options = {}) {
             };
         } }
     };
+    if (options.isIOS !== undefined) sandbox.window.iOSBackgroundAudio = { isIOS: () => options.isIOS };
     vm.createContext(sandbox);
     vm.runInContext(app.slice(start, end), sandbox);
     return { sandbox, images, draws, timers, update: song => sandbox.updateMediaSessionMetadata(song) };
@@ -73,6 +74,15 @@ test('local authenticated cover URLs remain on their original origin', async () 
     assert.equal(p.sandbox.navigator.mediaSession.metadata.artwork[0].type, 'image/jpeg');
 });
 
+test('normalized stored songs retain their album name in system metadata', async () => {
+    const p = player({ isIOS: true });
+    p.update({ id: 'stored', name: 'Track', singer: 'Artist', meta: { albumName: 'Stored album' }, img: '/cover.png' });
+    assert.equal(p.sandbox.navigator.mediaSession.metadata.album, 'Stored album');
+    p.images[0].onload();
+    await flush();
+    assert.equal(p.sandbox.navigator.mediaSession.metadata.album, 'Stored album');
+});
+
 test('a stale artwork load cannot replace a newer song or its lyric title', async () => {
     const p = player();
     p.update({ id: 'a', name: 'First', img: '/first.png' });
@@ -94,6 +104,46 @@ test('a new song does not retain the previous song lyric title', () => {
     p.update({ id: 'b', name: 'Second', singer: 'Second artist', img: '/second.png' });
     assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Second');
     assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Second artist');
+});
+
+for (const [deviceName, options] of [
+    ['iPhone with the shared detector', { isIOS: true }],
+    ['iPadOS without the shared detector', { device: { userAgent: 'Mozilla/5.0 (Macintosh)', platform: 'MacIntel', maxTouchPoints: 5 } }],
+]) {
+    test(`${deviceName} keeps canonical title and artist through synchronous and asynchronous cover refreshes`, async () => {
+        const p = player(options);
+        const song = { id: 'a', name: 'Track', singer: 'Artist', img: '/cover.png' };
+        p.sandbox.settings.enableSmtcLyric = true;
+        p.update(song);
+        p.sandbox.navigator.mediaSession.metadata.title = 'Previous lyric';
+        p.sandbox.navigator.mediaSession.metadata.artist = 'Track - Artist';
+        p.update(song);
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Track');
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Artist');
+        p.sandbox.navigator.mediaSession.metadata.title = 'Another stale lyric';
+        p.sandbox.navigator.mediaSession.metadata.artist = 'Track - Artist';
+        p.images[0].onload();
+        await flush();
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Track');
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Artist');
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.artwork[0].type, 'image/jpeg');
+        assert.equal(p.sandbox.settings.enableSmtcLyric, true);
+    });
+}
+
+test('desktop metadata retains lyrics during same-song and asynchronous artwork refreshes', async () => {
+    const p = player({ isIOS: false, device: { userAgent: 'Mozilla/5.0 (Macintosh)', platform: 'MacIntel', maxTouchPoints: 0 } });
+    p.sandbox.settings.enableSmtcLyric = true;
+    const song = { id: 'a', name: 'Track', singer: 'Artist', img: '/cover.png' };
+    p.update(song);
+    p.sandbox.navigator.mediaSession.metadata.title = 'Current lyric';
+    p.sandbox.navigator.mediaSession.metadata.artist = 'Track - Artist';
+    p.update(song);
+    assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Current lyric');
+    p.images[0].onload();
+    await flush();
+    assert.equal(p.sandbox.navigator.mediaSession.metadata.title, 'Current lyric');
+    assert.equal(p.sandbox.navigator.mediaSession.metadata.artist, 'Track - Artist');
 });
 
 test('repeated metadata updates share a single artwork decode', async () => {
