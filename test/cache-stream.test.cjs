@@ -66,6 +66,9 @@ for (const [range, expectedRange, expected] of [
     ['bytes=-3', 'bytes 7-9/10', '789'],
     ['bytes=-100', 'bytes 0-9/10', '0123456789'],
     ['bytes=7-100', 'bytes 7-9/10', '789'],
+    ['Bytes=2-5', 'bytes 2-5/10', '2345'],
+    ['BYTES=-3', 'bytes 7-9/10', '789'],
+    ['bYtEs=7-', 'bytes 7-9/10', '789'],
 ]) {
     test(`cached audio supports ${range}`, async t => {
         const res = await request(fixture(t), range);

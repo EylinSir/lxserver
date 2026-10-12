@@ -45,7 +45,7 @@ function createBridge(options = {}) {
                 setAttribute() {},
                 play() {
                     this.playCalls++;
-                    if (options.rejectAnchorPlay) return Promise.reject(new Error('Anchor playback denied'));
+                    if (options.rejectAnchorPlay) return Promise.reject(options.anchorPlayError || new Error('Anchor playback denied'));
                     this.paused = false;
                     return Promise.resolve();
                 },
@@ -150,6 +150,43 @@ test('rejected anchor playback falls back to direct output instead of leaving th
     assert.equal(fixture.bridge.isActive(), false);
     assert.equal(fixture.anchors.length, 0);
     assert.equal(fixture.main.listenerCount('play'), 0);
+});
+
+test('an autoplay denial retains the bridge so a later playback gesture can retry the same anchor', async () => {
+    const error = new Error('Playback needs a user gesture');
+    error.name = 'NotAllowedError';
+    const options = { rejectAnchorPlay: true, anchorPlayError: error };
+    const fixture = createBridge(options);
+    fixture.bridge.init(fixture.audioContext, fixture.analyser);
+    const anchor = fixture.anchors[0];
+    await settle();
+
+    assert.equal(fixture.bridge.isActive(), true);
+    assert.equal(fixture.anchors.length, 1);
+    assert.equal(anchor.paused, true);
+    assert.equal(fixture.main.listenerCount('play'), 1);
+    assert.equal(fixture.main.listenerCount('pause'), 1);
+    assert.equal(fixture.audioContext.listenerCount('statechange'), 1);
+    assert.equal(fixture.document.listenerCount('visibilitychange'), 1);
+
+    options.rejectAnchorPlay = false;
+    fixture.main.paused = true;
+    fixture.bridge.ensureAnchorPlaying();
+    assert.equal(anchor.playCalls, 1, 'A genuinely paused track must stay paused');
+    fixture.main.paused = false;
+    fixture.bridge.ensureAnchorPlaying();
+    await settle();
+
+    assert.equal(fixture.bridge.isActive(), true);
+    assert.equal(fixture.anchors[0], anchor);
+    assert.equal(anchor.paused, false);
+    assert.equal(anchor.playCalls, 2);
+    assert.equal(fixture.audioContext.streamDestinations.length, 1);
+    assert.deepEqual(outputs(fixture.analyser), ['stream']);
+    assert.equal(fixture.main.listenerCount('play'), 1);
+    assert.equal(fixture.main.listenerCount('pause'), 1);
+    assert.equal(fixture.audioContext.listenerCount('statechange'), 1);
+    assert.equal(fixture.document.listenerCount('visibilitychange'), 1);
 });
 
 for (const event of ['play', 'visibilitychange']) {

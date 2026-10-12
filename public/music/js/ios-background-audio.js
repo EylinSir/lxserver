@@ -204,7 +204,9 @@ window.iOSBackgroundAudio = (function () {
                         }
                     }).catch(e => {
                         if (anchor !== anchorAudio) return;
-                        if (e.name !== 'NotAllowedError') console.warn('[iOSAudio] Play failed:', e);
+                        // 自动播放限制可由后续用户手势解除；保留锚点与监听器以便重试。
+                        if (e.name === 'NotAllowedError') return;
+                        console.warn('[iOSAudio] Play failed:', e);
                         if (_audioContext.state === 'running' && !mainAudio.paused) resetBridge();
                     });
                 }

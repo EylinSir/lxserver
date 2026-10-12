@@ -2928,10 +2928,10 @@ export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerRespon
         res.end()
         return
     }
-    const range = req.headers.range?.startsWith('bytes=') ? req.headers.range : undefined
+    const range = req.headers.range && /^bytes=/i.test(req.headers.range) ? req.headers.range : undefined
     let stream: fs.ReadStream
     if (range) {
-        const parts = /^bytes=(\d*)-(\d*)$/.exec(range)
+        const parts = /^bytes=(\d*)-(\d*)$/i.exec(range)
         let start = 0
         let end = stat.size - 1
         let valid = !!parts && !!(parts[1] || parts[2]) && stat.size > 0
