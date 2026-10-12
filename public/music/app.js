@@ -8184,10 +8184,10 @@ function updateMediaSessionMetadata(song) {
         const songTitle = song.name || '';
         const songArtist = song.singer || '';
 
-        // 如果开启了 SMTC 歌词且当前 title 已被歌词同步（不等于歌曲原标题），保留现有歌词 title 与 artist 避免延迟刷新时被冲掉
+        // 开启 SMTC 歌词时保留同一歌曲的 title 与 artist，即使歌词恰好等于歌曲名，避免延迟刷新时被冲掉
         let targetTitle = songTitle;
         let targetArtist = songArtist;
-        if (sameSong && currentMeta && settings && settings.enableSmtcLyric && currentMeta.title && currentMeta.title !== songTitle) {
+        if (sameSong && currentMeta && settings && settings.enableSmtcLyric && currentMeta.title) {
             targetTitle = currentMeta.title;
             targetArtist = currentMeta.artist || songArtist;
         }
