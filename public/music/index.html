@@ -727,61 +727,194 @@
                     <!-- Song List Detail View (Overlay within the view) -->
                     <div id="songlist-detail-view"
                         class="absolute inset-0 t-bg-main z-20 flex flex-col hidden translate-x-full transition-transform duration-300 pb-44 md:pb-32">
-                        <div class="h-16 px-4 md:px-6 flex items-center gap-4 border-b t-border-main t-bg-panel glass">
-                            <button onclick="closeSongListDetail()"
-                                class="p-2 t-text-muted hover:t-bg-track rounded-lg">
-                                <i class="fas fa-arrow-left text-xl"></i>
-                            </button>
-                            <div class="flex-1 min-w-0 cursor-pointer select-none" onclick="toggleSlDetailHeader()"
-                                title="点击折叠/展开歌单信息">
-                                <div class="flex items-center gap-1.5">
-                                    <h1 id="sl-detail-title" class="font-bold truncate text-sm md:text-base">歌单详情</h1>
-                                    <i id="sl-detail-collapse-icon"
-                                        class="fas fa-chevron-up text-[10px] t-text-muted transition-transform duration-300 flex-shrink-0"></i>
+                        
+                        <!-- Song List Floating Mini Bar (Shown when scrolling down inside song list, 小窗) -->
+                        <div id="sl-mini-bar" class="hidden flex-shrink-0 border-b t-border-main t-bg-panel/90 backdrop-blur-xl px-3 md:px-5 py-2.5 transition-all duration-300 ease-out transform -translate-y-2 opacity-0 pointer-events-none z-20">
+                            <div class="flex items-center justify-between gap-2.5 md:gap-4 w-full">
+                                <!-- Left: Mini Cover + Title + Stats -->
+                                <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <div class="relative w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-xl overflow-hidden shadow-md flex-shrink-0 ring-1 ring-black/10 dark:ring-white/10">
+                                        <img id="sl-mini-cover" class="w-full h-full object-cover" src="/music/assets/logo.svg" alt="歌单封面">
+                                    </div>
+                                    <div class="min-w-0 flex-1">
+                                        <div class="flex items-center gap-1.5">
+                                            <h1 id="sl-detail-title" class="font-bold text-xs md:text-sm t-text-main truncate max-w-[140px] sm:max-w-xs md:max-w-md">
+                                                歌单详情
+                                            </h1>
+                                            <span class="hidden sm:inline-block px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex-shrink-0">
+                                                歌单
+                                            </span>
+                                            <span id="sl-mini-source-badge" class="hidden sm:inline-block px-1.5 py-0.2 rounded text-[9px] font-medium bg-gray-500/10 t-text-muted border t-border-main flex-shrink-0">
+                                            </span>
+                                        </div>
+                                        <div id="sl-detail-subtitle" class="text-[10px] md:text-[11px] t-text-muted truncate flex items-center gap-2">
+                                            加载中...
+                                        </div>
+                                    </div>
                                 </div>
-                                <div id="sl-detail-subtitle" class="text-[10px] md:text-xs t-text-muted truncate">加载中...
+
+                                <!-- Right: Action Buttons -->
+                                <div class="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
+                                    <!-- Mini Top / Expand Button -->
+                                    <button id="sl-mini-expand-btn"
+                                            onclick="handleSongListMiniExpandClick()"
+                                            class="px-2 md:px-2.5 py-1.5 rounded-lg border t-border-main t-bg-main hover:t-bg-track t-text-muted hover:t-text-main text-xs flex items-center gap-1 transition-all shadow-sm active:scale-95"
+                                            title="展开歌单详情卡片">
+                                        <i class="fas fa-chevron-down text-[10px]"></i>
+                                        <span class="hidden sm:inline">展开</span>
+                                    </button>
+
+                                    <!-- Mini Play All -->
+                                    <button onclick="playAllInSongList()"
+                                            class="px-2.5 md:px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all active:scale-95"
+                                            title="播放全部">
+                                        <i class="fas fa-play text-[10px]"></i>
+                                        <span class="hidden sm:inline text-xs">播放全部</span>
+                                    </button>
+
+                                    <!-- Mini Favorite -->
+                                    <button id="sl-mini-fav-btn"
+                                            onclick="collectCurrentSongList()"
+                                            class="w-7 h-7 md:w-8 md:h-8 rounded-lg border t-border-main t-bg-main hover:t-bg-track text-rose-500 flex items-center justify-center transition-all shadow-sm active:scale-95"
+                                            title="收藏歌单">
+                                        <i class="fas fa-heart text-xs text-rose-500"></i>
+                                    </button>
+
+                                    <!-- Mini Back -->
+                                    <button onclick="closeSongListDetail()"
+                                            class="px-2 md:px-2.5 py-1.5 rounded-lg border t-border-main t-bg-main hover:t-bg-track t-text-muted hover:t-text-main text-xs flex items-center gap-1 transition-all shadow-sm active:scale-95"
+                                            title="返回上一页">
+                                        <i class="fas fa-arrow-left text-[10px]"></i>
+                                        <span class="hidden md:inline">返回</span>
+                                    </button>
                                 </div>
                             </div>
-                            <button id="sl-detail-play-all" onclick="playAllInSongList()"
-                                class="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all flex items-center gap-2">
-                                <i class="fas fa-play"></i>
-                                <span class="hidden sm:inline">播放全部</span>
-                            </button>
-                            <button id="sl-detail-collect" onclick="collectCurrentSongList()"
-                                class="p-2 t-bg-panel border t-border-main rounded-xl hover:text-red-500 transition-colors shadow-sm"
-                                title="收藏歌单">
-                                <i class="far fa-heart"></i>
-                            </button>
                         </div>
 
                         <!-- Detail Content -->
                         <div class="flex-1 flex flex-col overflow-hidden">
-                            <!-- Info Section -->
+                            <!-- Info Section (Hero Card / 大窗) -->
                             <div id="sl-detail-header"
-                                class="p-4 md:p-6 flex gap-4 md:gap-6 border-b t-border-main t-bg-panel/30 overflow-hidden transition-all duration-300 ease-in-out max-h-[1000px]">
-                                <img id="sl-detail-cover" loading="lazy" fetchpriority="low"
-                                    class="w-24 h-24 md:w-48 md:h-48 rounded-2xl shadow-xl flex-shrink-0 object-cover dynamic-logo is-placeholder"
-                                    src="/music/assets/logo.svg">
-                                <div class="flex flex-col justify-center gap-1 md:gap-3 flex-1 min-w-0">
-                                    <h2 id="sl-detail-name"
-                                        class="text-lg md:text-3xl font-extrabold t-text-main line-clamp-2">
-                                    </h2>
-                                    <div class="flex items-center gap-2 flex-wrap">
-                                        <div id="sl-detail-author"
-                                            class="text-xs md:text-base font-medium text-emerald-600"></div>
-                                        <div id="sl-detail-stats"
-                                            class="flex items-center gap-3 text-xs t-text-muted ml-2">
-                                            <!-- Stats injected here by JS -->
+                                class="flex-shrink-0 transition-all duration-300 ease-in-out max-h-[1000px]">
+                                <div class="relative p-6 md:p-8 t-bg-panel/50 border-b t-border-main overflow-hidden group/header">
+                                    <!-- Ambient top-right glow -->
+                                    <div class="absolute -right-12 -top-12 w-52 h-52 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                                    <!-- Small Absolute Back Button -->
+                                    <button onclick="closeSongListDetail()"
+                                        class="absolute top-2 left-2 md:top-4 md:left-4 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full bg-emerald-500/80 hover:bg-emerald-500 text-white transition-all z-30 shadow-md active:scale-90"
+                                        title="返回">
+                                        <i class="fas fa-arrow-left"></i>
+                                    </button>
+
+                                    <!-- Favorite Button (Song List) -->
+                                    <button id="sl-header-fav-btn"
+                                        onclick="collectCurrentSongList()"
+                                        class="absolute top-2 right-4 md:top-4 md:right-6 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main transition-all z-30 shadow-sm active:scale-90"
+                                        title="收藏歌单">
+                                        <i class="fas fa-heart text-rose-500"></i>
+                                    </button>
+
+                                    <!-- Main Layout -->
+                                    <div class="flex flex-col md:flex-row gap-5 md:gap-7 items-center md:items-start text-center md:text-left relative z-10">
+                                        <!-- Cover with Play Hover Button & Platform Badge -->
+                                        <div class="relative w-28 h-28 md:w-44 md:h-44 rounded-2xl overflow-hidden shadow-2xl ring-2 ring-black/5 dark:ring-white/10 flex-shrink-0 group/cover">
+                                            <img id="sl-detail-cover" loading="lazy" fetchpriority="low"
+                                                class="w-full h-full object-cover transition-transform duration-500 group-hover/cover:scale-105 dynamic-logo is-placeholder"
+                                                src="/music/assets/logo.svg">
+                                            <div class="absolute inset-0 bg-black/35 opacity-0 group-hover/cover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                                                onclick="playAllInSongList()" title="点击播放全部">
+                                                <div class="w-12 h-12 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg transform translate-y-2 group-hover/cover:translate-y-0 transition-transform duration-300">
+                                                    <i class="fas fa-play text-base ml-0.5"></i>
+                                                </div>
+                                            </div>
+                                            <span id="sl-detail-platform-badge" class="absolute top-2 left-2 px-2 py-0.5 text-[10px] font-bold bg-black/60 backdrop-blur-md text-white rounded-lg shadow-sm z-10">歌单</span>
                                         </div>
-                                    </div>
-                                    <div class="relative mt-1">
-                                        <p id="sl-detail-desc"
-                                            class="text-xs md:text-sm t-text-muted line-clamp-3 md:line-clamp-4 leading-relaxed max-w-4xl cursor-pointer hover:t-text-main transition-colors"
-                                            onclick="toggleSongListDesc()">
-                                        </p>
-                                        <button id="sl-detail-desc-btn" onclick="toggleSongListDesc()"
-                                            class="text-xs text-emerald-500 hover:text-emerald-600 mt-1 hidden font-medium">展开全部
-                                            <i class="fas fa-chevron-down text-[10px] ml-0.5"></i></button>
+
+                                        <!-- Info & Actions -->
+                                        <div class="flex-1 min-w-0 flex flex-col justify-between self-stretch py-0.5">
+                                            <div>
+                                                <!-- Top Tags Row -->
+                                                <div class="flex flex-wrap items-center justify-center md:justify-start gap-2 mb-2">
+                                                    <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 tracking-wider">
+                                                        歌单
+                                                    </span>
+                                                    <span id="sl-detail-source-tag" class="px-2 py-0.5 rounded-md text-[10px] font-medium bg-gray-500/10 t-text-muted border t-border-main">
+                                                        歌单推荐
+                                                    </span>
+                                                    <div id="sl-detail-stats" class="flex items-center gap-2 text-xs t-text-muted flex-wrap justify-center md:justify-start">
+                                                        <!-- Stats injected here -->
+                                                    </div>
+                                                </div>
+
+                                                <!-- Song List Title -->
+                                                <h2 id="sl-detail-name" class="text-xl md:text-2xl lg:text-3xl font-black t-text-main leading-snug tracking-tight mb-2 select-text" title="歌单名">
+                                                    歌单详情
+                                                </h2>
+
+                                                <!-- Author Row -->
+                                                <div class="flex items-center justify-center md:justify-start gap-1.5 text-xs md:text-sm mb-2.5">
+                                                    <span class="t-text-muted">创建者：</span>
+                                                    <span id="sl-detail-author" class="font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"></span>
+                                                </div>
+
+                                                <!-- Description (collapsible) -->
+                                                <div class="relative mb-3 max-w-4xl">
+                                                    <p id="sl-detail-desc"
+                                                        class="text-xs md:text-sm t-text-muted leading-relaxed line-clamp-2 md:line-clamp-3 hover:line-clamp-none cursor-pointer bg-black/5 dark:bg-white/5 p-2.5 rounded-xl transition-all select-none"
+                                                        onclick="toggleSongListDesc()" title="点击展开/收起完整简介">
+                                                        暂无介绍
+                                                    </p>
+                                                    <button id="sl-detail-desc-btn" onclick="toggleSongListDesc()"
+                                                        class="text-xs text-emerald-500 hover:text-emerald-600 mt-1 hidden font-medium">
+                                                        展开全部 <i class="fas fa-chevron-down text-[10px] ml-0.5"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <!-- Action Toolbar in Hero Card -->
+                                            <div class="flex flex-wrap items-center justify-center md:justify-start gap-2.5 pt-2">
+                                                <!-- Play All -->
+                                                <button id="sl-detail-play-all" onclick="playAllInSongList()"
+                                                    class="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs md:text-sm shadow-md shadow-emerald-500/20 flex items-center gap-2 transition-all active:scale-95"
+                                                    title="播放全部歌曲">
+                                                    <i class="fas fa-play text-xs"></i>
+                                                    <span>播放全部</span>
+                                                </button>
+
+                                                <!-- Favorite / Collect -->
+                                                <button id="sl-detail-collect" onclick="collectCurrentSongList()"
+                                                    class="px-3.5 py-2 rounded-xl border t-border-main font-medium text-xs md:text-sm flex items-center gap-2 transition-all shadow-sm active:scale-95 t-bg-main hover:t-bg-track t-text-main"
+                                                    title="收藏歌单">
+                                                    <i class="fas fa-heart text-rose-500"></i>
+                                                    <span id="sl-detail-collect-text">收藏歌单</span>
+                                                </button>
+
+                                                <!-- Batch Actions -->
+                                                <button onclick="toggleBatchMode()"
+                                                    class="px-3.5 py-2 rounded-xl border t-border-main t-bg-main hover:t-bg-track t-text-main font-medium text-xs md:text-sm flex items-center gap-2 transition-all shadow-sm active:scale-95"
+                                                    title="批量选择操作">
+                                                    <i class="fas fa-tasks text-emerald-600"></i>
+                                                    <span>批量操作</span>
+                                                </button>
+
+                                                <!-- Collapse / Switch to Mini Mode -->
+                                                <button onclick="collapseSongListDetailHeader()"
+                                                    class="px-3.5 py-2 rounded-xl border t-border-main t-bg-main hover:t-bg-track t-text-muted hover:t-text-main font-medium text-xs md:text-sm flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                                                    title="收起为小窗模式">
+                                                    <i class="fas fa-compress-alt text-xs"></i>
+                                                    <span class="hidden sm:inline">小窗</span>
+                                                </button>
+
+                                                <!-- Back Button in Toolbar -->
+                                                <button onclick="closeSongListDetail()"
+                                                    class="px-3.5 py-2 rounded-xl border t-border-main t-bg-main hover:t-bg-track t-text-muted hover:t-text-main font-medium text-xs md:text-sm flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                                                    title="返回上一页">
+                                                    <i class="fas fa-arrow-left text-xs"></i>
+                                                    <span>返回</span>
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -2847,7 +2980,7 @@
                                                 <i class="fas fa-wave-square mr-2 text-emerald-500"></i> 底部播放栏
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
-                                                    <span class="setting-tooltip-content">控制播放栏上方的实时波形显示。</span>
+                                                    <span class="setting-tooltip-content">控制播放栏上方的实时波形显示。<br><span class="text-amber-500 font-semibold">注：iOS 设备受系统限制，开启波形将导致锁屏或退至后台时暂停播放。</span></span>
                                                 </span>
                                             </h4>
                                             <label class="relative inline-flex items-center cursor-pointer">
@@ -2859,6 +2992,10 @@
                                                 </div>
                                             </label>
                                         </div>
+                                        <p class="text-[11px] text-amber-500 dark:text-amber-400 leading-tight flex items-start gap-1">
+                                            <i class="fas fa-info-circle mt-0.5 flex-shrink-0 text-[10px]"></i>
+                                            <span>提示：iOS 设备因系统后台限制，开启波形将导致锁屏或退至后台时暂停播放。</span>
+                                        </p>
                                         <select id="setting-footer-visualizer-style"
                                             onchange="updateSetting('footerVisualizerStyle', this.value)"
                                             class="lm-select !w-full !py-2">

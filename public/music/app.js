@@ -13356,9 +13356,17 @@ function collectCurrentSongList() {
 }
 
 function _executeCollectSongList(activeListData, detail) {
-    const existingIndex = activeListData.userList.findIndex(l => String(l.sourceListId) === String(detail.id) && l.source === detail.source);
+    const existingIndex = activeListData.userList.findIndex(l => (String(l.sourceListId) === String(detail.id) || String(l.id) === String(detail.id)) && l.source === detail.source);
     if (existingIndex >= 0) {
-        if (window.showToast) window.showToast('info', '该歌单已在您的收藏中');
+        activeListData.userList.splice(existingIndex, 1);
+        pushDataChange(activeListData).then(() => {
+            renderMyLists(currentListData);
+            if (window.updateSongListFavButtons) window.updateSongListFavButtons(false);
+            if (window.showToast) window.showToast('info', '已取消收藏歌单');
+        }).catch(err => {
+            console.error('取消收藏失败:', err);
+            if (window.showToast) window.showToast('error', '取消收藏失败');
+        });
         return;
     }
 
@@ -13385,6 +13393,7 @@ function _executeCollectSongList(activeListData, detail) {
 
     pushDataChange(activeListData).then(() => {
         renderMyLists(currentListData);
+        if (window.updateSongListFavButtons) window.updateSongListFavButtons(true);
         if (window.showToast) window.showToast('success', '歌单收藏成功！');
     }).catch(err => {
         console.error('收藏失败:', err);

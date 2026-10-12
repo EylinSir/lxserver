@@ -13,13 +13,19 @@ const musicVisualizer = (function () {
     const detailCanvas = document.getElementById('detail-visualizer');
     const playerFooter = document.getElementById('player-footer');
 
-    function isMobileDevice() {
+    function isIOSDevice() {
         if (window.iOSBackgroundAudio && typeof window.iOSBackgroundAudio.isIOS === 'function') {
-            if (window.iOSBackgroundAudio.isIOS()) return true;
+            return window.iOSBackgroundAudio.isIOS();
         }
         const ua = navigator.userAgent;
-        const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (isTouch && window.innerWidth < 1024);
+        const isIPad = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        return /iPhone|iPod/.test(ua) || isIPad;
+    }
+
+    function isMobileDevice() {
+        if (isIOSDevice()) return true;
+        const ua = navigator.userAgent;
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
     }
 
     /**
@@ -118,8 +124,9 @@ const musicVisualizer = (function () {
         // --- Handle Footer Visualizer ---
         waveFooter.clearAnimations();
         const visualizerContainer = document.getElementById('visualizer-container');
+        const isFooterOn = s.showFooterVisualizer !== false;
 
-        if (s.showFooterVisualizer && footerCanvas && visualizerContainer) {
+        if (isFooterOn && footerCanvas && visualizerContainer) {
             const style = s.footerVisualizerStyle || 'bars';
             // 获取容器实际宽度而不是 Canvas 宽度
             const containerRect = visualizerContainer.getBoundingClientRect();
@@ -318,13 +325,15 @@ const musicVisualizer = (function () {
     }
 
     if (audio) {
-        audio.addEventListener('play', () => {
+        const ensureVisualizerRunning = () => {
             if (!isInitialized) {
                 init();
             } else if (audioContext && audioContext.state === 'suspended') {
-                audioContext.resume();
+                audioContext.resume().catch(() => {});
             }
-        });
+        };
+        audio.addEventListener('play', ensureVisualizerRunning);
+        audio.addEventListener('playing', ensureVisualizerRunning);
     }
 
     window.addEventListener('resize', () => {

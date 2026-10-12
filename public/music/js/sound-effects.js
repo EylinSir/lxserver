@@ -73,8 +73,7 @@ window.soundEffects = (function () {
     function isMobileDevice() {
         if (isIOSDevice()) return true;
         const ua = navigator.userAgent;
-        const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (isTouch && window.innerWidth < 1024);
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
     }
 
     function init(force = false) {
