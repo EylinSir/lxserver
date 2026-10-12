@@ -505,6 +505,31 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
     }
 }
 
+const validateReturnedMusicUrl = (rawUrl: any, sourceName?: string): string => {
+    if (!rawUrl || typeof rawUrl !== 'string') {
+        throw new Error('音源未返回有效的链接字符串')
+    }
+    const trimmed = rawUrl.trim()
+    const lower = trimmed.toLowerCase()
+    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+        throw new Error(`音源返回了非播放链接内容: ${trimmed.slice(0, 40)}`)
+    }
+    // 拦截 404 页面或无效报错链接
+    if (lower.includes('/404') || lower.includes('status=404') || lower.includes('error.html')) {
+        throw new Error(`音源 [${sourceName || '未知'}] 返回了 404/失效链接，拒绝并自动尝试下一个音源`)
+    }
+    // 拦截试听片段特征（网易云 jd-musicrep-ts、QQ音乐 RS02 试听等）
+    if (lower.includes('jd-musicrep-ts') ||
+        lower.includes('/musicrep-ts/') ||
+        lower.includes('-ts/') ||
+        lower.includes('/rs02') ||
+        lower.includes('trialinfo') ||
+        lower.includes('freetrial')) {
+        throw new Error(`音源 [${sourceName || '未知'}] 返回了试听片段 (URL 包含试听标记)，拒绝并自动尝试下一个音源`)
+    }
+    return trimmed
+}
+
 // 调用自定义源的 getMusicUrl
 export async function callUserApiGetMusicUrl(
     source: string,
@@ -753,11 +778,12 @@ export async function callUserApiGetMusicUrl(
             try {
                 console.log(`[自定义源] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (第 ${i + 1}/${maxRetries} 次, 所属: ${api.info.owner})`)
 
-                const url = await api.callRequest('musicUrl', source, {
+                const rawUrl = await api.callRequest('musicUrl', source, {
                     musicInfo: normalizedSongInfo,
                     quality: quality,
                     type: quality
                 })
+                const url = validateReturnedMusicUrl(rawUrl, api.info.name)
 
                 console.log(`[自定义源] ✓ ${api.info.name} 成功返回链接 (所属: ${api.info.owner})`)
                 const att = { name: api.info.name, status: 'success', message: `第 ${i + 1} 次尝试成功` }
@@ -783,11 +809,12 @@ export async function callUserApiGetMusicUrl(
             try {
                 console.log(`[自定义源] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (所属: ${api.info.owner})`)
 
-                const url = await api.callRequest('musicUrl', source, {
+                const rawUrl = await api.callRequest('musicUrl', source, {
                     musicInfo: normalizedSongInfo,
                     quality: quality,
                     type: quality
                 })
+                const url = validateReturnedMusicUrl(rawUrl, api.info.name)
 
                 console.log(`[自定义源] ✓ ${api.info.name} 成功返回链接 (所属: ${api.info.owner})`)
                 const att = { name: api.info.name, status: 'success' }
