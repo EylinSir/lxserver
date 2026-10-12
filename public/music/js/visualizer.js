@@ -41,16 +41,18 @@ class LXStudioVUMeterAnimation {
     }
 
     vuToNorm(vu) {
-        if (vu <= -20) return 0.0;
+        if (vu <= -60) return 0.0;
         if (vu >= 3) return 1.0;
         const table = [
-            { vu: -20, norm: 0.00 },
-            { vu: -10, norm: 0.28 },
-            { vu:  -7, norm: 0.42 },
-            { vu:  -5, norm: 0.53 },
-            { vu:  -3, norm: 0.65 },
-            { vu:  -2, norm: 0.71 },
-            { vu:  -1, norm: 0.78 },
+            { vu: -60, norm: 0.00 },
+            { vu: -50, norm: 0.12 },
+            { vu: -40, norm: 0.24 },
+            { vu: -30, norm: 0.36 },
+            { vu: -20, norm: 0.48 },
+            { vu: -10, norm: 0.62 },
+            { vu:  -5, norm: 0.74 },
+            { vu:  -3, norm: 0.78 },
+            { vu:  -1, norm: 0.82 },
             { vu:   0, norm: 0.85 },
             { vu:   1, norm: 0.90 },
             { vu:   2, norm: 0.95 },
@@ -126,7 +128,7 @@ class LXStudioVUMeterAnimation {
                 peakR = maxVal;
             }
 
-            // Digital Full-Scale Peak Clipping Detection (Independent of VU scale)
+            // Digital Full-Scale Peak Clipping Detection
             if (peakL >= 0.985) this.clipHoldL = now + 700; // hold LED for 700ms
             if (peakR >= 0.985) this.clipHoldR = now + 700;
 
@@ -135,7 +137,6 @@ class LXStudioVUMeterAnimation {
                 const dBFS_L = rmsL > 1e-5 ? 20 * Math.log10(rmsL) : -100;
                 const dBFS_R = rmsR > 1e-5 ? 20 * Math.log10(rmsR) : -100;
 
-                // 0 VU = -18 dBFS reference mapping
                 const vuL = dBFS_L - (-18);
                 const vuR = dBFS_R - (-18);
 
@@ -159,7 +160,9 @@ class LXStudioVUMeterAnimation {
     renderConsole(ctx, width, height, levelL, levelR, clipL, clipR, isCompact) {
         ctx.save();
 
-        // Housing Dimensions
+        const theme = (window.settings && window.settings.vuMeterTheme) || this.options.theme || 'vintage-amber';
+
+        // Chassis Dimensions
         const marginX = isCompact ? 4 : 8;
         const marginY = isCompact ? 3 : 6;
         const panelW = width - marginX * 2;
@@ -167,49 +170,50 @@ class LXStudioVUMeterAnimation {
         const panelX = marginX;
         const panelY = marginY;
 
-        const scale = Math.min(panelW / (isCompact ? 520 : 840), panelH / (isCompact ? 72 : 230));
-        const cornerR = (isCompact ? 4 : 6) * scale;
+        const scale = Math.min(panelW / (isCompact ? 520 : 860), panelH / (isCompact ? 72 : 230));
+        const cornerR = (isCompact ? 4 : 8) * scale;
 
-        // 1. Single Main Bezel + Restrained Shadow
+        // 1. Chassis Outer Bezel & Shadow
         ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-        ctx.shadowBlur = (isCompact ? 4 : 14) * scale;
-        ctx.shadowOffsetY = (isCompact ? 1.5 : 5) * scale;
-        ctx.fillStyle = '#171920';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+        ctx.shadowBlur = (isCompact ? 4 : 16) * scale;
+        ctx.shadowOffsetY = (isCompact ? 2 : 6) * scale;
+        ctx.fillStyle = theme === 'champagne-gold' ? '#24211a' : '#121418';
         this.roundRect(ctx, panelX, panelY, panelW, panelH, cornerR);
         ctx.fill();
         ctx.restore();
 
-        // Matte Charcoal Enclosure Face
-        const enclosureGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
-        enclosureGrad.addColorStop(0, '#1c1f26');
-        enclosureGrad.addColorStop(1, '#14161c');
-        ctx.fillStyle = enclosureGrad;
+        // Chassis Faceplate Brushed Texture Gradient
+        const faceGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
+        if (theme === 'champagne-gold') {
+            faceGrad.addColorStop(0, '#383226');
+            faceGrad.addColorStop(0.5, '#2a251c');
+            faceGrad.addColorStop(1, '#1e1a14');
+        } else {
+            faceGrad.addColorStop(0, '#1c1f26');
+            faceGrad.addColorStop(0.5, '#15171d');
+            faceGrad.addColorStop(1, '#0e1014');
+        }
+        ctx.fillStyle = faceGrad;
         this.roundRect(ctx, panelX, panelY, panelW, panelH, cornerR);
         ctx.fill();
 
-        // Subtle Inset Edge (clean chamfer, no gaudy multiple layers)
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        // Inset Chamfer Edge
+        ctx.strokeStyle = theme === 'champagne-gold' ? 'rgba(218, 185, 120, 0.25)' : 'rgba(255, 255, 255, 0.08)';
         ctx.lineWidth = 1 * scale;
         this.roundRect(ctx, panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1, cornerR);
         ctx.stroke();
 
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
-        ctx.lineWidth = 1 * scale;
-        this.roundRect(ctx, panelX + 1.5, panelY + 1.5, panelW - 3, panelH - 3, Math.max(1, cornerR - 1));
-        ctx.stroke();
-
-        // Layout Partitioning
-        const padX = (isCompact ? 5 : 10) * scale;
-        const padY = (isCompact ? 4 : 8) * scale;
+        // Internal Layout: Maximum width dedicated to meter pods
+        const padX = (isCompact ? 6 : 14) * scale;
+        const padY = (isCompact ? 4 : 10) * scale;
         const innerX = panelX + padX;
         const innerY = panelY + padY;
         const innerW = panelW - padX * 2;
         const innerH = panelH - padY * 2;
 
-        // Center console is functional & compact (calibration, clip LEDs, subtle status)
-        const centerW = Math.min(Math.max(68 * scale, innerW * 0.16), (isCompact ? 92 : 132) * scale);
-        const gap = (isCompact ? 5 : 8) * scale;
+        const centerW = (isCompact ? 38 : 64) * scale;
+        const gap = (isCompact ? 6 : 12) * scale;
         const meterW = (innerW - centerW - gap * 2) / 2;
         const meterH = innerH;
 
@@ -217,372 +221,394 @@ class LXStudioVUMeterAnimation {
         const centerX = leftX + meterW + gap;
         const rightX = centerX + centerW + gap;
 
-        // 2. Render Left Meter
-        this.drawMeterPod(ctx, leftX, innerY, meterW, meterH, levelL, scale, 'LEFT', isCompact);
+        // 2. Render Left Meter Pod
+        this.drawMeterPod(ctx, leftX, innerY, meterW, meterH, levelL, scale, 'LEFT', isCompact, theme);
 
         // 3. Render Center Functional Console
-        this.drawCenterConsole(ctx, centerX, innerY, centerW, meterH, scale, clipL, clipR, isCompact);
+        this.drawCenterConsole(ctx, centerX, innerY, centerW, meterH, scale, clipL, clipR, isCompact, theme);
 
-        // 4. Render Right Meter
-        this.drawMeterPod(ctx, rightX, innerY, meterW, meterH, levelR, scale, 'RIGHT', isCompact);
+        // 4. Render Right Meter Pod
+        this.drawMeterPod(ctx, rightX, innerY, meterW, meterH, levelR, scale, 'RIGHT', isCompact, theme);
 
         ctx.restore();
     }
 
-    drawMeterPod(ctx, x, y, w, h, level, scale, channelTitle, isCompact) {
+    drawMeterPod(ctx, x, y, w, h, level, scale, channelTitle, isCompact, theme) {
         ctx.save();
         const podR = (isCompact ? 2 : 4) * scale;
 
-        // 1. Smoked Glass Dial Face Background
-        const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
-        bgGrad.addColorStop(0, '#0c0e12');
-        bgGrad.addColorStop(0.5, '#101319');
-        bgGrad.addColorStop(1, '#08090c');
-        ctx.fillStyle = bgGrad;
+        // 1. Clip to meter window
+        ctx.save();
         this.roundRect(ctx, x, y, w, h, podR);
-        ctx.fill();
+        ctx.clip();
 
-        // 2. Warm Incandescent Backlight Illumination (Accuphase Amber Glow)
-        const glowX = x + w / 2;
-        const glowY = y + h * 0.40;
-        const glowR = Math.max(w * 0.65, h * 0.95);
-        const lampGlow = ctx.createRadialGradient(glowX, glowY, 4 * scale, glowX, glowY, glowR);
-        lampGlow.addColorStop(0, 'rgba(255, 220, 140, 0.18)');
-        lampGlow.addColorStop(0.35, 'rgba(240, 190, 90, 0.07)');
-        lampGlow.addColorStop(0.7, 'rgba(210, 140, 40, 0.015)');
-        lampGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = lampGlow;
-        this.roundRect(ctx, x, y, w, h, podR);
-        ctx.fill();
+        // 2. Theme-Specific Dial Face Background & Backlight Illumination
+        if (theme === 'vintage-amber') {
+            // Warm Amber Illuminated Backlight
+            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.45, 12 * scale, x + w / 2, y + h * 0.45, Math.max(w * 0.65, h * 1.1));
+            bgGrad.addColorStop(0, '#ffe89c');
+            bgGrad.addColorStop(0.35, '#ffce63');
+            bgGrad.addColorStop(0.70, '#e8a535');
+            bgGrad.addColorStop(1, '#aa6b18');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(x, y, w, h);
 
-        // Bezel Borders
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+            // Edge Illumination Vignette
+            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
+            vigGrad.addColorStop(0, 'rgba(80, 40, 10, 0.32)');
+            vigGrad.addColorStop(0.2, 'rgba(80, 40, 10, 0)');
+            vigGrad.addColorStop(0.8, 'rgba(80, 40, 10, 0)');
+            vigGrad.addColorStop(1, 'rgba(70, 35, 5, 0.48)');
+            ctx.fillStyle = vigGrad;
+            ctx.fillRect(x, y, w, h);
+
+            const sideVig = ctx.createLinearGradient(x, y, x + w, y);
+            sideVig.addColorStop(0, 'rgba(70, 35, 5, 0.28)');
+            sideVig.addColorStop(0.12, 'rgba(70, 35, 5, 0)');
+            sideVig.addColorStop(0.88, 'rgba(70, 35, 5, 0)');
+            sideVig.addColorStop(1, 'rgba(70, 35, 5, 0.28)');
+            ctx.fillStyle = sideVig;
+            ctx.fillRect(x, y, w, h);
+
+        } else if (theme === 'ocean-blue') {
+            // Radiant Ocean Blue Glass
+            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.40, 12 * scale, x + w / 2, y + h * 0.40, Math.max(w * 0.65, h * 1.1));
+            bgGrad.addColorStop(0, '#58d8ff');
+            bgGrad.addColorStop(0.35, '#1db8f2');
+            bgGrad.addColorStop(0.70, '#0480ce');
+            bgGrad.addColorStop(1, '#014f88');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(x, y, w, h);
+
+            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
+            vigGrad.addColorStop(0, 'rgba(0, 30, 65, 0.38)');
+            vigGrad.addColorStop(0.22, 'rgba(0, 30, 65, 0)');
+            vigGrad.addColorStop(0.78, 'rgba(0, 30, 65, 0)');
+            vigGrad.addColorStop(1, 'rgba(0, 20, 50, 0.52)');
+            ctx.fillStyle = vigGrad;
+            ctx.fillRect(x, y, w, h);
+
+        } else if (theme === 'cyber-cyan') {
+            // Smoked Obsidian Glass with Neon Cyan Glow
+            const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
+            bgGrad.addColorStop(0, '#0d131a');
+            bgGrad.addColorStop(0.5, '#070b10');
+            bgGrad.addColorStop(1, '#04070a');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(x, y, w, h);
+
+            const glow = ctx.createRadialGradient(x + w / 2, y + h * 0.5, 12 * scale, x + w / 2, y + h * 0.5, w * 0.62);
+            glow.addColorStop(0, 'rgba(0, 229, 255, 0.16)');
+            glow.addColorStop(0.6, 'rgba(0, 160, 200, 0.04)');
+            glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = glow;
+            ctx.fillRect(x, y, w, h);
+
+        } else if (theme === 'champagne-gold') {
+            // Warm Champagne Backlight
+            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.45, 12 * scale, x + w / 2, y + h * 0.45, Math.max(w * 0.65, h * 1.1));
+            bgGrad.addColorStop(0, '#fff4cc');
+            bgGrad.addColorStop(0.35, '#fae39b');
+            bgGrad.addColorStop(0.70, '#dfba63');
+            bgGrad.addColorStop(1, '#a68233');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(x, y, w, h);
+
+            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
+            vigGrad.addColorStop(0, 'rgba(60, 45, 20, 0.30)');
+            vigGrad.addColorStop(0.2, 'rgba(60, 45, 20, 0)');
+            vigGrad.addColorStop(0.8, 'rgba(60, 45, 20, 0)');
+            vigGrad.addColorStop(1, 'rgba(50, 35, 10, 0.45)');
+            ctx.fillStyle = vigGrad;
+            ctx.fillRect(x, y, w, h);
+        }
+
+        // -------------------------------------------------------------
+        // FULL-WIDTH RECTANGULAR DIAL GEOMETRY
+        // -------------------------------------------------------------
+        // 1. Horizontal Span: spans 87% of pod width!
+        const spanMarginX = w * 0.065;
+        const scaleStartX = x + spanMarginX;
+        const scaleEndX = x + w - spanMarginX;
+        const scaleW = scaleEndX - scaleStartX;
+
+        // 2. Vertical Proportions: gentle, shallow elliptical/parabolic baseline arc
+        const baseCenterY = isCompact ? (y + h * 0.68) : (y + h * 0.62);
+        const arcSag = isCompact ? (h * 0.07) : (h * 0.08);
+
+        // Virtual Deep Pivot Point: positioned below the window for sweeping angle
+        const pivotX = x + w / 2;
+        const pivotDepth = isCompact ? (h * 1.85) : (h * 2.1);
+        const pivotY = y + pivotDepth;
+
+        // Function to compute baseline point (bx, by) and fanned upward unit vector (ux, uy)
+        const getScalePoint = (norm) => {
+            const bx = scaleStartX + norm * scaleW;
+            const u = (norm - 0.5) * 2; // -1 .. 1
+            const by = baseCenterY + (u * u) * arcSag;
+
+            const dx = bx - pivotX;
+            const dy = by - pivotY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const ux = dx / dist;
+            const uy = dy / dist;
+
+            return { bx, by, ux, uy };
+        };
+
+        // Theme Inscription Colors
+        const isDarkText = theme === 'vintage-amber' || theme === 'ocean-blue' || theme === 'champagne-gold';
+        const textMain = isDarkText ? '#161616' : '#22d3ee';
+        const textMuted = isDarkText ? 'rgba(30, 30, 30, 0.72)' : 'rgba(34, 211, 238, 0.65)';
+        const textRed = '#e62424';
+        const arcColor = isDarkText ? '#181818' : 'rgba(34, 211, 238, 0.9)';
+        const redArcColor = '#e62424';
+
+        // 3. Channel Header: LEFT / RIGHT (Centered cleanly at top of pod)
+        ctx.save();
+        const headerFontSize = Math.max(5.5, Math.round((isCompact ? 6.5 : 9.5) * scale));
+        ctx.font = `600 ${headerFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.fillStyle = textMain;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.letterSpacing = `${(isCompact ? 1.0 : 2.0) * scale}px`;
+        ctx.fillText(channelTitle === 'LEFT' ? 'LEFT' : 'RIGHT', x + w / 2, y + (isCompact ? 4.5 : 8.5) * scale);
+        ctx.restore();
+
+        // 4. Tick Lengths (Prominent, authentic physical graduations)
+        const majorTickLen = isCompact ? (6.0 * scale) : (14.0 * scale);
+        const medTickLen = isCompact ? (4.0 * scale) : (9.0 * scale);
+        const minorTickLen = isCompact ? (2.5 * scale) : (5.5 * scale);
+
+        // 5. Baseline Arc Stroke (Normal up to 0 dB at norm=0.85, Red above)
+        const normZero = 0.85;
+
+        ctx.beginPath();
+        for (let i = 0; i <= 50; i++) {
+            const n = (i / 50) * normZero;
+            const p = getScalePoint(n);
+            if (i === 0) ctx.moveTo(p.bx, p.by);
+            else ctx.lineTo(p.bx, p.by);
+        }
+        ctx.strokeStyle = arcColor;
+        ctx.lineWidth = (isCompact ? 1.0 : 1.6) * scale;
+        ctx.stroke();
+
+        ctx.beginPath();
+        for (let i = 0; i <= 20; i++) {
+            const n = normZero + (i / 20) * (1.0 - normZero);
+            const p = getScalePoint(n);
+            if (i === 0) ctx.moveTo(p.bx, p.by);
+            else ctx.lineTo(p.bx, p.by);
+        }
+        ctx.strokeStyle = redArcColor;
+        ctx.lineWidth = (isCompact ? 1.6 : 2.4) * scale;
+        ctx.stroke();
+
+        // 6. Scales & Graduations
+        const dbTicks = [
+            { label: '−',  norm: 0.00, major: true },
+            { label: '60', norm: 0.12, major: true },
+            { label: '50', norm: 0.24, major: true },
+            { label: '40', norm: 0.36, major: true },
+            { label: '30', norm: 0.48, major: true },
+            { label: '20', norm: 0.60, major: true },
+            { label: '10', norm: 0.72, major: true },
+            { label: '0',  norm: 0.85, major: true, isRed: true },
+            { label: '+',  norm: 1.00, major: true, isRed: true }
+        ];
+
+        // Intermediate Ticks
+        const intermediateTicks = [
+            { norm: 0.06, type: 'min' },
+            { norm: 0.18, type: 'med' },
+            { norm: 0.30, type: 'med' },
+            { norm: 0.42, type: 'med' },
+            { norm: 0.54, type: 'med' },
+            { norm: 0.66, type: 'med' },
+            { norm: 0.75, type: 'med' },
+            { norm: 0.78, type: 'med' },
+            { norm: 0.81, type: 'med' },
+            { norm: 0.83, type: 'min' },
+            { norm: 0.89, type: 'med', isRed: true },
+            { norm: 0.93, type: 'med', isRed: true },
+            { norm: 0.96, type: 'min', isRed: true }
+        ];
+
+        // Draw Intermediate Ticks
+        intermediateTicks.forEach(t => {
+            const p = getScalePoint(t.norm);
+            const len = t.type === 'med' ? medTickLen : minorTickLen;
+            ctx.strokeStyle = t.isRed ? redArcColor : arcColor;
+            ctx.lineWidth = (t.isRed ? 1.2 : 0.9) * scale;
+            ctx.beginPath();
+            ctx.moveTo(p.bx, p.by);
+            ctx.lineTo(p.bx + p.ux * len, p.by + p.uy * len);
+            ctx.stroke();
+        });
+
+        // Draw Major Ticks and Numbers
+        const fontSize = Math.max(5.5, Math.round((isCompact ? 6.2 : 9.5) * scale));
+        ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const labelGap = (isCompact ? 4.5 : 7.0) * scale;
+
+        dbTicks.forEach(t => {
+            const p = getScalePoint(t.norm);
+            ctx.strokeStyle = t.isRed ? redArcColor : arcColor;
+            ctx.lineWidth = (t.isRed ? 1.8 : 1.3) * scale;
+
+            ctx.beginPath();
+            ctx.moveTo(p.bx, p.by);
+            ctx.lineTo(p.bx + p.ux * majorTickLen, p.by + p.uy * majorTickLen);
+            ctx.stroke();
+
+            const lx = p.bx + p.ux * (majorTickLen + labelGap);
+            const ly = p.by + p.uy * (majorTickLen + labelGap);
+            ctx.fillStyle = t.isRed ? textRed : textMain;
+            ctx.fillText(t.label, lx, ly);
+        });
+
+        // 7. Lower Scale: Percentage Micro-scale (-∞ 0.0001 0.001 0.01 0.1 1 10 100%)
+        if (!isCompact || w > 240 * scale) {
+            const pctTicks = [
+                { label: '-∞',    norm: 0.00 },
+                { label: '0.0001', norm: 0.12 },
+                { label: '0.001',  norm: 0.24 },
+                { label: '0.01',   norm: 0.36 },
+                { label: '0.1',    norm: 0.48 },
+                { label: '1',      norm: 0.60 },
+                { label: '10',     norm: 0.72 },
+                { label: '100%',   norm: 0.85, isRed: true }
+            ];
+
+            const pctFontSize = Math.max(4.5, Math.round((isCompact ? 4.8 : 6.8) * scale));
+            ctx.font = `500 ${pctFontSize}px "Helvetica Neue", -apple-system, sans-serif`;
+            const pctGap = (isCompact ? 4.0 : 6.5) * scale;
+
+            pctTicks.forEach(pt => {
+                const p = getScalePoint(pt.norm);
+                ctx.strokeStyle = pt.isRed ? redArcColor : textMuted;
+                ctx.lineWidth = 0.8 * scale;
+                ctx.beginPath();
+                ctx.moveTo(p.bx, p.by);
+                ctx.lineTo(p.bx - p.ux * (2.8 * scale), p.by - p.uy * (2.8 * scale));
+                ctx.stroke();
+
+                const px = p.bx - p.ux * pctGap;
+                const py = p.by - p.uy * pctGap;
+                ctx.fillStyle = pt.isRed ? textRed : textMuted;
+                ctx.fillText(pt.label, px, py);
+            });
+        }
+
+        // 8. "dB" Inscription (Centered below baseline)
+        ctx.save();
+        const dbY = baseCenterY + (isCompact ? 13 : 23) * scale;
+        ctx.font = `bold ${Math.max(6.5, Math.round((isCompact ? 7.5 : 12.5) * scale))}px "Times New Roman", Times, Georgia, serif`;
+        ctx.fillStyle = textMain;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('dB', x + w / 2, dbY);
+        ctx.restore();
+
+        // 9. THE PHYSICAL NEEDLE: Tapered slender needle sweeping across full width
+        const norm = Math.max(0, Math.min(1.0, level));
+        const targetPoint = getScalePoint(norm);
+
+        const ndx = targetPoint.bx - pivotX;
+        const ndy = targetPoint.by - pivotY;
+        const nDist = Math.sqrt(ndx * ndx + ndy * ndy);
+        const nux = ndx / nDist;
+        const nuy = ndy / nDist;
+
+        const needleTipX = targetPoint.bx + nux * (majorTickLen + 1.5 * scale);
+        const needleTipY = targetPoint.by + nuy * (majorTickLen + 1.5 * scale);
+
+        const needleBaseY = y + h + 2 * scale;
+        const tBase = (needleBaseY - pivotY) / nuy;
+        const needleBaseX = pivotX + tBase * nux;
+
+        const npX = -nuy;
+        const npY = nux;
+
+        const baseW = (isCompact ? 0.9 : 1.4) * scale;
+        const tipW = (isCompact ? 0.3 : 0.4) * scale;
+
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+        ctx.shadowBlur = (isCompact ? 2.5 : 4.5) * scale;
+        ctx.shadowOffsetX = 1.0 * scale;
+        ctx.shadowOffsetY = 1.5 * scale;
+
+        ctx.beginPath();
+        ctx.moveTo(needleBaseX - npX * baseW, needleBaseY - npY * baseW);
+        ctx.lineTo(needleBaseX + npX * baseW, needleBaseY + npY * baseW);
+        ctx.lineTo(needleTipX + npX * tipW, needleTipY + npY * tipW);
+        ctx.lineTo(needleTipX - npX * tipW, needleTipY - npY * tipW);
+        ctx.closePath();
+
+        ctx.fillStyle = theme === 'cyber-cyan' ? '#00e5ff' : '#141416';
+        ctx.fill();
+        ctx.restore();
+
+        ctx.restore(); // Unclip window
+
+        // 10. Bezel Frame around meter window
+        const rimColor = theme === 'vintage-amber' ? '#bfa15f' : (theme === 'champagne-gold' ? '#dab978' : (theme === 'cyber-cyan' ? '#1e3040' : '#457b9d'));
+        ctx.strokeStyle = rimColor;
+        ctx.lineWidth = 1.5 * scale;
+        this.roundRect(ctx, x - 0.5, y - 0.5, w + 1, h + 1, podR);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.lineWidth = 1.2 * scale;
         this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
         ctx.stroke();
 
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-        ctx.beginPath();
-        ctx.moveTo(x + 1, y + 1);
-        ctx.lineTo(x + w - 1, y + 1);
-        ctx.stroke();
-
-        // 3. Channel Title Inscription in Dedicated Header
-        ctx.save();
-        ctx.font = `600 ${Math.max(5.5, Math.round((isCompact ? 6.0 : 7.5) * scale))}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-        ctx.fillStyle = 'rgba(195, 210, 230, 0.7)';
-        ctx.letterSpacing = `${0.8 * scale}px`;
-        ctx.textAlign = channelTitle.startsWith('LEFT') ? 'left' : 'right';
-        ctx.textBaseline = 'top';
-        const labelX = channelTitle.startsWith('LEFT') ? x + 10 * scale : x + w - 10 * scale;
-        ctx.fillText(channelTitle.startsWith('LEFT') ? 'LEFT CHANNEL' : 'RIGHT CHANNEL', labelX, y + 8 * scale);
-        ctx.restore();
-
-        // 4. Physical Pivot: ANCHORED PERMANENTLY AT BOTTOM CENTER!
-        // The base is physically locked at (pivotX, pivotY) and NEVER translates or shifts sideways!
-        const pivotX = x + w / 2;
-        const pivotY = y + h - (isCompact ? 4.5 : 8.5) * scale;
-
-        // Wide deflection angle: -62° to +50° (full 112° physical sweep spanning ~90% of pod width!)
-        const thetaMin = -62 * Math.PI / 180;
-        const thetaMax = +50 * Math.PI / 180;
-        const totalSweep = thetaMax - thetaMin;
-
-        // Concentric Dial Arc Radii
-        const arcTopR = Math.min((pivotY - y - (isCompact ? 13 : 22) * scale), (w * 0.46) / Math.sin(62 * Math.PI / 180));
-        const arcMidR = arcTopR - (isCompact ? 4.0 : 7.0) * scale;
-        const arcBotR = arcTopR - (isCompact ? 8.0 : 14.0) * scale;
-
-        // Angle helper
-        const getAngle = (norm) => -Math.PI / 2 + (thetaMin + norm * totalSweep);
-
-        const normZero = 0.85; // 0 dB / 100% position
-        const startAng = getAngle(0.0);
-        const zeroAng = getAngle(normZero);
-        const endAng = getAngle(1.0);
-
-        // 5. Dual Concentric Scale Tracks (Accuphase / McIntosh Standard)
-        // Upper Track Guideline
-        ctx.strokeStyle = '#d8cca8';
-        ctx.lineWidth = (isCompact ? 1.2 : 1.6) * scale;
-        ctx.beginPath();
-        ctx.arc(pivotX, pivotY, arcTopR, startAng, zeroAng);
-        ctx.stroke();
-
-        ctx.strokeStyle = '#e63946';
-        ctx.lineWidth = (isCompact ? 1.8 : 2.4) * scale;
-        ctx.beginPath();
-        ctx.arc(pivotX, pivotY, arcTopR, zeroAng, endAng);
-        ctx.stroke();
-
-        // Lower Track Guideline
-        ctx.strokeStyle = 'rgba(200, 190, 165, 0.35)';
-        ctx.lineWidth = 0.8 * scale;
-        ctx.beginPath();
-        ctx.arc(pivotX, pivotY, arcMidR, startAng, endAng);
-        ctx.stroke();
-
-        // 6. Primary Scale: Decibels (-∞, 50, 40, 30, 20, 10, 5, 0, 3, +)
-        const dbTicks = isCompact 
-            ? [
-                { label: '-∞', norm: 0.00, major: true },
-                { label: '50', norm: 0.14, major: true },
-                { label: '40', norm: 0.28, major: false },
-                { label: '30', norm: 0.42, major: true },
-                { label: '20', norm: 0.54, major: false },
-                { label: '10', norm: 0.68, major: true },
-                { label: '5',  norm: 0.77, major: false },
-                { label: '0',  norm: 0.85, major: true, isRed: true },
-                { label: '3',  norm: 0.93, major: false, isRed: true },
-                { label: '+',  norm: 1.00, major: true, isRed: true }
-              ]
-            : [
-                { label: '-∞', norm: 0.00, major: true },
-                { label: '50', norm: 0.14, major: true },
-                { label: '40', norm: 0.28, major: true },
-                { label: '30', norm: 0.42, major: true },
-                { label: '20', norm: 0.54, major: true },
-                { label: '10', norm: 0.68, major: true },
-                { label: '5',  norm: 0.77, major: true },
-                { label: '0',  norm: 0.85, major: true, isRed: true },
-                { label: '3',  norm: 0.93, major: true, isRed: true },
-                { label: '+',  norm: 1.00, major: true, isRed: true }
-              ];
-
-        // Precision Hash Mark Sub-ticks
-        const subTickNorms = [
-            0.07, 0.21, 0.35, 0.48, 0.61, 0.73, 0.81, 0.89, 0.97
-        ];
-
-        const tickMajorLen = Math.max(3.0, 5.0 * scale);
-        const tickMinorLen = Math.max(1.8, 3.0 * scale);
-        const labelGap = Math.max(3.0, 4.5 * scale);
-        const fontSize = Math.max(5.5, Math.round((isCompact ? 6.0 : 8) * scale));
-
-        // Sub-ticks
-        ctx.strokeStyle = '#7c7358';
-        ctx.lineWidth = 0.8 * scale;
-        subTickNorms.forEach(sn => {
-            const ang = getAngle(sn);
-            const cos = Math.cos(ang), sin = Math.sin(ang);
-            ctx.beginPath();
-            ctx.moveTo(pivotX + cos * arcTopR, pivotY + sin * arcTopR);
-            ctx.lineTo(pivotX + cos * (arcTopR - tickMinorLen), pivotY + sin * (arcTopR - tickMinorLen));
-            ctx.stroke();
-        });
-
-        // Major Ticks & dB Labels
-        ctx.font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        dbTicks.forEach(t => {
-            const ang = getAngle(t.norm);
-            const cos = Math.cos(ang), sin = Math.sin(ang);
-
-            // Tick line extending outward
-            ctx.strokeStyle = t.isRed ? '#e63946' : '#d8cca8';
-            ctx.lineWidth = (t.isRed ? 1.6 : 1.2) * scale;
-            ctx.beginPath();
-            ctx.moveTo(pivotX + cos * arcTopR, pivotY + sin * arcTopR);
-            ctx.lineTo(pivotX + cos * (arcTopR + tickMajorLen), pivotY + sin * (arcTopR + tickMajorLen));
-            ctx.stroke();
-
-            // Downward tick across the track
-            ctx.beginPath();
-            ctx.moveTo(pivotX + cos * arcTopR, pivotY + sin * arcTopR);
-            ctx.lineTo(pivotX + cos * arcMidR, pivotY + sin * arcMidR);
-            ctx.stroke();
-
-            // Label above tick
-            if (t.major) {
-                const labelR = arcTopR + tickMajorLen + labelGap;
-                ctx.fillStyle = t.isRed ? '#ff4d5a' : '#ede5d0';
-                ctx.fillText(t.label, pivotX + cos * labelR, pivotY + sin * labelR);
-            }
-        });
-
-        // 7. Secondary Scale: Power Percentage (Accuphase 0.001% to 200%) - Rendered in Detail View
-        if (!isCompact && h > 100 * scale) {
-            const pctTicks = [
-                { label: '0.001', norm: 0.14 },
-                { label: '0.01',  norm: 0.28 },
-                { label: '0.1',   norm: 0.42 },
-                { label: '1',     norm: 0.54 },
-                { label: '10',    norm: 0.68 },
-                { label: '100',   norm: 0.85, isRed: true },
-                { label: '200',   norm: 0.93, isRed: true },
-                { label: '%',     norm: 1.00, isRed: true }
-            ];
-
-            const pctFontSize = Math.max(4.8, Math.round(6.5 * scale));
-            ctx.font = `400 ${pctFontSize}px "Helvetica Neue", -apple-system, sans-serif`;
-
-            pctTicks.forEach(pt => {
-                const ang = getAngle(pt.norm);
-                const cos = Math.cos(ang), sin = Math.sin(ang);
-
-                ctx.strokeStyle = pt.isRed ? '#e63946' : 'rgba(200, 190, 165, 0.45)';
-                ctx.lineWidth = 0.8 * scale;
-                ctx.beginPath();
-                ctx.moveTo(pivotX + cos * arcMidR, pivotY + sin * arcMidR);
-                ctx.lineTo(pivotX + cos * (arcMidR - 2.5 * scale), pivotY + sin * (arcMidR - 2.5 * scale));
-                ctx.stroke();
-
-                const pLabelR = arcMidR - 6.5 * scale;
-                ctx.fillStyle = pt.isRed ? '#ff4d5a' : 'rgba(215, 205, 180, 0.7)';
-                ctx.fillText(pt.label, pivotX + cos * pLabelR, pivotY + sin * pLabelR);
-            });
-        }
-
-        // 8. Center Inscriptions ("dB" & "PEAK POWER LEVEL")
-        ctx.save();
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        const dbY = isCompact ? (pivotY - arcMidR * 0.48) : (pivotY - arcBotR * 0.62);
-        ctx.font = `bold ${Math.max(6.5, Math.round((isCompact ? 7.5 : 12.5) * scale))}px "Times New Roman", Times, Georgia, serif`;
-        ctx.fillStyle = '#dfd3bc';
-        ctx.fillText('dB', pivotX, dbY);
-
-        if (!isCompact) {
-            ctx.font = `600 ${Math.max(4.5, Math.round(6.2 * scale))}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-            ctx.fillStyle = 'rgba(165, 155, 135, 0.7)';
-            ctx.letterSpacing = `${0.6 * scale}px`;
-            ctx.fillText('PEAK POWER LEVEL', pivotX, dbY + 11 * scale);
-        }
-        ctx.restore();
-
-        // 9. Microprint: "0dB = 50 WATTS AT 8 OHMS"
-        if (!isCompact && w > 160 * scale) {
-            ctx.save();
-            ctx.font = `500 ${Math.max(4.5, Math.round(5.5 * scale))}px monospace`;
-            ctx.fillStyle = 'rgba(140, 130, 110, 0.55)';
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'bottom';
-            ctx.fillText('-0dB = 50 WATTS AT 8 OHMS', x + w - 10 * scale, y + h - 7 * scale);
-            ctx.restore();
-        }
-
-        // 10. THE PHYSICAL NEEDLE: ROTATES STRICTLY FROM THE PIVOT IN THE CENTER!
-        // The base is physically locked at (pivotX, pivotY) and NEVER shifts laterally!
-        const norm = Math.max(0, Math.min(1.0, level));
-        const needleAng = getAngle(norm);
-        const cosN = Math.cos(needleAng);
-        const sinN = Math.sin(needleAng);
-
-        const tipR = arcTopR + tickMajorLen + 1.5 * scale;
-        const tipX = pivotX + cosN * tipR;
-        const tipY = pivotY + sinN * tipR;
-
-        // Shadow behind pointer
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
-        ctx.shadowBlur = 3.5 * scale;
-        ctx.shadowOffsetX = 1.2 * scale;
-        ctx.shadowOffsetY = 1.8 * scale;
-
-        // Counterweight tail (extends past pivot into bottom bezel, classic physical needle!)
-        const tailLen = Math.max(4, 7.5 * scale);
-        ctx.strokeStyle = '#1b1d24';
-        ctx.lineWidth = 2.0 * scale;
-        ctx.beginPath();
-        ctx.moveTo(pivotX, pivotY);
-        ctx.lineTo(pivotX - cosN * tailLen, pivotY - sinN * tailLen);
-        ctx.stroke();
-
-        // Tapered pointer geometry (ivory body with crisp dark edge)
-        const perpX = -sinN;
-        const perpY = cosN;
-        const baseWidth = (isCompact ? 1.3 : 1.8) * scale;
-        const tipWidth = (isCompact ? 0.4 : 0.6) * scale;
-
-        ctx.beginPath();
-        ctx.moveTo(pivotX - perpX * baseWidth, pivotY - perpY * baseWidth);
-        ctx.lineTo(pivotX + perpX * baseWidth, pivotY + perpY * baseWidth);
-        ctx.lineTo(tipX + perpX * tipWidth, tipY + perpY * tipWidth);
-        ctx.lineTo(tipX - perpX * tipWidth, tipY - perpY * tipWidth);
-        ctx.closePath();
-
-        // Dark edge contour
-        ctx.fillStyle = '#0d0e12';
-        ctx.strokeStyle = '#0a0b0e';
-        ctx.lineWidth = 1.2 * scale;
-        ctx.stroke();
-
-        // High-contrast Ivory needle body
-        ctx.fillStyle = '#fbf9f4';
-        ctx.fill();
-        ctx.restore();
-
-        // 11. Machined Satin Metal Galvanometer Pivot Hub Cap (Anchored at Center)
-        const hubR = Math.max(3.5, 5.0 * scale);
-        const hubGrad = ctx.createRadialGradient(pivotX, pivotY, 0.5 * scale, pivotX, pivotY, hubR);
-        hubGrad.addColorStop(0, '#555b66');
-        hubGrad.addColorStop(0.5, '#252932');
-        hubGrad.addColorStop(1, '#0e1014');
-        ctx.fillStyle = hubGrad;
-        ctx.beginPath();
-        ctx.arc(pivotX, pivotY, hubR, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-        ctx.lineWidth = 0.8 * scale;
-        ctx.stroke();
-
-        // Center jewel screw
-        ctx.fillStyle = '#ccc';
-        ctx.beginPath();
-        ctx.arc(pivotX, pivotY, Math.max(1.0, 1.4 * scale), 0, Math.PI * 2);
-        ctx.fill();
-
         ctx.restore();
     }
 
-    drawCenterConsole(ctx, x, y, w, h, scale, clipL, clipR, isCompact) {
+    drawCenterConsole(ctx, x, y, w, h, scale, clipL, clipR, isCompact, theme) {
         ctx.save();
         const cornerR = (isCompact ? 2 : 4) * scale;
 
-        // Console Inset
-        ctx.fillStyle = '#0a0b0e';
+        ctx.fillStyle = theme === 'champagne-gold' ? '#1c1913' : '#101216';
         this.roundRect(ctx, x, y, w, h, cornerR);
         ctx.fill();
 
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.strokeStyle = theme === 'champagne-gold' ? 'rgba(218, 185, 120, 0.2)' : 'rgba(255, 255, 255, 0.06)';
         ctx.lineWidth = 1 * scale;
         this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, cornerR);
         ctx.stroke();
 
         const cx = x + w / 2;
+        const cy = y + h / 2;
 
-        // 1. Prestigious Script Logo (Accuphase signature emerald script!)
-        const logoY = y + h * (isCompact ? 0.28 : 0.25);
-        ctx.save();
+        // Brand Logo
+        ctx.font = `italic 700 ${Math.max(5.5, Math.round((isCompact ? 6.5 : 10.0) * scale))}px "Times New Roman", Georgia, serif`;
+        ctx.fillStyle = (theme === 'vintage-amber' || theme === 'champagne-gold') ? '#d4af37' : '#00e5ff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.shadowColor = '#10c98e';
-        ctx.shadowBlur = (isCompact ? 5 : 8) * scale;
-        ctx.fillStyle = '#16d996';
-        ctx.font = `italic 700 ${Math.max(9, Math.round((isCompact ? 10.5 : 15) * scale))}px "Brush Script MT", "Snell Roundhand", cursive, sans-serif`;
-        ctx.fillText('Accuphase', cx, logoY);
-        ctx.restore();
+        ctx.fillText('LX-AUDIO', cx, isCompact ? (cy - 8 * scale) : (cy - 14 * scale));
 
-        // 2. Functional Calibration Inscription
-        const calibY = logoY + (isCompact ? 11 : 17) * scale;
-        ctx.font = `500 ${Math.max(4.8, Math.round((isCompact ? 5.2 : 6.8) * scale))}px monospace`;
-        ctx.fillStyle = 'rgba(215, 225, 240, 0.85)';
-        ctx.fillText('0 VU = -18 dBFS', cx, calibY);
+        // Functional Calibration Inscription
+        ctx.font = `500 ${Math.max(4.5, Math.round((isCompact ? 4.8 : 6.0) * scale))}px monospace`;
+        ctx.fillStyle = 'rgba(200, 210, 225, 0.75)';
+        ctx.fillText('0VU=-18dBFS', cx, isCompact ? (cy + 2 * scale) : (cy + 2 * scale));
 
-        // 3. Operating Status (Unframed status badge)
-        const statusY = calibY + (isCompact ? 10 : 16) * scale;
-        ctx.font = `600 ${Math.max(4.5, Math.round((isCompact ? 5.0 : 6.2) * scale))}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
-        ctx.fillStyle = 'rgba(160, 175, 195, 0.7)';
-        ctx.fillText('STEREO', cx, statusY);
+        if (!isCompact) {
+            ctx.font = `600 ${Math.max(4.5, Math.round(5.5 * scale))}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
+            ctx.fillStyle = 'rgba(150, 165, 185, 0.65)';
+            ctx.fillText('STEREO', cx, cy + 14 * scale);
+        }
 
-        // 4. Per-Channel Digital Clip Indicators (CLIP L & CLIP R)
-        const clipY = statusY + (isCompact ? 12 : 19) * scale;
-        const ledSpacing = (isCompact ? 14 : 22) * scale;
-        const ledR = (isCompact ? 2.2 : 3.0) * scale;
+        // Per-Channel Digital Clip Indicators (CLIP L & CLIP R)
+        const clipY = isCompact ? (cy + 12 * scale) : (cy + 27 * scale);
+        const ledSpacing = (isCompact ? 10 : 16) * scale;
+        const ledR = (isCompact ? 1.8 : 2.5) * scale;
 
         // Left Clip LED
         const ledLX = cx - ledSpacing;
@@ -598,9 +624,11 @@ class LXStudioVUMeterAnimation {
         ctx.fillStyle = clipR ? '#ff2a2a' : '#22262e';
         ctx.fill();
 
-        ctx.font = `600 ${Math.max(4, Math.round((isCompact ? 4.8 : 5.8) * scale))}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
-        ctx.fillStyle = (clipL || clipR) ? '#ff4d5a' : 'rgba(140, 150, 165, 0.5)';
-        ctx.fillText('PEAK CLIP', cx, clipY + (isCompact ? 6.5 : 9.5) * scale);
+        if (!isCompact) {
+            ctx.font = `600 ${Math.max(4, Math.round(5.0 * scale))}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
+            ctx.fillStyle = (clipL || clipR) ? '#ff4d5a' : 'rgba(140, 150, 165, 0.5)';
+            ctx.fillText('PEAK CLIP', cx, clipY + 8 * scale);
+        }
 
         ctx.restore();
     }

@@ -132,6 +132,7 @@ const DEFAULT_SETTINGS = {
     detailVisualizerStyle: 'pulse',
     visualizerOpacity: 0.5,
     visualizerGlobalStyle: 'blocks',
+    vuMeterTheme: 'vintage-amber',
     // Cache Settings
     enableServerCache: true, // 开启服务器缓存
     enableServerLyricCache: true, // 开启服务器歌词文件缓存
@@ -8746,6 +8747,7 @@ const SETTINGS_UI_MAP = {
     showDetailVisualizer: { id: 'setting-show-detail-visualizer', type: 'checkbox' },
     detailVisualizerStyle: { id: 'setting-detail-visualizer-style', type: 'value' },
     visualizerGlobalStyle: { id: 'setting-visualizer-global-style', type: 'value' },
+    vuMeterTheme: { id: 'setting-vu-meter-theme', type: 'value' },
     visualizerOpacity: {
         id: 'setting-visualizer-opacity',
         type: 'value',

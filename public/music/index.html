@@ -2914,6 +2914,28 @@
                                         </select>
                                     </div>
 
+                                    <!-- VU Meter Theme -->
+                                    <div
+                                        class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow flex flex-col gap-3">
+                                        <h4 class="text-sm font-bold t-text-main flex items-center">
+                                            <i class="fas fa-gauge-high mr-2 text-emerald-500"></i> 表盘风格
+                                            <span class="setting-tooltip-trigger ml-1">
+                                                <i class="fas fa-question-circle text-[10px]"></i>
+                                                <span class="setting-tooltip-content">
+                                                    选择双表头 (VU Meter) 的经典发烧仪表面板主题风格。
+                                                </span>
+                                            </span>
+                                        </h4>
+                                        <select id="setting-vu-meter-theme"
+                                            onchange="updateSetting('vuMeterTheme', this.value)"
+                                            class="lm-select !w-full !py-2">
+                                            <option value="vintage-amber">经典暖金 (Vintage Amber)</option>
+                                            <option value="ocean-blue">湖水湛蓝 (Ocean Blue)</option>
+                                            <option value="cyber-cyan">赛博青翠 (Cyber Cyan)</option>
+                                            <option value="champagne-gold">香槟金典 (Champagne Gold)</option>
+                                        </select>
+                                    </div>
+
                                     <!-- Global Opacity -->
                                     <div
                                         class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow col-span-full">
