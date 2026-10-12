@@ -124,6 +124,7 @@ const DEFAULT_SETTINGS = {
     enableAutoDegradeQuality: true, // 自动降低音质 (默认开启)
     playbackErrorPriority: 'platform,quality,next', // 播放失败处理优先级
     enablePreloader: true, // 预读机制 (默认开启)
+    disablePreloadSkip: false, // 禁用预读跳过 (默认关闭)
     enableSmtcLyric: true, // SMTC 歌词显示 (默认开启)
     // Visualizer Settings (Refactored)
     showFooterVisualizer: true,
@@ -398,7 +399,7 @@ function handleUnexpectedPlaybackPause() {
     playbackRecoveryTriggeredForRequestId = requestId;
     if (currentPlaybackErrorHandler && typeof audio.removeEventListener === 'function') {
         audio.removeEventListener('error', currentPlaybackErrorHandler);
-        currentPlaybackErrorHandler = null;
+        // 暂停期间不恢复播放；保留当前歌曲的回调，供用户继续播放时重新挂载。
     }
 
     // 探测服务器是否掉线
@@ -5866,8 +5867,8 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
     const nextSong = currentPlaylist[targetIndex];
     if (!nextSong) return;
 
-    // 如果这首已经被标记为不可播放，拉下一首
-    if (nextSong._unplayable) {
+    // 如果这首已经被标记为不可播放（且未启用“禁用预读跳过”），拉下一首
+    if (nextSong._unplayable && !settings.disablePreloadSkip) {
         const followingIndex = (targetIndex + 1) >= currentPlaylist.length ? 0 : targetIndex + 1;
         return prefetchNextSong(followingIndex, depth + 1);
     }
@@ -5897,7 +5898,9 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
 
     } catch (e) {
         console.warn(`[Prefetch] Skip unplayable [${nextSong.name}]:`, e.message);
-        nextSong._unplayable = true; // 标记
+        if (!settings.disablePreloadSkip) {
+            nextSong._unplayable = true; // 标记
+        }
 
         // 递归探测
         const followingIndex = (targetIndex + 1) >= currentPlaylist.length ? 0 : targetIndex + 1;
@@ -7534,6 +7537,10 @@ async function togglePlay() {
             if (settings.enableCrossfade) {
                 audio.volume = 0;
             }
+            if (currentPlaybackErrorHandler) {
+                audio.addEventListener('error', currentPlaybackErrorHandler, { once: true });
+            }
+            playbackRecoveryTriggeredForRequestId = 0;
             shouldAutoRecoverPlayback = true;
             await audio.play();
             updatePlayButton(true);
@@ -7579,8 +7586,8 @@ function playNext(depth = 0) {
     if (nextIndex !== -1 && currentPlaylist[nextIndex]) {
         const nextSong = currentPlaylist[nextIndex];
 
-        // [Logic Fix] 如果这首歌在预读中已经被确认不可解析，直接跳过到再下一首
-        if (nextSong._unplayable && nextIndex !== currentIndex) {
+        // [Logic Fix] 如果这首歌在预读中已经被确认不可解析且未禁用预读跳过，直接跳过到再下一首
+        if (nextSong._unplayable && !settings.disablePreloadSkip && nextIndex !== currentIndex) {
             console.log(`[Queue] Auto-skipping unplayable song [${nextIndex}]: ${nextSong.name}`);
             currentIndex = nextIndex; // 更新当前索引以便 getNextIndex() 能找到下一首
             return playNext(depth + 1);
@@ -8029,10 +8036,10 @@ audio.addEventListener('playing', () => {
 // Initialize Media Session Actions
 if ('mediaSession' in navigator) {
     navigator.mediaSession.setActionHandler('play', () => {
-        togglePlay();
+        if (audio.paused) return togglePlay();
     });
     navigator.mediaSession.setActionHandler('pause', () => {
-        togglePlay();
+        if (!audio.paused) return togglePlay();
     });
     navigator.mediaSession.setActionHandler('previoustrack', () => {
         playPrev();
@@ -8066,6 +8073,73 @@ if ('mediaSession' in navigator) {
     */
 }
 
+const mediaSessionArtworkCache = new Map();
+let mediaSessionMetadataSongKey = '';
+let mediaSessionArtworkRequest = 0;
+
+function resolveMediaSessionArtwork(imgUrl) {
+    const fallback = { src: new URL('/music/assets/logo.png', window.location.href).href, sizes: '512x512', type: 'image/png' };
+    let sourceUrl;
+    try {
+        const url = new URL(imgUrl, window.location.href);
+        if (url.protocol === 'http:' || url.protocol === 'https:') {
+            // 使用已有下载代理，避免跨域图片令 canvas 污染，亦避免系统媒体进程直接访问 CDN。
+            sourceUrl = url.origin === window.location.origin ? url.href :
+                `/api/music/download?url=${encodeURIComponent(url.href)}&filename=cover.jpg&inline=1`;
+        } else if (url.protocol === 'data:' && /^data:image\/(png|jpeg|webp|gif);/i.test(imgUrl)) {
+            sourceUrl = imgUrl;
+        } else {
+            return Promise.resolve(fallback);
+        }
+    } catch (_) { return Promise.resolve(fallback); }
+
+    if (mediaSessionArtworkCache.has(sourceUrl)) return mediaSessionArtworkCache.get(sourceUrl);
+    const result = new Promise(resolve => {
+        const image = new Image();
+        let settled = false;
+        const finish = artwork => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            image.onload = image.onerror = null;
+            resolve(artwork);
+        };
+        const timer = setTimeout(() => {
+            finish(fallback);
+            if (typeof image.removeAttribute === 'function') image.removeAttribute('src');
+        }, 10000);
+        image.onload = () => {
+            try {
+                const width = image.naturalWidth;
+                const height = image.naturalHeight;
+                if (!(width > 0 && height > 0)) throw new Error('Empty artwork');
+                const canvas = document.createElement('canvas');
+                canvas.width = canvas.height = 512;
+                const context = canvas.getContext('2d');
+                if (!context) throw new Error('Canvas unavailable');
+                context.fillStyle = '#ffffff';
+                context.fillRect(0, 0, 512, 512);
+                const scale = Math.min(512 / width, 512 / height);
+                const w = width * scale;
+                const h = height * scale;
+                context.drawImage(image, (512 - w) / 2, (512 - h) / 2, w, h);
+                const src = canvas.toDataURL('image/jpeg', 0.85);
+                if (!src.startsWith('data:image/jpeg;')) throw new Error('JPEG conversion unavailable');
+                finish({ src, sizes: '512x512', type: 'image/jpeg' });
+            } catch (_) { finish(fallback); }
+        };
+        image.onerror = () => finish(fallback);
+        image.src = sourceUrl;
+    });
+    mediaSessionArtworkCache.set(sourceUrl, result);
+    if (mediaSessionArtworkCache.size > 32) mediaSessionArtworkCache.delete(mediaSessionArtworkCache.keys().next().value);
+    // 临时失败不能永久缓存；下一次元数据刷新应允许重试。
+    result.then(artwork => {
+        if (artwork === fallback && mediaSessionArtworkCache.get(sourceUrl) === result) mediaSessionArtworkCache.delete(sourceUrl);
+    });
+    return result;
+}
+
 function updateMediaSessionMetadata(song) {
     if (!('mediaSession' in navigator) || !song) return;
 
@@ -8095,33 +8169,25 @@ function updateMediaSessionMetadata(song) {
         fullImgUrl = imgUrl;
     }
 
-    // 根据扩展名识别 MIME 类型；若无明确扩展名（如 /api/music/cache/cover）则省略 type 属性，交由浏览器按响应头自动协商
-    let mimeType = undefined;
-    const cleanUrl = fullImgUrl.split('?')[0].toLowerCase();
-    if (cleanUrl.endsWith('.png')) {
-        mimeType = 'image/png';
-    } else if (cleanUrl.endsWith('.webp')) {
-        mimeType = 'image/webp';
-    } else if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg')) {
-        mimeType = 'image/jpeg';
-    }
-
-    const artworkSizes = ['96x96', '128x128', '192x192', '256x256', '384x384', '512x512'];
-    const artwork = artworkSizes.map(size => {
-        const item = { src: fullImgUrl, sizes: size };
-        if (mimeType) item.type = mimeType;
-        return item;
-    });
+    // 尺寸描述必须与实际图片一致；加载完成前先使用已知的 512px PNG。
+    let artwork = [{ src: new URL('/music/assets/logo.png', window.location.href).href, sizes: '512x512', type: 'image/png' }];
+    const songKey = JSON.stringify([song.source, song.songmid || song.songId || song.id || song.filename, song.name, song.singer]);
+    const sameSong = mediaSessionMetadataSongKey === songKey;
+    mediaSessionMetadataSongKey = songKey;
+    const artworkRequest = ++mediaSessionArtworkRequest;
 
     try {
         const currentMeta = navigator.mediaSession.metadata;
+        if (sameSong && currentMeta && currentMeta.artwork && currentMeta.artwork.length) {
+            artwork = Array.from(currentMeta.artwork);
+        }
         const songTitle = song.name || '';
         const songArtist = song.singer || '';
 
         // 如果开启了 SMTC 歌词且当前 title 已被歌词同步（不等于歌曲原标题），保留现有歌词 title 与 artist 避免延迟刷新时被冲掉
         let targetTitle = songTitle;
         let targetArtist = songArtist;
-        if (currentMeta && settings && settings.enableSmtcLyric && currentMeta.title && currentMeta.title !== songTitle) {
+        if (sameSong && currentMeta && settings && settings.enableSmtcLyric && currentMeta.title && currentMeta.title !== songTitle) {
             targetTitle = currentMeta.title;
             targetArtist = currentMeta.artist || songArtist;
         }
@@ -8129,9 +8195,17 @@ function updateMediaSessionMetadata(song) {
         navigator.mediaSession.metadata = new MediaMetadata({
             title: targetTitle,
             artist: targetArtist,
-            album: song.albumName || (song.album && song.album.name) || '',
+            album: song.albumName || (song.album && song.album.name) || (song.meta && song.meta.albumName) || '',
             artwork: artwork
         });
+        resolveMediaSessionArtwork(fullImgUrl).then(image => {
+            if (artworkRequest !== mediaSessionArtworkRequest || mediaSessionMetadataSongKey !== songKey) return;
+            const latest = navigator.mediaSession.metadata;
+            if (!latest) return;
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: latest.title, artist: latest.artist, album: latest.album, artwork: [image]
+            });
+        }).catch(e => console.warn('[MediaSession] Failed to prepare artwork:', e));
         // Reset playback state logic is handled by event listeners, but metadata update often implies new song start
         // updatePositionState() will be called when loadedmetadata fires for new source
     } catch (e) {
@@ -8634,6 +8708,7 @@ const SETTINGS_UI_MAP = {
     enableAutoDegradeQuality: { id: 'setting-auto-degrade-quality', type: 'checkbox' },
     playbackErrorPriority: { id: 'setting-playback-error-priority', type: 'value' },
     enablePreloader: { id: 'setting-enable-preloader', type: 'checkbox' },
+    disablePreloadSkip: { id: 'setting-disable-preload-skip', type: 'checkbox' },
     deduplicatePlaylistByQuality: { id: 'setting-deduplicate-playlist', type: 'checkbox' },
     enableSmtcLyric: {
         id: 'setting-enable-smtc-lyric',
