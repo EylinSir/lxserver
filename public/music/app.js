@@ -192,25 +192,34 @@ async function setupAudioDeviceChangeListener() {
 
     const handleDeviceChange = async () => {
         const now = Date.now();
-        lastAudioDeviceChangeTime = now;
-        console.log('[Audio] Audio output/input device change detected (e.g. earphone plugged/unplugged).');
-
         let deviceRemoved = false;
+        let deviceAdded = false;
         try {
             if (typeof navigator.mediaDevices.enumerateDevices === 'function') {
                 const currentDevices = await navigator.mediaDevices.enumerateDevices();
                 const currentAudioDevices = currentDevices.filter(d => d.kind === 'audiooutput' || d.kind === 'audioinput');
-                if (lastKnownAudioDevices && currentAudioDevices.length < lastKnownAudioDevices.length) {
-                    deviceRemoved = true;
+                if (lastKnownAudioDevices) {
+                    if (currentAudioDevices.length < lastKnownAudioDevices.length) {
+                        deviceRemoved = true;
+                    } else if (currentAudioDevices.length > lastKnownAudioDevices.length) {
+                        deviceAdded = true;
+                    }
                 }
                 lastKnownAudioDevices = currentAudioDevices;
             }
         } catch (e) { }
 
-        // 当耳机/蓝牙断开时，系统一般会自动暂停音频并触发 devicechange。
-        // 为杜绝外放尴尬，若音频处于播放中或处于自动恢复标记中，或者设备减少，立即主动停播
-        if ((audio && !audio.paused) || shouldAutoRecoverPlayback || deviceRemoved) {
-            console.log('[Audio] Halting playback due to device change to prevent blasting sound via phone speaker.');
+        // 如果是新插入耳机/连接新设备，允许正常播放，不视为拔出断开
+        if (deviceAdded) {
+            console.log('[Audio] Audio device added (e.g. earphone connected). Keeping current playback state.');
+            return;
+        }
+
+        // 当耳机/蓝牙断开时（设备减少），系统一般会自动暂停音频。
+        // 为杜绝外放尴尬，若确认设备减少，或者设备减少期间处于恢复标记中，立即主动停播并记录时间戳
+        if (deviceRemoved) {
+            lastAudioDeviceChangeTime = now;
+            console.log('[Audio] Audio device removed (e.g. earphone disconnected). Halting playback to prevent speaker blast.');
             shouldAutoRecoverPlayback = false;
             try {
                 if (audio) audio.pause();
@@ -7983,26 +7992,40 @@ function updateMediaSessionMetadata(song) {
         fullImgUrl = imgUrl;
     }
 
-    // 根据扩展名或实际路径动态识别正确的 MIME 类型（避免强制 image/jpeg 导致部分车机解码校验失败）
-    let mimeType = 'image/jpeg';
+    // 根据扩展名识别 MIME 类型；若无明确扩展名（如 /api/music/cache/cover）则省略 type 属性，交由浏览器按响应头自动协商
+    let mimeType = undefined;
     const cleanUrl = fullImgUrl.split('?')[0].toLowerCase();
     if (cleanUrl.endsWith('.png')) {
         mimeType = 'image/png';
     } else if (cleanUrl.endsWith('.webp')) {
         mimeType = 'image/webp';
+    } else if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg')) {
+        mimeType = 'image/jpeg';
     }
 
     const artworkSizes = ['96x96', '128x128', '192x192', '256x256', '384x384', '512x512'];
-    const artwork = artworkSizes.map(size => ({
-        src: fullImgUrl,
-        sizes: size,
-        type: mimeType
-    }));
+    const artwork = artworkSizes.map(size => {
+        const item = { src: fullImgUrl, sizes: size };
+        if (mimeType) item.type = mimeType;
+        return item;
+    });
 
     try {
+        const currentMeta = navigator.mediaSession.metadata;
+        const songTitle = song.name || '';
+        const songArtist = song.singer || '';
+
+        // 如果开启了 SMTC 歌词且当前 title 已被歌词同步（不等于歌曲原标题），保留现有歌词 title 与 artist 避免延迟刷新时被冲掉
+        let targetTitle = songTitle;
+        let targetArtist = songArtist;
+        if (currentMeta && settings && settings.enableSmtcLyric && currentMeta.title && currentMeta.title !== songTitle) {
+            targetTitle = currentMeta.title;
+            targetArtist = currentMeta.artist || songArtist;
+        }
+
         navigator.mediaSession.metadata = new MediaMetadata({
-            title: song.name || '',
-            artist: song.singer || '',
+            title: targetTitle,
+            artist: targetArtist,
             album: song.albumName || (song.album && song.album.name) || '',
             artwork: artwork
         });
@@ -16698,23 +16721,30 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!detailView) return;
     let touchStartY = 0;
     let touchEndY = 0;
+    let isSwipeCloseActive = false;
 
     detailView.addEventListener('touchstart', (e) => {
+        isSwipeCloseActive = false;
         if (!isLyricViewOpen || e.touches.length !== 1) return;
         const lyricScrollEl = document.getElementById('lyric-container');
         // 仅在歌词滚动到顶部或触摸顶部导航区域时允许下滑收起
         if (lyricScrollEl && lyricScrollEl.scrollTop > 15 && e.touches[0].clientY > 120) return;
         touchStartY = e.touches[0].clientY;
         touchEndY = touchStartY;
+        isSwipeCloseActive = true;
     }, { passive: true });
 
     detailView.addEventListener('touchmove', (e) => {
-        if (!isLyricViewOpen || e.touches.length !== 1) return;
+        if (!isSwipeCloseActive || !isLyricViewOpen || e.touches.length !== 1) return;
         touchEndY = e.touches[0].clientY;
     }, { passive: true });
 
     detailView.addEventListener('touchend', () => {
-        if (!isLyricViewOpen) return;
+        if (!isSwipeCloseActive || !isLyricViewOpen) {
+            isSwipeCloseActive = false;
+            return;
+        }
+        isSwipeCloseActive = false;
         const deltaY = touchEndY - touchStartY;
         if (deltaY > 80) {
             toggleLyrics();
