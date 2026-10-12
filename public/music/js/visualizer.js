@@ -88,26 +88,28 @@ class LXStudioVUMeterAnimation {
             let peakL = 0, peakR = 0;
 
             // 1. Precise Stereo Time-Domain Waveform Analysis (True RMS & Sample Peak)
-            if (this.options.analyserL && this.options.analyserR) {
-                const sizeL = this.options.analyserL.fftSize || 512;
-                const sizeR = this.options.analyserR.fftSize || 512;
+            const aL = this.options.analyserL || window._sharedAnalyserL;
+            const aR = this.options.analyserR || window._sharedAnalyserR;
+            if (aL && aR) {
+                const sizeL = aL.fftSize || 512;
+                const sizeR = aR.fftSize || 512;
                 const timeBufL = new Uint8Array(sizeL);
                 const timeBufR = new Uint8Array(sizeR);
-                this.options.analyserL.getByteTimeDomainData(timeBufL);
-                this.options.analyserR.getByteTimeDomainData(timeBufR);
+                aL.getByteTimeDomainData(timeBufL);
+                aR.getByteTimeDomainData(timeBufR);
 
                 let sumSqL = 0, sumSqR = 0;
                 for (let i = 0; i < sizeL; i++) {
                     const vL = (timeBufL[i] - 128) / 128;
                     sumSqL += vL * vL;
-                    const aL = Math.abs(vL);
-                    if (aL > peakL) peakL = aL;
+                    const aLVal = Math.abs(vL);
+                    if (aLVal > peakL) peakL = aLVal;
                 }
                 for (let i = 0; i < sizeR; i++) {
                     const vR = (timeBufR[i] - 128) / 128;
                     sumSqR += vR * vR;
-                    const aR = Math.abs(vR);
-                    if (aR > peakR) peakR = aR;
+                    const aRVal = Math.abs(vR);
+                    if (aRVal > peakR) peakR = aRVal;
                 }
                 rmsL = Math.sqrt(sumSqL / sizeL);
                 rmsR = Math.sqrt(sumSqR / sizeR);
@@ -773,10 +775,14 @@ const musicVisualizer = (function () {
                 audioSource.connect(splitterNode);
                 splitterNode.connect(analyserL, 0);
                 splitterNode.connect(analyserR, 1);
+                window._sharedAnalyserL = analyserL;
+                window._sharedAnalyserR = analyserR;
             } catch (err) {
                 console.warn('[Visualizer] Stereo splitter setup fallback to mono:', err);
                 analyserL = audioAnalyser;
                 analyserR = audioAnalyser;
+                window._sharedAnalyserL = audioAnalyser;
+                window._sharedAnalyserR = audioAnalyser;
             }
 
             if (audioContext.state === 'suspended') {
