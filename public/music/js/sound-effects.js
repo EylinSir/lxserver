@@ -79,8 +79,16 @@ window.soundEffects = (function () {
         return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (isTouch && window.innerWidth < 1024);
     }
 
+    function canProcessLocally() {
+        // Capturing a mobile media element cannot be undone by disconnecting Web Audio.
+        // Keep native playback even before Safari reports an AirPlay target.
+        return !isMobileDevice() &&
+            !document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless &&
+            !window.LXPlayback?.isRemote;
+    }
+
     function init(force = false) {
-        if (document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || window.LXPlayback?.isRemote) return;
+        if (!canProcessLocally()) return;
         if (audioContext && isGraphBuilt) return;
         loadSettings();
         if (!force && (isMobileDevice() || !hasActiveEffects())) {
@@ -178,7 +186,7 @@ window.soundEffects = (function () {
     let pitchShifterInitPromise = null;
 
     async function initPitchShifter() {
-        if (!audioContext) return null;
+        if (!canProcessLocally() || !audioContext) return null;
         if (pitchShifterNode) return pitchShifterNode;
         if (pitchShifterInitPromise) return pitchShifterInitPromise;
 
@@ -186,6 +194,10 @@ window.soundEffects = (function () {
             try {
                 console.log('[SoundEffects] Loading Pitch Shifter Module from /music/js/pitch-shifter/phase-vocoder.js');
                 await audioContext.audioWorklet.addModule('/music/js/pitch-shifter/phase-vocoder.js');
+                if (!canProcessLocally()) {
+                    pitchShifterInitPromise = null;
+                    return null;
+                }
 
                 if (!pitchShifterNode) {
                     pitchShifterNode = new AudioWorkletNode(audioContext, 'phase-vocoder-processor', {
@@ -218,6 +230,7 @@ window.soundEffects = (function () {
     }
 
     function connectPitchShifter() {
+        if (!canProcessLocally()) return;
         if (pitchShifterNode) {
             // Already loaded, just connect
             try { mixerNode.disconnect(pannerNode); } catch (e) { }
@@ -227,7 +240,7 @@ window.soundEffects = (function () {
             pitchShifterNode.connect(pannerNode);
         } else {
             initPitchShifter().then(node => {
-                if (node && settings.pitch !== 1.0) {
+                if (canProcessLocally() && node && settings.pitch !== 1.0) {
                     try { mixerNode.disconnect(pannerNode); } catch (e) { }
                     try { mixerNode.disconnect(node); } catch (e) { }
                     try { node.disconnect(pannerNode); } catch (e) { }
@@ -239,6 +252,7 @@ window.soundEffects = (function () {
     }
 
     function disconnectPitchShifter() {
+        if (!canProcessLocally()) return;
         if (pitchShifterNode) {
             try { mixerNode.disconnect(pitchShifterNode); } catch (e) { }
             try { pitchShifterNode.disconnect(pannerNode); } catch (e) { }
@@ -323,6 +337,7 @@ window.soundEffects = (function () {
     }
 
     function applySettings() {
+        if (!canProcessLocally()) return;
         // EQ - check if initialized
         if (eqFilters && eqFilters.length > 0) {
             eqFilters.forEach((f, i) => {
@@ -334,11 +349,15 @@ window.soundEffects = (function () {
         // Panner
         updatePanner();
         // Pitch
+        if (settings.pitch !== 1.0) connectPitchShifter();
+        else disconnectPitchShifter();
         applyPitch();
     }
 
+    let reverbRequest = 0;
     function updateReverb() {
-        if (!convolverNode || !audioContext) return;
+        if (!canProcessLocally() || !convolverNode || !audioContext) return;
+        const request = ++reverbRequest;
         const rev = reverbOptions.find(r => r.id === settings.reverb.id);
 
         if (!rev || rev.id === 'none') {
@@ -351,16 +370,16 @@ window.soundEffects = (function () {
                 .then(r => r.arrayBuffer())
                 .then(data => audioContext.decodeAudioData(data))
                 .then(buffer => {
-                    if (!convolverNode) return;
+                    if (!canProcessLocally() || !convolverNode || request !== reverbRequest || settings.reverb.id !== rev.id) return;
                     convolverNode.buffer = buffer;
                     if (dryGainNode) dryGainNode.gain.value = settings.reverb.mainGain;
                     if (wetGainNode) wetGainNode.gain.value = settings.reverb.sendGain;
-                });
+                }).catch(error => console.warn('[SoundEffects] Reverb load failed:', error));
         }
     }
 
     function updatePanner() {
-        if (!pannerNode) return;
+        if (!canProcessLocally() || !pannerNode) return;
         const p = settings.panner;
 
         if (pannerInfo.interval) {
@@ -372,6 +391,11 @@ window.soundEffects = (function () {
         if (p.enable) {
             console.log('[SoundEffects] Starting Panner (Desktop Logic)');
             pannerInfo.interval = setInterval(() => {
+                if (!canProcessLocally()) {
+                    clearInterval(pannerInfo.interval);
+                    pannerInfo.interval = null;
+                    return;
+                }
                 if (!pannerNode) return;
                 pannerInfo.rad += 1;
                 if (pannerInfo.rad > 360) pannerInfo.rad -= 360;
@@ -417,7 +441,7 @@ window.soundEffects = (function () {
     }
 
     function applyPitch() {
-        if (pitchFactorParam) {
+        if (canProcessLocally() && pitchFactorParam) {
             // Use setTargetAtTime for immediate and smooth Web Audio update
             pitchFactorParam.setTargetAtTime(settings.pitch, audioContext.currentTime, 0.05);
         }
@@ -556,7 +580,7 @@ window.soundEffects = (function () {
     }
 
     function ensureLocalGraph() {
-        if (document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || window.LXPlayback?.isRemote) return false;
+        if (!canProcessLocally()) return false;
         if (!audioContext || !isGraphBuilt) init(true);
         return !!audioContext && isGraphBuilt;
     }
@@ -574,8 +598,8 @@ window.soundEffects = (function () {
         open: function () {
             // 打开面板时只加载并显示设置，不在此强制初始化 Web Audio 图
             loadSettings();
-            if (isIOSDevice() && window.showInfo) {
-                window.showInfo('提示：iOS 系统限制，开启自定义音效将导致退至后台或锁屏时暂停播放。如需后台播放请保持音效关闭。', 5000);
+            if (!canProcessLocally() && window.showInfo) {
+                window.showInfo('移动设备、AirPlay 和投放播放使用原生音频，音效设置仅保存，供本地桌面播放使用。', 5000);
             }
             const modal = document.getElementById('sound-effects-modal');
             if (!modal) return;
@@ -628,7 +652,7 @@ window.soundEffects = (function () {
         resetEQ: function () {
             settings.eq = Array(10).fill(0);
             activePresetName = '';
-            if (eqFilters.length && audioContext) {
+            if (canProcessLocally() && eqFilters.length && audioContext) {
                 eqFilters.forEach(f => f.gain.setTargetAtTime(0, audioContext.currentTime, 0.1));
             }
             saveSettings();
@@ -655,7 +679,7 @@ window.soundEffects = (function () {
             settings.pitch = val;
             saveSettings();
             if ((isGraphBuilt || hasActiveEffects()) && ensureLocalGraph()) {
-                if (val !== 1.0 && oldPitch === 1.0) connectPitchShifter();
+                if (val !== 1.0 && (oldPitch === 1.0 || !pitchShifterNode)) connectPitchShifter();
                 else if (val === 1.0 && oldPitch !== 1.0) disconnectPitchShifter();
                 applyPitch();
             }
@@ -777,6 +801,11 @@ window.soundEffects = (function () {
     // Attach event listeners to sound effects UI elements
     function attachListeners() {
         console.log('[SoundEffects] Attaching event listeners...');
+        const restoreLocalEffects = () => {
+            if (isGraphBuilt && canProcessLocally()) applySettings();
+        };
+        document.getElementById('audio-player')?.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', restoreLocalEffects);
+        window.addEventListener('lx-cast-route', restoreLocalEffects);
         // Reverb Gain Sliders
         const mainGain = document.getElementById('reverb-main-gain');
         if (mainGain) mainGain.oninput = (e) => {
