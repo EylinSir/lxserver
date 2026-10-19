@@ -25,3 +25,11 @@ Physical Android, other receiver/codec combinations, independent audible monitor
 - [x] Verify signed-in HTTPS assets, secure cookies and centered desktop/320px controls; configuration bytes, six mounts and 51 unrelated containers remain unchanged.
 
 The existing customization history includes eleven commits from October 12–13, before the October 19 audit, covering VU themes, audio behavior, search compatibility and badges. These are retained from the user's fork. Commit author identities alone do not distinguish manual work from assistant-generated work.
+
+## Combined-code compatibility audit
+
+- [x] Reproduce and fix nine behavioral conflicts across fixed audio policies, automatic login, sync surfaces, Cast/recovery handoff and custom VU rendering.
+- [x] Pass all 91 tests, type checking and production compilation; retain the existing lyric/artwork, security and playback regressions.
+- [ ] Validate and deploy the corrected frontend while preserving the combined backend and custom assets.
+
+See [the compatibility audit](../combined-conflict-audit.md) for reproductions, fixes and validation limits. Frontend worker v43 refreshes the corrected assets.

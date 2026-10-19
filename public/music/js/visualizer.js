@@ -606,7 +606,13 @@ const musicVisualizer = (function () {
 
     function isMobileDevice() {
         const ua = navigator.userAgent;
-        return /Android|iPhone|iPad|iPod/i.test(ua);
+        const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (isTouch && window.innerWidth < 1024);
+    }
+
+    function isDetailVisible() {
+        const view = document.getElementById('view-player-detail');
+        return !!view && !view.classList.contains('hidden') && !view.classList.contains('translate-y-[100%]');
     }
 
     /**
@@ -615,7 +621,7 @@ const musicVisualizer = (function () {
     function triggerStandaloneLoop() {
         const s = window.settings || {};
         const isFooterVU = s.showFooterVisualizer && s.footerVisualizerStyle === 'vumeter' && footerCanvas;
-        const isDetailVU = s.showDetailVisualizer && s.detailVisualizerStyle === 'vumeter' && detailCanvas;
+        const isDetailVU = s.showDetailVisualizer && s.detailVisualizerStyle === 'vumeter' && detailCanvas && isDetailVisible();
 
         // If Wave is running, do NOT run standalone loop to prevent frame collision
         if (isInitialized && waveFooter && waveDetail) {
@@ -639,7 +645,7 @@ const musicVisualizer = (function () {
         function renderLoop() {
             const currentSettings = window.settings || {};
             const needFooter = currentSettings.showFooterVisualizer && currentSettings.footerVisualizerStyle === 'vumeter' && footerCanvas;
-            const needDetail = currentSettings.showDetailVisualizer && currentSettings.detailVisualizerStyle === 'vumeter' && detailCanvas;
+            const needDetail = currentSettings.showDetailVisualizer && currentSettings.detailVisualizerStyle === 'vumeter' && detailCanvas && isDetailVisible();
 
             if (isInitialized || (!needFooter && !needDetail)) {
                 standaloneRafId = null;
@@ -953,8 +959,7 @@ const musicVisualizer = (function () {
 
         // --- Handle Detail Visualizer ---
         waveDetail.clearAnimations();
-        const detailViewEl = document.getElementById('view-player-detail');
-        const isDetailViewVisible = detailViewEl && !detailViewEl.classList.contains('hidden') && !detailViewEl.classList.contains('translate-y-[100%]');
+        const isDetailViewVisible = isDetailVisible();
 
         if (s.showDetailVisualizer && detailCanvas && isDetailViewVisible) {
             const style = s.detailVisualizerStyle || 'pulse';

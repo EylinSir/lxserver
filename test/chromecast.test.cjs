@@ -125,6 +125,15 @@ test('pause during a pending LOAD wins over its original autoplay request', asyn
     release(); await flush(); assert.equal(f.playback.paused, true);
 });
 
+test('seeking while a Cast LOAD is pending wins over its original start position', async () => {
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    const f = fixture({ loadGate: () => gate }); f.start(); await flush();
+    f.playback.currentTime = 55;
+    release(); await flush();
+    assert.equal(f.playback.currentTime, 55);
+    assert.equal(f.player.currentTime, 55);
+});
+
 test('stale URL preparation cannot replace a newly selected track', async () => {
     let release; const gate = new Promise(resolve => { release = resolve; }); let first = true;
     const f = fixture({ grantGate: async () => { if (first) { first = false; await gate; } } });

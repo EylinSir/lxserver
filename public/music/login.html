@@ -137,6 +137,7 @@
                     })
                     const autoData = await autoRes.json()
                     if (autoData.success) {
+                        rememberLocalLogin(autoData, savedPass)
                         window.location.replace('./')
                     }
                 }
@@ -144,6 +145,14 @@
                 console.error('[Login] 初始化检查失败:', e)
             }
         })()
+
+        function rememberLocalLogin(data, password) {
+            if (!data.username) return
+            localStorage.setItem('lx_sync_user', data.username)
+            localStorage.setItem('lx_sync_pass', password)
+            localStorage.setItem('lx_sync_mode', 'local')
+            if (data.token) localStorage.setItem('lx_user_token', data.token)
+        }
 
         async function handleLogin(event) {
             event.preventDefault()
@@ -172,14 +181,7 @@
                     sessionStorage.removeItem('lx_login_bounce_time')
                     sessionStorage.removeItem('lx_login_bounce_cnt')
                     submitBtn.innerHTML = '<i class="fas fa-check mr-2"></i>登录成功，跳转中...'
-                    if (data.username) {
-                        localStorage.setItem('lx_sync_user', data.username);
-                        localStorage.setItem('lx_sync_pass', password);
-                        localStorage.setItem('lx_sync_mode', 'local');
-                        if (data.token) {
-                            localStorage.setItem('lx_user_token', data.token);
-                        }
-                    }
+                    rememberLocalLogin(data, password)
                     setTimeout(() => window.location.replace('./'), 300)
                 } else {
                     errorDiv.classList.remove('hidden')
