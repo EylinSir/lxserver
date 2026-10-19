@@ -642,7 +642,7 @@ const checkUserConfig = (users: LX.Config['users']) => {
 
   for (const user of users) {
     if (userNames.includes(user.name)) exit('User name duplicate: ' + user.name)
-    if (!allowDuplicatePasswords && passwords.includes(user.password)) exit('User password duplicate: ' + user.password)
+    if (!allowDuplicatePasswords && passwords.includes(user.password)) exit('User password duplicate (value redacted)')
     userNames.push(user.name)
     passwords.push(user.password)
   }
@@ -686,7 +686,7 @@ if (fs.existsSync(usersJsonPath)) {
 checkUserConfig(global.lx.config.users)
 
 console.log(`[用户] 已注册用户:
-${global.lx.config.users.map(user => `  ${user.name}: ${user.password}`).join('\n') || '  (暂无用户)'}
+${global.lx.config.users.map(user => `  ${user.name}`).join('\n') || '  (暂无用户)'}
 `)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { getUserDirname } = require('@/user')

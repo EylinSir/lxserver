@@ -1183,10 +1183,10 @@ async function ensureUserAuthToken(options = {}) {
             localStorage.removeItem('lx_user_token');
         }
         try {
-            const response = await fetch('/api/user/login', {
+            const response = await fetch('/api/music/auth', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ username, password, mode: 'user' })
             });
             if (!response.ok) return false;
 
@@ -1208,6 +1208,22 @@ async function ensureUserAuthToken(options = {}) {
     return userTokenRefreshPromise;
 }
 window.ensureUserAuthToken = ensureUserAuthToken;
+
+async function restorePlaybackSession(allowRefresh = true) {
+    if (!isUserLoggedIn()) return false;
+    let valid;
+    try {
+        // Check the cookie alone: native audio cannot attach the API token header.
+        const response = await fetch('/api/music/auth/verify', {
+            cache: 'no-store', signal: AbortSignal.timeout(5000)
+        });
+        if (!response.ok) return false;
+        valid = (await response.json()).valid;
+    } catch (_) { return false; }
+    if (valid !== false) return false;
+    if (allowRefresh && await ensureUserAuthToken({ force: true })) return true;
+    throw Object.assign(new Error('登录已失效，请重新登录'), { status: 401 });
+}
 
 /**
  * 更新顶部栏的用户状态显示 (登录按钮/用户名)
@@ -5797,7 +5813,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
             excludeApiSources = currentRecoveryState.triedApiSourcesByPlatform?.[currentPlatform] || [];
         }
 
-        const res = await fetch(`${API_BASE}/url`, {
+        const request = {
             method: 'POST',
             headers,
             body: JSON.stringify({
@@ -5806,7 +5822,13 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
                 enableAutoSwitchApiSource: settings.enableAutoSwitchApiSource !== false,
                 excludeApiSources: Array.isArray(excludeApiSources) ? excludeApiSources : []
             })
-        });
+        };
+        let res = await fetch(`${API_BASE}/url`, request);
+        if (res.status === 401 && await ensureUserAuthToken({ force: true })) {
+            res = await fetch(`${API_BASE}/url`, {
+                ...request, headers: { ...headers, ...getUserAuthHeaders() }
+            });
+        }
 
         if (!res.ok) {
             let errorMsg = `HTTP ${res.status}`;
@@ -5815,7 +5837,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
                 result = await res.json();
                 if (result.error) errorMsg = result.error;
             } catch (e) { }
-            throw { message: errorMsg, attempts: result.attempts };
+            throw { message: errorMsg, status: res.status, attempts: result.attempts };
         }
 
         const result = await res.json();
@@ -6540,6 +6562,27 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
 
     const effectiveResumeTime = typeof savedResumeTime === 'number' ? savedResumeTime : (state.savedResumeTime || 0);
     state.savedResumeTime = effectiveResumeTime;
+
+    // A lost login session affects every track. Repair it before excluding providers.
+    try {
+        if (error?.status === 401 || error?.status === 403) {
+            throw Object.assign(new Error('登录已失效，请重新登录'), { status: 401 });
+        }
+        if (await restorePlaybackSession(!state.authRecoveryAttempted)) {
+            if (state !== currentRecoveryState) return;
+            state.authRecoveryAttempted = true;
+            window._resumeInfo = { time: effectiveResumeTime, song: state.currentSong };
+            playSong(state.currentSong, state.currentIndex, state.currentQuality, false, true);
+            return;
+        }
+    } catch (authError) {
+        if (state !== currentRecoveryState) return;
+        setPlayerStatus('请重新登录');
+        RecoveryToast.error(authError.message || '登录已失效，请重新登录');
+        updatePlayButton(false);
+        return;
+    }
+    if (state !== currentRecoveryState) return;
 
     const currentPlatform = state.currentSong?.source || state.originalSong?.source;
 
