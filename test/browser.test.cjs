@@ -130,3 +130,15 @@ test('remote playlist metadata is escaped as text and safely encoded in click ha
     assert.ok(html.includes('selectUserPlaylist(&quot;'));
     assert.ok(!html.includes('src="" onerror='));
 });
+
+test('media tokens are attached only to same-origin music endpoints', () => {
+    const source = read('public/music/app.js');
+    const fragment = source.slice(source.indexOf('function authorizeMediaUrl('), source.indexOf('async function applyAutoProxy('));
+    const window = { location: { origin: 'https://fixture.invalid', href: 'https://fixture.invalid/music/' } };
+    vm.runInNewContext(fragment, { window, URL, getUserAuthHeaders: () => ({ 'x-user-token': 'token-fixture' }) });
+    const authorize = window.authorizeMediaUrl;
+    assert.equal(new URL(authorize('/api/music/download?inline=1'), window.location.origin).searchParams.get('token'), 'token-fixture');
+    assert.equal(authorize('https://external.invalid/song.mp3'), 'https://external.invalid/song.mp3');
+    assert.equal(authorize('/api/unrelated'), '/api/unrelated');
+    assert.equal(authorize('/api/music/cache/file/song?token=existing'), '/api/music/cache/file/song?token=token-fixture');
+});

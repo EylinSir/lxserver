@@ -7,9 +7,9 @@ Preserve intentional public playback, authenticated personal libraries, explicit
 ## Implementation
 
 - `security.ts` centralizes cookie decoding, source-owner normalization, filesystem containment (including existing symlink ancestors), and public upstream address validation.
-- Download proxy authentication respects public mode. Each outbound request and redirect resolves and validates the upstream; connections use that validated address rather than repeating DNS resolution.
+- Download proxy authentication respects public mode. Each outbound request and redirect resolves and validates the upstream; connections use that validated address rather than repeating DNS resolution. Embedded remote artwork follows the same boundary with a size limit and timeout; cached artwork uses the authenticated local accessor.
 - Source handlers authorize the requested owner before filesystem changes, fetching scripts, or executing scripts. Native VM execution requires administrator approval and no longer occurs as an implicit fallback from safe mode.
-- Account deletion, rename, and password changes invalidate account credentials. Authentication independently rejects sessions for missing users.
+- Account deletion, rename, and password changes invalidate account credentials (including stored API tokens); clients must sign in or issue a new API token afterward. Authentication independently rejects sessions for missing users.
 - Cached media uses a shared file sender with validated ranges, HEAD handling, and stream cleanup. File-manager errors reject targets instead of falling back to the root.
 - Download jobs share a real completion promise only within one destination. Progress keys include the user; resumed queue tasks wait for cancelled runs to unwind.
 - Playlist ordering ignores stale/duplicate IDs; remote playlist metadata is escaped. Cover fetch timeouts remain active until the body is consumed.
@@ -20,8 +20,9 @@ Preserve intentional public playback, authenticated personal libraries, explicit
 
 - [x] Implement reproduced security, streaming, queue, playlist, and service-worker repairs.
 - [x] Add AirPlay control and iOS bridge regression coverage.
-- [x] Run 25 regression tests, TypeScript checking, and production compilation.
-- [ ] Complete final compatibility review and any follow-up regression tests.
+- [x] Run 29 regression tests, TypeScript checking, and production compilation.
+- [x] Complete final compatibility review and follow-up regression tests.
+- [x] Start the compiled application with isolated temporary data and verify its configuration endpoint returns HTTP 200.
 - [ ] Verify AirPlay on physical iPhone/iPad/macOS Safari and receiver hardware.
 
 ## Validation

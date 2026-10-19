@@ -35,7 +35,7 @@ import { getUpdatedListIds, removeUpdatedListId } from './task/networkListTask'
 import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSyncProgress, triggerUserSync, cancelUserSync, getUserSyncStorageLocation, isUserSyncRunning, migrateSyncStorage } from './task/syncDownloadTask'
 import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
-import { parseCookies, resolveContainedPath, resolvePublicUrl } from './security'
+import { parseCookies, resolveContainedPath, resolvePublicUrl, fetchPublicBuffer } from './security'
 import needle from 'needle'
 import { getProxyAgent } from '../modules/utils/proxy.js'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
@@ -227,7 +227,6 @@ const buildSessionCookieHeader = (req: IncomingMessage, sessionId: string, maxAg
   return `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Lax${secureAttr}; Max-Age=${maxAge}`
 }
 
-/** 解析 Cookie 字符串 */
 /** 检查请求是否携带有效的 Player Session Cookie 或有效的用户凭证 */
 const checkPlayerAuth = (req: IncomingMessage): boolean => {
   if (!global.lx.config['player.enableAuth']) return true // 未开启认证，直接放行
@@ -5650,15 +5649,13 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                       if (imageUrl) {
                         try {
                           let imgBuf: Buffer | null = null;
-                          if (imageUrl.startsWith('http')) {
-                            const imgResp = await (global as any).fetch(imageUrl)
-                            if (imgResp.ok) imgBuf = Buffer.from(await imgResp.arrayBuffer())
-                          } else if (imageUrl.startsWith('/api')) {
-                            // 内部 API 请求，使用请求头中的 host
-                            const hostLabel = req.headers.host || '127.0.0.1:2026'
-                            const internalUrl = `http://${hostLabel}${imageUrl}`
-                            const imgResp = await (global as any).fetch(internalUrl)
-                            if (imgResp.ok) imgBuf = Buffer.from(await imgResp.arrayBuffer())
+                          if (/^https?:\/\//i.test(imageUrl)) {
+                            imgBuf = await fetchPublicBuffer(imageUrl)
+                          } else if (imageUrl.startsWith('/api/music/cache/cover?')) {
+                            // Read through the authenticated cache accessor; never trust Host for a loopback fetch.
+                            const coverUrl = new URL(imageUrl, 'http://localhost')
+                            const cover = await fileCache.getCacheCover(coverUrl.searchParams.get('filename') || '', proxyUser || '_open')
+                            if (cover) imgBuf = cover.data
                           }
 
                           if (imgBuf && imgBuf.length > 0) {
@@ -5735,6 +5732,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 }
               })
 
+              proxyReq.setTimeout(30000, () => proxyReq.destroy(new Error('Upstream timeout')))
               proxyReq.end()
 
             } catch (err: any) {
