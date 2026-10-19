@@ -203,7 +203,8 @@
     }
 
     function updateButton() {
-        const connected = !!context?.getCurrentSession();
+        // During SESSION_ENDED the SDK can still return the previous session.
+        const connected = !!output && !!context?.getCurrentSession();
         // Opening the picker starts discovery on browsers that defer it until a user gesture.
         button.hidden = false;
         button.disabled = false;
@@ -256,6 +257,7 @@
         output = null;
         previous.dispose();
         route(false);
+        updateButton();
     }
     function initialize(available) {
         if (!available || context) return;
