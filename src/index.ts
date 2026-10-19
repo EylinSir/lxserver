@@ -16,6 +16,7 @@ if (typeof (global as any).navigator === 'undefined') {
 
 import { initLogger } from '@/utils/log4js'
 import defaultConfig from './defaultConfig'
+import { migrateLegacyConfig } from './configMigration'
 import { ENV_PARAMS, File } from './constants'
 import { checkAndCreateDirSync } from './utils'
 
@@ -239,7 +240,7 @@ const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string
     let value = String(v)
     if (envParamKeys.includes(envKey)) {
       if (envParams[envKey] == null) {
-        envLog.push(`${envKey}: ${value}`)
+        envLog.push(`${envKey}: [configured]`)
         envParams[envKey] = value
       }
     } else if (envKey.startsWith('LX_USER_') && value) {
@@ -249,7 +250,7 @@ const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string
           name,
           password: value,
         })
-        envLog.push(`${envKey}: ${value}`)
+        envLog.push(`${envKey}: [configured]`)
       }
     }
   }
@@ -266,6 +267,7 @@ const margeConfig = (p: string) => {
     console.warn('Read config error: ' + (err.message as string))
     return false
   }
+  config = migrateLegacyConfig(config)
   const newConfig = { ...global.lx.config }
   for (const key of Object.keys(defaultConfig) as Array<keyof LX.Config>) {
     // @ts-expect-error
