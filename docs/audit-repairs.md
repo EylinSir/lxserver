@@ -21,7 +21,7 @@ Preserve intentional public playback, authenticated personal libraries, explicit
 
 - [x] Implement reproduced security, streaming, queue, playlist, and service-worker repairs.
 - [x] Add AirPlay control and iOS bridge regression coverage.
-- [x] Run 32 regression tests, TypeScript checking, and production compilation.
+- [x] Run the complete 50-test playback/Cast/audit suite, TypeScript checking, and production compilation on the latest upstream `dev`.
 - [x] Complete final compatibility review and follow-up regression tests.
 - [x] Start the compiled application with isolated temporary data and verify its configuration endpoint returns HTTP 200.
 - [ ] Verify AirPlay on physical iPhone/iPad/macOS Safari and receiver hardware.

@@ -3,6 +3,37 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { read, quiet } = require('./helpers.cjs');
 
+test('Cast play and pause preserve receiver volume when local crossfade is enabled', async () => {
+    const source = read('public/music/app.js');
+    const fragment = source.slice(source.indexOf('async function togglePlay()'), source.indexOf('function updatePlayButton('));
+    const audio = { isRemote: true, paused: true, volume: 0.63,
+        async play() { this.paused = false; }, pause() { this.paused = true; } };
+    const states = [];
+    const context = { audio, settings: { enableCrossfade: true }, window: {}, currentVolume: 0.9,
+        currentPlaybackErrorHandler: null, playbackRecoveryTriggeredForRequestId: 0,
+        shouldAutoRecoverPlayback: false, updatePlayButton: state => states.push(state),
+        fadeVolume: () => assert.fail('local crossfade must not alter the receiver'), console: quiet };
+    vm.runInNewContext(fragment, context);
+    await context.togglePlay();
+    assert.equal(audio.paused, false); assert.equal(audio.volume, 0.63);
+    await context.togglePlay();
+    assert.equal(audio.paused, true); assert.equal(audio.volume, 0.63);
+    assert.deepEqual(states, [true, false]);
+});
+
+test('deployment pass-through volume never ramps or overwrites receiver volume', async () => {
+    const source = read('public/music/app.js');
+    const fragment = source.slice(source.indexOf('let volumeFadeInterval ='), source.indexOf('// Audio Events'));
+    const audio = { isRemote: false, volume: 0.6 };
+    const context = { audio, clearInterval() {}, setInterval: () => assert.fail('volume must not ramp') };
+    vm.runInNewContext(fragment, context);
+    await context.fadeVolume(0.4, 600);
+    assert.equal(audio.volume, 0.4);
+    audio.isRemote = true; audio.volume = 0.72;
+    await context.fadeVolume(0, 600);
+    assert.equal(audio.volume, 0.72);
+});
+
 test('playlist categories and hot tags render escaped names without shadowing the escaping helper', () => {
     const source = read('public/music/js/songlist_manager.js');
     const start = source.indexOf('    function renderTags()');

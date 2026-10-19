@@ -64,14 +64,19 @@ window.iOSBackgroundAudio = (function () {
     }
 
     function init(audioContext, analyserNode) {
-        if (!isIOS()) return;
+        if (!isIOS() || !audioContext || !analyserNode) return;
         if (isActive && _audioContext === audioContext) {
             if (outputAnalyser !== analyserNode) {
                 try { outputAnalyser.disconnect(streamDestination); } catch (_) { }
             }
             outputAnalyser = analyserNode;
-            routeOutput(); // Reconnect after the effects graph disconnects/rebuilds its analyser.
-            syncAnchorWithContext();
+            try {
+                routeOutput(); // Reconnect after the effects graph disconnects/rebuilds its analyser.
+                syncAnchorWithContext();
+            } catch (error) {
+                dispose();
+                console.warn('[iOSAudio] Reconnect failed; restored native output:', error);
+            }
             return;
         }
         if (isActive) dispose();
