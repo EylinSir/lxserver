@@ -20,5 +20,8 @@ Physical Android, other receiver/codec combinations, independent audible monitor
 
 - [x] Merge the upstream integration with the existing customization branch, preserving the custom stereo VU themes, search response compatibility, quality badges, pass-through volume policy and transient preload retry behavior.
 - [x] Retain lyric-title, composite artist and raster artwork behavior; include the 30 existing metadata regressions in the combined suite.
-- [x] Pass all 80 tests and refresh the combined frontend worker to v42.
-- [ ] Validate the combined release in isolation, deploy and verify served assets, runtime APIs and preserved configuration.
+- [x] Pass all 82 tests, including saved pass-through settings and transient preload retry regressions; refresh the combined frontend worker to v42.
+- [x] Validate and deploy the combined release: 38 isolated and 38 live runtime checks; 179 release file hashes and 84 retained static asset hashes match; five sources initialize successfully.
+- [x] Verify signed-in HTTPS assets, secure cookies and centered desktop/320px controls; configuration bytes, six mounts and 51 unrelated containers remain unchanged.
+
+The existing customization history includes eleven commits from October 12–13, before the October 19 audit, covering VU themes, audio behavior, search compatibility and badges. These are retained from the user's fork. Commit author identities alone do not distinguish manual work from assistant-generated work.
