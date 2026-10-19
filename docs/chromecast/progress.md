@@ -85,3 +85,11 @@ Existing pages that already captured the audio element need a full reload to sta
 - [x] Publish `b3aea76` through atomic file updates with worker v47. Three files updated/260 retained hashes verified; container ID/start/restart count, configuration/environment/mounts and unrelated containers preserved. Compose selects a tested image containing the same files for future recreation; the current process retains its prior base image. Startup-log redaction takes effect on its next start.
 
 QQ search errors were also observed during the reported interval; the investigation does not establish that every provider failed or that the external search service is repaired. Existing tabs load the frontend correction on their next full reload.
+
+## Song-list scrolling profile
+
+- [x] Measure search-list scrolling and isolate animation work with an A/B/A comparison. Closed drawers retained running marquee animations; pausing them reduced style-calculation work by 43–69% across the tested browser states. Total main-thread improvement varied, so these figures are not a guaranteed frame-rate gain.
+- [x] Pause marquee animations only while queue/cache/download drawers are translated closed; preserve their behavior when open. Publish `0521bae` with worker v48 using atomic file updates and retain the current process.
+- [x] Pass all 134 tests, 45 isolated/live runtime checks, ten session/eight effects regressions per image, two updated/261 retained hashes and eleven authenticated HTTPS asset hashes including the stylesheet. Browser checks confirm zero running marquee tracks in the closed queue, normal resumption on open, removed diagnostic overrides and preserved paused position.
+
+The profile used connected macOS Chrome, 20 visible search rows and a 98-track queue; the user reported Windows Chrome search/playlists. Windows hardware/GPU/extensions were not profiled and are not ruled out. NAS load was low at the sampled time. No virtualization or saved page-size setting was changed.
