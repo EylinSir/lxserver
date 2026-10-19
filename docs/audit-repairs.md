@@ -21,7 +21,7 @@ Preserve intentional public playback, authenticated personal libraries, explicit
 
 - [x] Implement reproduced security, streaming, queue, playlist, and service-worker repairs.
 - [x] Add AirPlay control and iOS bridge regression coverage.
-- [x] Run the complete 50-test playback/Cast/audit suite, TypeScript checking, and production compilation on the latest upstream `dev`.
+- [x] Run the complete 76-test playback/Cast/audit suite, TypeScript checking, and production compilation on the latest upstream `dev`.
 - [x] Complete final compatibility review and follow-up regression tests.
 - [x] Start the compiled application with isolated temporary data and verify its configuration endpoint returns HTTP 200.
 - [ ] Verify AirPlay on physical iPhone/iPad/macOS Safari and receiver hardware.
@@ -35,3 +35,8 @@ Tests exercise local HTTP streaming and proxy behavior, owner authorization, fil
 The production-only dependency audit returned zero advisories during this repair. The development tree reported 19 advisories (10 high, 9 moderate); dependency remedies require separate compatibility evaluation and must not be applied through forced major downgrades.
 
 Physical AirPlay delivery, device discovery on a real LAN, receiver codec compatibility, and iOS lock-screen behavior remain manual verification gates. Simulated browser tests establish application state transitions, not hardware success. Enabling local DSP may alter Safari's native routing behavior and also requires device testing.
+
+
+## PR review corrections
+
+Both review batches were checked against the PR head. Twelve distinct findings were corrected across receiver artwork/play intent, lyric speed, startup restore, media-query credentials, wireless settings, source-admin authentication, rename revocation order, shared-download cancellation/options, proxy timeout/error lifetime, playlist escaping and the portable directory-link fixture. Regression coverage includes real local HTTP media/proxy requests and simulated SDK/settings/rename boundaries. Windows execution and physical receiver playback were not repeated for this review pass.

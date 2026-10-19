@@ -1380,14 +1380,13 @@ window.LocalMusicManager = {
                                 <i class="fas fa-music t-text-muted text-xs"></i>
                              </div>`;
             if (item.hasCover) {
-                const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
                 const coverVersion = [
                     item.coverCheckedVersion || 0,
                     Math.round(item.coverCheckedMtime || item.mtime || 0),
                     item.coverCheckedSize || item.size || 0,
                     1
                 ].join('-');
-                const coverUrl = `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}&v=${encodeURIComponent(coverVersion)}`;
+                const coverUrl = `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}&v=${encodeURIComponent(coverVersion)}`;
                 coverHtml = `<img data-src="${this.escapeAttr(coverUrl)}" data-lm-cover-index="${index}" src="/music/assets/logo.svg" loading="lazy" fetchpriority="low" class="lazy-image lm-cover-image is-placeholder w-10 h-10 md:w-12 md:h-12 rounded-lg object-cover shadow-sm flex-shrink-0 border t-border-main mr-2.5 md:mr-4 ml-0.5 md:ml-3">`;
             }
 
@@ -1791,15 +1790,14 @@ window.LocalMusicManager = {
 
         // Transform into songInfo for global player
         const username = this.getCurrentUsername();
-        const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
         // Important: Use existing checkCache via global logic if possible, 
         // or directly supply local URL
         const songInfo = {
             ...item.songInfo,
             // Reconstruct full URL locally
-            url: `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
-            pic: `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
+            url: `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}`,
+            pic: `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}`,
             isLocal: true,
             folder: item.folder,
             _localFilename: item.filename,
@@ -1811,8 +1809,8 @@ window.LocalMusicManager = {
         // We might want to construct a playlist of local tracks.
         const playlist = this.displayData.map(d => ({
             ...d.songInfo,
-            url: `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(d.filename)}?folder=${d.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
-            pic: `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
+            url: `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(d.filename)}?folder=${d.folder}`,
+            pic: `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}`,
             isLocal: true,
             // 附加本地文件定位信息，供 fetchLyric 读取内嵌歌词（未关联歌曲时优先使用）
             _localFilename: d.filename,
@@ -2190,8 +2188,7 @@ window.LocalMusicManager = {
 
     saveFileToDevice(item) {
         const username = this.getCurrentUsername();
-        const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
-        const url = `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
+        const url = `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}`;
         const a = document.createElement('a');
         a.href = url;
         a.download = item.filename;
@@ -3124,7 +3121,6 @@ window.LocalMusicManager = {
             const username = isCustomDir
                 ? ((window.getCurrentUser && window.getCurrentUser()) || localStorage.getItem('lx_user_username') || 'default')
                 : this.getCurrentUsername();
-            const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
             container.innerHTML = pageItems.map(item => {
                 const selected = this.remasterSelectedItems.has(item.filename);
@@ -3142,8 +3138,8 @@ window.LocalMusicManager = {
                 if (item.hasCover || (item.img && typeof item.img === 'string' && /^https?:\/\//i.test(item.img))) {
                     const coverUrl = item.hasCover
                         ? (isCustomDir
-                            ? `/api/music/custom/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}&v=${encodeURIComponent([Math.round(item.mtime || 0), item.size || 0].join('-'))}`
-                            : `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}&v=${encodeURIComponent([item.coverCheckedVersion || 0, Math.round(item.coverCheckedMtime || item.mtime || 0), item.coverCheckedSize || item.size || 0, 1].join('-'))}`)
+                            ? `/api/music/custom/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}&v=${encodeURIComponent([Math.round(item.mtime || 0), item.size || 0].join('-'))}`
+                            : `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}&v=${encodeURIComponent([item.coverCheckedVersion || 0, Math.round(item.coverCheckedMtime || item.mtime || 0), item.coverCheckedSize || item.size || 0, 1].join('-'))}`)
                         : item.img;
                     const fallbackAttr = item.img && item.img !== coverUrl ? `data-fallback-src="${this.escapeAttr(item.img)}"` : '';
                     coverHtml = `<img data-src="${this.escapeAttr(coverUrl)}" ${fallbackAttr} src="/music/assets/logo.svg" loading="lazy" fetchpriority="low" class="lazy-image lm-remaster-cover is-placeholder w-9 h-9 rounded-lg object-cover shadow-xs flex-shrink-0 border t-border-main" onerror="if(this.dataset.fallbackSrc && !this.dataset.fallbackTried){this.dataset.fallbackTried='true';this.src=this.dataset.fallbackSrc;}else{this.src='/music/assets/logo.svg';}">`;

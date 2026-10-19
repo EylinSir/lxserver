@@ -123,22 +123,23 @@
                     metadata.title = song.name || 'LX Music';
                     metadata.artist = song.singer || '';
                     metadata.albumName = window.getSongAlbumName?.(song) || '';
-                    if (song.pic) {
-                        try {
-                            const art = new URL(song.pic, location.href);
+                    try {
+                        const pic = window.getImgUrl?.(song) || song.pic;
+                        if (pic && !/\/music\/assets\/logo\.(svg|png)(?:[?#]|$)/i.test(pic)) {
+                            const art = new URL(pic, location.href);
                             if (art.origin === location.origin && /\/api\/music\/(cache|custom)\/cover$/.test(art.pathname)) {
-                                const cover = await grant(song.pic, 'image/jpeg');
+                                const cover = await grant(pic, 'image/jpeg');
                                 credentials.push(cover.id);
                                 metadata.images = [new chrome.cast.Image(cover.url)];
                             } else if (art.protocol === 'https:' && !art.searchParams.has('token')) {
                                 metadata.images = [new chrome.cast.Image(art.href)];
                             }
-                        } catch { /* Artwork must never prevent audio playback. */ }
-                    }
+                        }
+                    } catch { /* Artwork must never prevent audio playback. */ }
                     if (version !== this.version || output !== this) throw abort();
                     info.metadata = metadata;
                     info.customData = { lxMusicCast: true, song: { id: song.id, name: song.name,
-                        singer: song.singer, source: song.source, songmid: song.songmid, albumName: metadata.albumName } };
+                        singer: song.singer, source: song.source, songmid: song.songmid, albumName: metadata.albumName, img: metadata.images?.[0]?.url } };
                     const request = new chrome.cast.media.LoadRequest(info);
                     request.currentTime = this.position;
                     this.pendingSeek = false;
@@ -156,8 +157,8 @@
                     playback.emit('canplay');
                     this.sync();
                     if (seekAfterLoad !== null) this.currentTime = seekAfterLoad;
-                    // A pause requested while LOAD was in flight must still take effect.
-                    if (this.desiredPaused && !player.isPaused) controller.playOrPause();
+                    // Apply the last transport request made while LOAD was in flight.
+                    if (this.desiredPaused !== !!player.isPaused) controller.playOrPause();
                 } catch (error) {
                     credentials.forEach(revoke);
                     throw error;

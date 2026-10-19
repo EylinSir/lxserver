@@ -53,6 +53,10 @@ window.addEventListener('lx-cast-route', event => {
         currentPlaybackRate = localPlaybackRateBeforeCast;
         localPlaybackRateBeforeCast = null;
     }
+    if (lyricPlayer) {
+        lyricPlayer.setPlaybackRate(currentPlaybackRate);
+        if (!audio.paused) lyricPlayer.play(audio.currentTime * 1000);
+    }
     updatePlaybackRateUI();
 });
 window.addEventListener('lx-cast-track', event => {
@@ -4652,8 +4656,7 @@ function getImgUrl(item) {
             const isCustom = s.isCustomDir || s._isCustom || s.customMusic || s.source === 'custom' || s.folder === 'custom';
             const basePath = isCustom ? '/api/music/custom/cover' : '/api/music/cache/cover';
             const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
-            const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
-            rawUrl = `${basePath}?filename=${encodeURIComponent(fn)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
+            rawUrl = `${basePath}?filename=${encodeURIComponent(fn)}&user=${encodeURIComponent(username)}`;
         }
     }
 
@@ -4668,7 +4671,7 @@ function getImgUrl(item) {
         }
     }
 
-    return rawUrl;
+    return authorizeMediaUrl(rawUrl) || '/music/assets/logo.svg';
 }
 window.getImgUrl = getImgUrl;
 
@@ -5630,10 +5633,11 @@ function getSourceName(source) {
  */
 function authorizeMediaUrl(url) {
     if (!url) return url;
-    const parsed = new URL(url, window.location.href);
+    let parsed;
+    try { parsed = new URL(url, window.location.href); } catch { return ''; }
     if (parsed.origin !== window.location.origin || !parsed.pathname.startsWith('/api/music/')) return url;
-    const token = getUserAuthHeaders()['x-user-token'];
-    if (token) parsed.searchParams.set('token', token);
+    // Native media and downloads use the same-origin HttpOnly session cookie.
+    parsed.searchParams.delete('token');
     return parsed.pathname + parsed.search + parsed.hash;
 }
 window.authorizeMediaUrl = authorizeMediaUrl;
@@ -7830,6 +7834,7 @@ function savePlaybackState() {
 }
 
 async function restorePlaybackState() {
+    if (audio.isRemote) return;
     if (!settings.autoResume) {
         return;
     }
@@ -7882,6 +7887,7 @@ async function restorePlaybackState() {
 
         // 5. 延迟加载播放源（静默模式）但不强制切换 Tab 破坏默认入口设置
         setTimeout(() => {
+            if (audio.isRemote) return;
             if (state.scope === 'network') {
                 renderResults(currentPlaylist);
             } else if (state.scope === 'local_list' || state.scope === 'local_all') {
@@ -9317,11 +9323,9 @@ function renderCacheList() {
         }
 
         const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
-        // <img src> 无法携带自定义请求头，将 token 附到 URL 以通过服务端认证
-        const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null)
-            || localStorage.getItem('lx_user_token') || '';
+        // Native image requests use the player session cookie.
         const coverUrl = item.hasCover
-            ? `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`
+            ? `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}`
             : '/music/assets/logo.svg';
 
         return `

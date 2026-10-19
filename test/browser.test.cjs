@@ -203,23 +203,24 @@ test('remote playlist metadata is escaped as text and safely encoded in click ha
     const window = {};
     vm.runInNewContext(read('public/music/js/songlist_manager.js'), {
         window, document: { getElementById: element, addEventListener() {} }, localStorage: { getItem() { return null; } }, setTimeout() {}, console: quiet,
-        fetch: async () => ({ json: async () => ({ list: [{ id: "a');bad();//", name: '<img src=x onerror=bad()>', img: '" onerror="bad()' }] }) }),
+        fetch: async () => ({ json: async () => ({ list: [{ id: "<img src=x onerror=bad()>');bad();//", name: '<img src=x onerror=bad()>', img: '" onerror="bad()' }] }) }),
     });
     await window.SongListManager.handleQQSubmit();
     const html = element('user-playlist-container').innerHTML;
     assert.ok(!html.includes('<img src=x onerror=bad()>')); assert.ok(html.includes('&lt;img'));
     assert.ok(html.includes('selectUserPlaylist(&quot;'));
     assert.ok(!html.includes('src="" onerror='));
+    assert.ok(html.includes('tid:&lt;img src=x onerror=bad()&gt;'));
 });
 
-test('media tokens are attached only to same-origin music endpoints', () => {
+test('native media URLs use cookies and never include reusable account tokens', () => {
     const source = read('public/music/app.js');
     const fragment = source.slice(source.indexOf('function authorizeMediaUrl('), source.indexOf('async function applyAutoProxy('));
     const window = { location: { origin: 'https://fixture.invalid', href: 'https://fixture.invalid/music/' } };
     vm.runInNewContext(fragment, { window, URL, getUserAuthHeaders: () => ({ 'x-user-token': 'token-fixture' }) });
     const authorize = window.authorizeMediaUrl;
-    assert.equal(new URL(authorize('/api/music/download?inline=1'), window.location.origin).searchParams.get('token'), 'token-fixture');
+    assert.equal(new URL(authorize('/api/music/download?inline=1'), window.location.origin).searchParams.get('token'), null);
     assert.equal(authorize('https://external.invalid/song.mp3'), 'https://external.invalid/song.mp3');
     assert.equal(authorize('/api/unrelated'), '/api/unrelated');
-    assert.equal(authorize('/api/music/cache/file/song?token=existing'), '/api/music/cache/file/song?token=token-fixture');
+    assert.equal(authorize('/api/music/cache/file/song?token=existing'), '/api/music/cache/file/song');
 });

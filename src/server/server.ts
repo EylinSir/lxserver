@@ -438,6 +438,16 @@ const revokeUserSessions = (username: string) => {
   persistentTokenSaveQueue.delete(username)
 }
 
+// Cookie fallback is restricted to read-only native media requests, not mutation APIs.
+const verifyMediaUserAuth = (req: IncomingMessage): string | null => {
+  const verified = verifyUserAuth(req)
+  if (verified || req.headers['x-user-token']) return verified
+  if (req.method !== 'GET' && req.method !== 'HEAD') return null
+  const session = playerSessions.get(parseCookies(req.headers.cookie)[SESSION_COOKIE_NAME])
+  return session?.user && Date.now() - session.createdAt <= SESSION_TTL &&
+    global.lx.config.users.some(u => u.name === session.user) ? session.user : null
+}
+
 const getCacheRequestUsername = (req: IncomingMessage): string | null => {
   const verified = verifyUserAuth(req)
   if (verified) return verified
@@ -1627,6 +1637,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 }
 
                 // 2. 释放内存中的用户空间 (清除缓存) 并锁定，防止重命名期间被重新初始化
+                revokeUserSessions(name)
                 renameUserSpace(name)
 
                 // 3. 稍作延迟等待 Socket 释放和可能的异步操作完成 (Windows 友好)
@@ -1637,7 +1648,6 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                     migrateUserData(name, newName)
 
                     // 5. 更新内存中的用户信息 (全局配置)
-                    revokeUserSessions(name)
                     user.name = newName
 
                     handleFinalUpdate()
@@ -4327,7 +4337,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (reqUsername && !req.headers['x-user-name']) {
               (req.headers as any)['x-user-name'] = reqUsername
             }
-            const verified = verifyUserAuth(req)
+            const verified = verifyMediaUserAuth(req)
             if (!verified) {
               res.writeHead(401)
               res.end('Unauthorized')
@@ -4549,12 +4559,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         let username = '_open'
 
         if (!isPublic) {
-          // <img src> 无法携带自定义请求头，允许从 URL ?token= 参数读取 Token 作为补偿
+          // Legacy API clients may still send a query token; browsers use session cookies.
           const urlToken = urlObj.searchParams.get('token')
           if (urlToken && !req.headers['x-user-token']) {
             (req.headers as any)['x-user-token'] = urlToken
           }
-          const verified = verifyUserAuth(req)
+          const verified = verifyMediaUserAuth(req)
           if (!verified) {
             res.writeHead(401)
             res.end('Unauthorized')
@@ -4572,7 +4582,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (cover && cover.data) {
           res.writeHead(200, {
             'Content-Type': cover.mime || 'image/jpeg',
-            'Cache-Control': 'public, max-age=86400'
+            'Cache-Control': 'private, max-age=86400'
           })
           res.end(cover.data)
         } else {
@@ -4727,7 +4737,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           if (reqUsername && !req.headers['x-user-name']) {
             (req.headers as any)['x-user-name'] = reqUsername
           }
-          const verified = verifyUserAuth(req)
+          const verified = verifyMediaUserAuth(req)
           if (!verified) {
             res.writeHead(401)
             res.end('Unauthorized')
@@ -4748,7 +4758,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (reqUsername && !req.headers['x-user-name']) {
           (req.headers as any)['x-user-name'] = reqUsername
         }
-        const verified = verifyUserAuth(req)
+        const verified = verifyMediaUserAuth(req)
         if (!verified) {
           res.writeHead(401)
           res.end('Unauthorized')
@@ -4764,7 +4774,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (cover && cover.data) {
           res.writeHead(200, {
             'Content-Type': cover.mime || 'image/jpeg',
-            'Cache-Control': 'public, max-age=86400',
+            'Cache-Control': 'private, max-age=86400',
           })
           res.end(cover.data)
         } else {
@@ -5568,7 +5578,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
               const lib = parsedUrl.protocol === 'https:' ? https : http
 
+              const failProxy = (err: Error) => {
+                if (res.destroyed || res.writableEnded) return
+                if (res.headersSent) res.destroy(err)
+                else { res.writeHead(502); res.end('Request Error') }
+              }
               const proxyReq = lib.request(targetUrl, options, (proxyRes: any) => {
+                // The timeout protects connection/headers, not paused or backpressured audio.
+                proxyReq.setTimeout(0)
+                proxyRes.once('error', failProxy)
+                proxyRes.once('aborted', () => failProxy(new Error('Upstream response aborted')))
                 // 处理重定向
                 if ([301, 302, 303, 307, 308].includes(proxyRes.statusCode)) {
                   const location = proxyRes.headers.location
@@ -5740,10 +5759,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
               proxyReq.on('error', (err: any) => {
                 console.error('[下载代理] 请求异常:', err)
-                if (!res.headersSent) {
-                  res.writeHead(502)
-                  res.end('Request Error')
-                }
+                failProxy(err)
               })
 
               // 如果客户端（浏览器）中止了请求（例如：用户拖拽进度条、切换歌曲等），应该立刻销毁上游的下载请求，防止持续占用服务器下行带宽

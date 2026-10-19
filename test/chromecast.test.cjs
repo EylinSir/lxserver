@@ -175,3 +175,39 @@ test('session resumption adopts receiver state without issuing another LOAD', as
     assert.equal(f.loads.length, 0); assert.equal(f.playback.currentTime, 40);
     assert.equal(f.playback.isRemote, true);
 });
+
+
+test('play requested while a paused Cast LOAD is pending starts the receiver', async () => {
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    const f = fixture({ loadGate: () => gate }); f.native.paused = true;
+    f.start(); await flush(); assert.equal(f.loads[0].autoplay, false);
+    const playing = f.playback.play();
+    release(); await playing; await flush();
+    assert.equal(f.player.isPaused, false); assert.equal(f.playback.paused, false);
+});
+
+test('Cast resolves standard artwork fields, scopes local covers and retains artwork for resumption', async () => {
+    for (const pic of ['https://artwork.test/song.jpg', '/api/music/cache/cover?filename=song.flac&user=alice&token=account-secret']) {
+        const f = fixture();
+        f.window.getImgUrl = () => pic;
+        f.start(); await flush();
+        const info = f.loads[0].media;
+        assert.ok(info.metadata.images?.[0]?.url);
+        assert.equal(info.customData.song.img, info.metadata.images[0].url);
+        assert.ok(!JSON.stringify(info).includes('account-secret'));
+        assert.equal(f.requests.filter(r => r.method === 'POST').length, pic.startsWith('/') ? 2 : 1);
+    }
+});
+
+test('default logo artwork is omitted from Cast metadata', async () => {
+    const f = fixture(); f.window.getImgUrl = () => '/music/assets/logo.svg';
+    f.start(); await flush(); assert.equal(f.loads[0].media.metadata.images, undefined);
+});
+
+
+test('an optional artwork resolver failure never prevents receiver audio loading', async () => {
+    const f = fixture(); f.window.getImgUrl = () => { throw Error('malformed artwork'); };
+    f.start(); await flush();
+    assert.equal(f.loads.length, 1); assert.equal(f.playback.isRemote, true);
+    assert.equal(f.loads[0].media.metadata.images, undefined); assert.equal(f.errors.length, 0);
+});

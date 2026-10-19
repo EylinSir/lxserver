@@ -132,7 +132,7 @@ export const setUserCacheLocation = (username: string | undefined, location: unk
 export const cacheProgress: Map<string, { progress: number; status: string; total?: number; received?: number; speed?: number; updatedAt?: number; errorMsg?: string }> = new Map()
 
 export const getProgressKey = (songKey: string, username?: string) => JSON.stringify([username && username !== 'default' ? username : '_open', songKey])
-const downloadJobs = new Map<string, Promise<void>>()
+const downloadJobs = new Map<string, { promise: Promise<void>; signature: string }>()
 const expireProgress = (key: string) => {
     const value = cacheProgress.get(key)
     setTimeout(() => { if (cacheProgress.get(key) === value) cacheProgress.delete(key) }, 30000).unref()
@@ -2172,23 +2172,43 @@ export interface DownloadProvenance {
 }
 
 export const downloadAndCache = (...args: Parameters<typeof downloadAndCacheImpl>): Promise<void> => {
-    const [song, , quality, username, signal, onlyDownload, , , provenance] = args
+    const [song, url, quality, username, signal, onlyDownload, cacheLyric = true, embedLyric = true, provenance = {}] = args
     if (signal?.aborted) return Promise.reject(new Error('Aborted'))
-    const dir = provenance?.customTargetDir || ensureDir(username, onlyDownload)
+    const dir = provenance.customTargetDir || ensureDir(username, onlyDownload)
     const key = JSON.stringify([path.resolve(dir), normalizeSongId(song), quality || 'unknown'])
+    const signature = JSON.stringify([url, username, !!onlyDownload, cacheLyric, embedLyric,
+        provenance.requestedSource, provenance.downloadSource, provenance.sourceName])
     const existing = downloadJobs.get(key)
-    if (existing) return existing
+    if (existing) {
+        // A joiner's cancellation ends only its wait. The creator still owns the actual transfer.
+        const joined = signal ? new Promise<void>((resolve, reject) => {
+            const onAbort = () => { cleanup(); reject(new Error('Aborted')) }
+            const cleanup = () => signal.removeEventListener('abort', onAbort)
+            signal.addEventListener('abort', onAbort, { once: true })
+            existing.promise.then(() => { cleanup(); resolve() }, err => { cleanup(); reject(err) })
+            if (signal.aborted) onAbort()
+        }) : existing.promise
+        return joined.then(() => {
+            // Serialize differing requirements through the normal cache/lyric/provenance path.
+            if (existing.signature !== signature) return downloadAndCache(...args)
+        }, err => {
+            // The creator may cancel, but an unaborted caller must not become paused as well.
+            if (err?.message === 'Aborted' && !signal?.aborted) return downloadAndCache(...args)
+            throw err
+        })
+    }
     const job = downloadAndCacheImpl(...args).finally(() => {
-        if (downloadJobs.get(key) === job) downloadJobs.delete(key)
+        if (downloadJobs.get(key)?.promise === job) downloadJobs.delete(key)
     })
-    downloadJobs.set(key, job)
+    downloadJobs.set(key, { promise: job, signature })
     return job
 }
 
 const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string, username?: string, signal?: AbortSignal, isOnlyDownload?: boolean, shouldCacheLyric: boolean = true, shouldEmbedLyric: boolean = true, provenance: DownloadProvenance = {}) => {
     const dir = provenance.customTargetDir || ensureDir(username, isOnlyDownload)
     const baseName = getFileName(songInfo, quality, isOnlyDownload, username)
-    const tempPath = path.join(dir, baseName + '.tmp')
+    // An aborted transfer may still have delayed cleanup; retries need a different temp file.
+    const tempPath = path.join(dir, baseName + '.' + crypto.randomBytes(8).toString('hex') + '.tmp')
     const songKey = getProgressKey(normalizeSongId(songInfo) + '_' + (quality || 'unknown'), username)
     const requestedSource = provenance.requestedSource || songInfo.requestedSource || songInfo.source || 'unknown'
     const downloadSource = detectDownloadSource(url, provenance.downloadSource || songInfo.downloadSource || songInfo.source)

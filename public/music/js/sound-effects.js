@@ -80,7 +80,7 @@ window.soundEffects = (function () {
     }
 
     function init(force = false) {
-        if (document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless) return;
+        if (document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || window.LXPlayback?.isRemote) return;
         if (audioContext && isGraphBuilt) return;
         loadSettings();
         if (!force && (isMobileDevice() || !hasActiveEffects())) {
@@ -555,6 +555,12 @@ window.soundEffects = (function () {
         }
     }
 
+    function ensureLocalGraph() {
+        if (document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || window.LXPlayback?.isRemote) return false;
+        if (!audioContext || !isGraphBuilt) init(true);
+        return !!audioContext && isGraphBuilt;
+    }
+
     const manager = {
         init,
         toggle: function () {
@@ -596,28 +602,25 @@ window.soundEffects = (function () {
             }, 300);
         },
         setEQ: function (index, val) {
-            if (!audioContext || !isGraphBuilt) init(true);
-            if (!audioContext || !isGraphBuilt) return;
+            if (!isGraphBuilt) loadSettings();
             val = parseInt(val);
             settings.eq[index] = val;
-            if (eqFilters[index]) eqFilters[index].gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
-            activePresetName = ''; // Reset when manually adjusted
+            activePresetName = '';
             saveSettings();
+            if (ensureLocalGraph() && eqFilters[index]) eqFilters[index].gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
             renderUI();
         },
         applyPreset: function (name) {
-            if (!audioContext || !isGraphBuilt) init(true);
-            if (!audioContext || !isGraphBuilt) return;
+            if (!isGraphBuilt) loadSettings();
             const allPresets = [...defaultPresets, ...customPresets];
             const p = allPresets.find(p => p.name === name);
             if (p) {
                 settings.eq = [...p.values];
-                activePresetName = name; // Set active preset by name
-                settings.eq.forEach((v, i) => {
-                    // Smoothly transition EQ gains
+                activePresetName = name;
+                saveSettings();
+                if (ensureLocalGraph()) settings.eq.forEach((v, i) => {
                     if (eqFilters[i]) eqFilters[i].gain.setTargetAtTime(v, audioContext.currentTime, 0.1);
                 });
-                saveSettings();
                 renderUI();
                 if (window.showSuccess) window.showSuccess(`应用预设: ${name}`);
             }
@@ -632,50 +635,30 @@ window.soundEffects = (function () {
             renderUI();
         },
         setReverb: function (id) {
-            if (!audioContext || !isGraphBuilt) init(true);
-            if (!audioContext || !isGraphBuilt) return;
+            if (!isGraphBuilt) loadSettings();
             settings.reverb.id = id;
             const rev = reverbOptions.find(r => r.id === id);
             if (rev) {
                 settings.reverb.mainGain = rev.main;
                 settings.reverb.sendGain = rev.send;
-
-                // Animate the DRY/WET sliders visually
                 animateSlider('reverb-main-gain', rev.main * 100);
                 animateSlider('reverb-send-gain', rev.send * 100);
             }
-            updateReverb();
             saveSettings();
-            renderUI(); // Update radio selection state
+            if (ensureLocalGraph()) updateReverb();
+            renderUI();
         },
         setPitch: function (val) {
+            if (!isGraphBuilt) loadSettings();
             val = parseFloat(val);
-            if (!audioContext || !isGraphBuilt) {
-                if (val === 1.0 && !hasActiveEffects()) {
-                    settings.pitch = 1.0;
-                    saveSettings();
-                    const label = document.getElementById('pitch-val');
-                    if (label) label.innerText = '1.00x';
-                    const slider = document.getElementById('pitch-slider');
-                    if (slider) slider.value = 1.0;
-                    return;
-                }
-                init(true);
-                if (!audioContext || !isGraphBuilt) return;
-            }
             const oldPitch = settings.pitch;
             settings.pitch = val;
-
-            if (settings.pitch !== 1.0 && oldPitch === 1.0) {
-                connectPitchShifter();
-            } else if (settings.pitch === 1.0 && oldPitch !== 1.0) {
-                disconnectPitchShifter();
-            }
-
-            applyPitch();
             saveSettings();
-
-            // Immediate UI update for smooth dragging
+            if ((isGraphBuilt || hasActiveEffects()) && ensureLocalGraph()) {
+                if (val !== 1.0 && oldPitch === 1.0) connectPitchShifter();
+                else if (val === 1.0 && oldPitch !== 1.0) disconnectPitchShifter();
+                applyPitch();
+            }
             const label = document.getElementById('pitch-val');
             if (label) label.innerText = settings.pitch.toFixed(2) + 'x';
             const slider = document.getElementById('pitch-slider');
@@ -694,12 +677,11 @@ window.soundEffects = (function () {
             if (slider) slider.value = 1.0;
         },
         setPanner: function (key, val) {
-            if (!audioContext || !isGraphBuilt) init(true);
-            if (!audioContext || !isGraphBuilt) return;
+            if (!isGraphBuilt) loadSettings();
             if (key === 'enable') settings.panner.enable = val;
             else settings.panner[key] = parseInt(val);
-            updatePanner();
             saveSettings();
+            if (ensureLocalGraph()) updatePanner();
             renderUI();
         },
         isGraphBuilt: () => isGraphBuilt,
@@ -707,13 +689,12 @@ window.soundEffects = (function () {
         getSourceNode: () => mediaSource || window._sharedAudioSourceNode || null,
         getAnalyser: () => analyser || window._sharedAudioAnalyser || null,
         setReverbGain: function (type, val) {
-            if (!audioContext || !isGraphBuilt) init(true);
-            if (!audioContext || !isGraphBuilt) return;
+            if (!isGraphBuilt) loadSettings();
             if (type === 'main') settings.reverb.mainGain = val;
             else settings.reverb.sendGain = val;
             saveSettings();
 
-            if (window._soundEffectsGains && audioContext) {
+            if (ensureLocalGraph() && window._soundEffectsGains) {
                 if (type === 'main') window._soundEffectsGains.dry.gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
                 else window._soundEffectsGains.wet.gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
             }
