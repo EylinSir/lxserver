@@ -76,7 +76,7 @@ const setBoolConfig = <K extends keyof LX.Config>(key: K, val?: string) => {
         }
         return false
       }),
-  ].map(([e, v]) => `${e}: ${v as string}`)
+  ].map(([e, v]) => `${e}: [configured]`)
   if (envLog.length) console.log(`Load env: \n  ${envLog.join('\n  ')}`)
 }
 

@@ -4003,6 +4003,10 @@
                 <i class="fas fa-download text-sm"></i>
             </button>
             <!-- Sound Effects Button -->
+            <button id="btn-airplay" type="button" hidden disabled aria-label="AirPlay" aria-pressed="false"
+                title="AirPlay" class="p-2 rounded-lg t-text-muted hover:text-emerald-500">
+                <i class="fas fa-tv" aria-hidden="true"></i>
+            </button>
             <button id="btn-sound-effects"
                 class="text-gray-500 hover:text-emerald-600 text-sm font-bold border border-gray-300 rounded px-2 py-0.5 transition-colors"
                 onclick="window.soundEffects && window.soundEffects.toggle()" title="均衡器 & 音效">
@@ -5926,6 +5930,7 @@
     <script src="js/lyric-card.js"></script>
     <script src="js/ios-background-audio.js"></script>
     <script src="js/sound-effects.js"></script>
+    <script src="js/airplay.js"></script>
     <script src="js/download_manager.js"></script>
     <script src="js/local_music.js"></script>
     <script src="js/customDir.js"></script>

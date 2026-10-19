@@ -688,6 +688,13 @@ const musicVisualizer = (function () {
             return;
         }
 
+        // Preserve native Safari/AirPlay playback unless the user explicitly enables DSP.
+        if (audio.webkitCurrentPlaybackTargetIsWireless ||
+            (!hasEffectsAnalyser && (isMobileDevice() || typeof audio.webkitShowPlaybackTargetPicker === 'function'))) {
+            triggerStandaloneLoop();
+            return;
+        }
+
         if (!window.Wave) return;
 
         try {

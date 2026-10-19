@@ -1,3 +1,5 @@
+import { resolveContainedPath } from './security'
+import { serveFile } from './serveFile'
 
 
 import fs from 'fs'
@@ -128,6 +130,14 @@ export const setUserCacheLocation = (username: string | undefined, location: unk
 // Helper to get actual directory path
 // [Unified Enhancement] Cache Progress Tracker
 export const cacheProgress: Map<string, { progress: number; status: string; total?: number; received?: number; speed?: number; updatedAt?: number; errorMsg?: string }> = new Map()
+
+export const getProgressKey = (songKey: string, username?: string) => JSON.stringify([username && username !== 'default' ? username : '_open', songKey])
+const downloadJobs = new Map<string, Promise<void>>()
+const expireProgress = (key: string) => {
+    const value = cacheProgress.get(key)
+    setTimeout(() => { if (cacheProgress.get(key) === value) cacheProgress.delete(key) }, 30000).unref()
+}
+
 
 // [New] Active Cache Tasks Tracker: username -> [ { songKey, controller } ]
 export const activeTasks: Map<string, Array<{ songKey: string, controller: AbortController }>> = new Map()
@@ -2161,11 +2171,25 @@ export interface DownloadProvenance {
     customTargetDir?: string
 }
 
-export const downloadAndCache = async (songInfo: any, url: string, quality?: string, username?: string, signal?: AbortSignal, isOnlyDownload?: boolean, shouldCacheLyric: boolean = true, shouldEmbedLyric: boolean = true, provenance: DownloadProvenance = {}) => {
+export const downloadAndCache = (...args: Parameters<typeof downloadAndCacheImpl>): Promise<void> => {
+    const [song, , quality, username, signal, onlyDownload, , , provenance] = args
+    if (signal?.aborted) return Promise.reject(new Error('Aborted'))
+    const dir = provenance?.customTargetDir || ensureDir(username, onlyDownload)
+    const key = JSON.stringify([path.resolve(dir), normalizeSongId(song), quality || 'unknown'])
+    const existing = downloadJobs.get(key)
+    if (existing) return existing
+    const job = downloadAndCacheImpl(...args).finally(() => {
+        if (downloadJobs.get(key) === job) downloadJobs.delete(key)
+    })
+    downloadJobs.set(key, job)
+    return job
+}
+
+const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string, username?: string, signal?: AbortSignal, isOnlyDownload?: boolean, shouldCacheLyric: boolean = true, shouldEmbedLyric: boolean = true, provenance: DownloadProvenance = {}) => {
     const dir = provenance.customTargetDir || ensureDir(username, isOnlyDownload)
     const baseName = getFileName(songInfo, quality, isOnlyDownload, username)
     const tempPath = path.join(dir, baseName + '.tmp')
-    const songKey = normalizeSongId(songInfo) + '_' + (quality || 'unknown')
+    const songKey = getProgressKey(normalizeSongId(songInfo) + '_' + (quality || 'unknown'), username)
     const requestedSource = provenance.requestedSource || songInfo.requestedSource || songInfo.source || 'unknown'
     const downloadSource = detectDownloadSource(url, provenance.downloadSource || songInfo.downloadSource || songInfo.source)
     const sourceName = provenance.sourceName || songInfo.sourceName
@@ -2179,7 +2203,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
             console.log(`[文件缓存] 歌曲已存在于 ${targetFolder}，跳过下载: ${result.filename}`)
             // 通知前端轮询：目标目录文件已存在，视为立即完成
             cacheProgress.set(songKey, { progress: 100, status: 'exists' })
-            setTimeout(() => cacheProgress.delete(songKey), 30000)
+            expireProgress(songKey)
             return Promise.resolve()
         }
 
@@ -2271,28 +2295,16 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
 
             console.log(`[文件缓存] 已复制缓存歌曲至下载目录: ${path.basename(finalPath)}`)
             cacheProgress.set(songKey, { progress: 100, status: 'finished', total: stat.size, received: stat.size })
-            setTimeout(() => cacheProgress.delete(songKey), 30000)
+            expireProgress(songKey)
             return Promise.resolve()
         }
 
         console.log(`[文件缓存] 歌曲已存在于 ${result.folder}，跳过下载: ${result.filename}`)
         cacheProgress.set(songKey, { progress: 100, status: 'exists' })
-        setTimeout(() => cacheProgress.delete(songKey), 30000)
+        expireProgress(songKey)
         return Promise.resolve()
     }
 
-    // [去重] 同一 songKey 正在下载/写标签时直接跳过，避免并发重复下载
-    // (如 Subsonic 客户端反复请求 stream、或音流并行触发原生缓存)
-    const inFlight = cacheProgress.get(songKey)
-    if (inFlight && (inFlight.status === 'downloading' || inFlight.status === 'tagging')) {
-        const age = Date.now() - (inFlight.updatedAt || 0)
-        // 超过 10 分钟仍无进展视为卡死，允许本次重新下载（避免永久阻塞该歌曲，
-        // 尤其 fire-and-forget 的 Subsonic 缓存触发没有 abort 信号）
-        if (age < 10 * 60 * 1000) {
-            console.log(`[文件缓存] 任务已在下载队列中 (${songKey})，跳过重复请求`)
-            return Promise.resolve()
-        }
-    }
     if (signal?.aborted) return
     // 立即同步占坑标记下载中，关闭“拿到 200 响应前”的并发竞态窗口；
     // 后续到达的相同 songKey 请求会被上面的守卫跳过，不再重复下载。
@@ -2575,7 +2587,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                     alignOrphanLyric(username, id, actualQuality, folderType)
 
                     cacheProgress.set(songKey, { progress: 100, status: 'finished', total: total || received, received, speed: 0, updatedAt: Date.now() })
-                    setTimeout(() => cacheProgress.delete(songKey), 30000)
+                    expireProgress(songKey)
                     settle(() => { resolve(); void checkAndCleanupCache(username) })
                 })
             })
@@ -2888,44 +2900,22 @@ export const setIndexEmbedLyric = (
 }
 
 export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerResponse, filename: string, username?: string, folder?: CacheFolder) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
-    const userLoc = getUserCacheLocation(normalizedUsername)
-    const locations = [
-        userLoc,
-        userLoc === CACHE_ROOTS.DATA ? CACHE_ROOTS.ROOT : CACHE_ROOTS.DATA
-    ]
-    const roots: CacheFolder[] = folder ? [folder] : ['cache', 'music']
-    let filePath = ''
-    for (const loc of locations) {
-        for (const folder of roots) {
-            const dir = getCacheDir(normalizedUsername, folder === 'music', loc)
-            const checkPath = path.join(dir, filename) // [Fix] Allow subfolders
-            if (fs.existsSync(checkPath)) { filePath = checkPath; break }
+    const owner = username && username !== 'default' ? username : '_open'
+    const location = getUserCacheLocation(owner)
+    for (const loc of [location, location === CACHE_ROOTS.DATA ? CACHE_ROOTS.ROOT : CACHE_ROOTS.DATA]) {
+        for (const target of folder ? [folder] : ['cache', 'music'] as CacheFolder[]) {
+            const dir = getCacheDir(owner, target === 'music', loc)
+            let filenamePath: string
+            try { filenamePath = resolveContainedPath(dir, filename) } catch {
+                res.writeHead(403); res.end('Forbidden'); return
+            }
+            if (!fs.existsSync(filenamePath)) continue
+            const mime: Record<string, string> = { '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.wav': 'audio/wav' }
+            serveFile(req, res, filenamePath, mime[path.extname(filenamePath).toLowerCase()] || 'application/octet-stream')
+            return
         }
-        if (filePath) break
     }
-    if (!filePath) { res.writeHead(404); res.end('Not Found'); return }
-    const stat = fs.statSync(filePath)
-    const ext = path.extname(filePath).toLowerCase()
-    const mimeTypes: Record<string, string> = {
-        '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.wav': 'audio/wav'
-    }
-    const contentType = mimeTypes[ext] || 'application/octet-stream'
-    const range = req.headers.range
-    if (range) {
-        const parts = range.replace(/bytes=/, "").split("-")
-        const start = parseInt(parts[0], 10)
-        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
-        const chunksize = (end - start) + 1
-        res.writeHead(206, {
-            'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-            'Accept-Ranges': 'bytes', 'Content-Length': chunksize, 'Content-Type': contentType,
-        })
-        fs.createReadStream(filePath, { start, end }).pipe(res)
-    } else {
-        res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': contentType, 'Accept-Ranges': 'bytes' })
-        fs.createReadStream(filePath).pipe(res)
-    }
+    res.writeHead(404); res.end('Not Found')
 }
 
 export const getCacheStats = (username?: string) => {

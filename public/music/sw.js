@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lx-music-web-v36';
+const CACHE_NAME = 'lx-music-web-v37';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -28,6 +28,7 @@ const ASSETS_TO_CACHE = [
     './js/tailwind_setup.js',
     './js/log_viewer.js',
     './js/ios-background-audio.js',
+    './js/airplay.js',
     // 第三方库
     './assets/tailwindcss.js',
     './js/crypto-js.min.js',
@@ -59,7 +60,7 @@ self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
     // 1. 过滤非 http(s) 协议 (如 chrome-extension://)，避免 cache.put 报错
-    if (!url.protocol.startsWith('http')) return;
+    if (!['http:', 'https:'].includes(url.protocol) || url.origin !== self.location.origin) return;
 
     // 2. 忽略所有音频请求、下载请求、API 请求以及动态配置接口，让浏览器直接处理
     // 拦截下载会导致大文件占用 Cache 且单个失败可能引起 SW state 不良
@@ -91,7 +92,7 @@ self.addEventListener('fetch', (event) => {
             })
             .catch(() => {
                 // 网络不可用时，尝试从缓存获取
-                return caches.match(event.request);
+                return caches.open(CACHE_NAME).then(cache => cache.match(event.request)).then(response => response || new Response('Offline', { status: 503 }));
             })
     );
 });
@@ -103,7 +104,7 @@ self.addEventListener('activate', (event) => {
         caches.keys().then((cacheNames) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
-                    if (!KNOWN_CACHES.includes(cacheName)) {
+                    if (cacheName.startsWith('lx-music-web-') && !KNOWN_CACHES.includes(cacheName)) {
                         console.log('[SW] Deleting old cache:', cacheName);
                         return caches.delete(cacheName);
                     }

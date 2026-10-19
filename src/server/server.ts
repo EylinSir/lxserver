@@ -35,6 +35,7 @@ import { getUpdatedListIds, removeUpdatedListId } from './task/networkListTask'
 import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSyncProgress, triggerUserSync, cancelUserSync, getUserSyncStorageLocation, isUserSyncRunning, migrateSyncStorage } from './task/syncDownloadTask'
 import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
+import { parseCookies, resolveContainedPath, resolvePublicUrl } from './security'
 import needle from 'needle'
 import { getProxyAgent } from '../modules/utils/proxy.js'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
@@ -210,16 +211,6 @@ async function fetchArtistPicShared(source: string, id: string | number): Promis
 const generateSessionId = () => crypto.randomBytes(32).toString('hex')
 
 /** 解析 Cookie 字符串 */
-const parseCookies = (cookieHeader: string | undefined): Record<string, string> => {
-  if (!cookieHeader) return {}
-  return Object.fromEntries(
-    cookieHeader.split(';').map(c => {
-      const [k, ...v] = c.trim().split('=')
-      return [k.trim(), decodeURIComponent(v.join('='))]
-    })
-  )
-}
-
 /** 检查请求是否携带有效的 Player Session Cookie 或有效的用户凭证 */
 const checkPlayerAuth = (req: IncomingMessage): boolean => {
   if (!global.lx.config['player.enableAuth']) return true // 未开启认证，直接放行
@@ -227,7 +218,7 @@ const checkPlayerAuth = (req: IncomingMessage): boolean => {
   const sessionId = cookies[SESSION_COOKIE_NAME]
   if (sessionId) {
     const session = playerSessions.get(sessionId)
-    if (session && Date.now() - session.createdAt <= SESSION_TTL) {
+    if (session && (!session.user || global.lx.config.users.some(u => u.name === session.user)) && Date.now() - session.createdAt <= SESSION_TTL) {
       return true
     }
     if (session) playerSessions.delete(sessionId)
@@ -367,13 +358,13 @@ export const verifyUserAuth = (req: IncomingMessage): string | null => {
   if (token) {
     // 1. Session Token 验证
     const session = userSessions.get(token)
-    if (session && Date.now() - session.createdAt <= USER_SESSION_TTL) {
+    if (session && global.lx.config.users.some(u => u.name === session.username) && Date.now() - session.createdAt <= USER_SESSION_TTL) {
       return session.username
     }
 
     // 2. 持久化 API Token 验证（全程走内存，不读磁盘）
     const persistentUsername = persistentTokens.get(token)
-    if (persistentUsername) {
+    if (persistentUsername && global.lx.config.users.some(u => u.name === persistentUsername)) {
       const meta = persistentTokenMeta.get(token)
       if (meta) {
         // 检查是否被禁用
@@ -390,7 +381,7 @@ export const verifyUserAuth = (req: IncomingMessage): string | null => {
           // 记录 Token 日志
           const ip = getIP(req)
           const masked = `${meta.token.slice(0, 6)}...${meta.token.slice(-4)}`
-          tokenLog.info(`API Token [${meta.name}] (${masked}) used by ${persistentUsername} from ${ip} to access ${req.url}`)
+          tokenLog.info(`API Token [${meta.name}] (${masked}) used by ${persistentUsername} from ${ip} to access ${new URL(req.url || '/', 'http://localhost').pathname}`)
 
           return persistentUsername
         } else {
@@ -417,7 +408,22 @@ export const verifyUserAuth = (req: IncomingMessage): string | null => {
   return null
 }
 
+const revokeUserSessions = (username: string) => {
+  for (const [token, session] of userSessions) if (session.username === username) userSessions.delete(token)
+  for (const [token, session] of playerSessions) if (session.user === username) playerSessions.delete(token)
+  for (const [token, owner] of persistentTokens) {
+    if (owner === username) { persistentTokens.delete(token); persistentTokenMeta.delete(token) }
+  }
+  const stored = getUserTokenConfig(username)
+  if (stored.enabled || stored.tokens.length) saveUserTokenConfig(username, { enabled: false, tokens: [] })
+  const timer = persistentTokenSaveQueue.get(username)
+  if (timer) clearTimeout(timer)
+  persistentTokenSaveQueue.delete(username)
+}
+
 const getCacheRequestUsername = (req: IncomingMessage): string | null => {
+  const verified = verifyUserAuth(req)
+  if (verified) return verified
   const requested = (req.headers['x-user-name'] as string) || ''
   if (!requested || requested === 'default' || requested === 'open' || requested === '_open') return '_open'
   return verifyUserAuth(req)
@@ -1086,6 +1092,7 @@ const serveStatic = (req: IncomingMessage, res: http.ServerResponse, filePath: s
 
 const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promise((resolve, reject) => {
   const httpServer = http.createServer(async (req, res) => {
+    try {
     // CORS 跨域处理
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
@@ -1099,9 +1106,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
     }
 
     const ip = getIP(req)
-    accessLog.info(`${req.method} ${req.url} from ${ip}`)
-    // console.log(req.url)
     const urlObj = new URL(req.url ?? '', `http://${req.headers.host}`)
+    accessLog.info(`${req.method} ${urlObj.pathname} from ${ip}`)
     const pathname = urlObj.pathname
 
     // 读取路径配置（每次请求都重新读取，保存后立刻生效）
@@ -1513,7 +1519,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 const oldEnabled = !!user.enableCustomMusicDir
                 const oldCustomDir = (user.customMusicDir || '').trim()
 
-                if (password) user.password = password
+                if (password) {
+                  revokeUserSessions(user.name)
+                  user.password = password
+                }
                 if (enableCustomMusicDir !== undefined) user.enableCustomMusicDir = !!enableCustomMusicDir
                 if (customMusicDir !== undefined) {
                   const trimmedMusicDir = String(customMusicDir).trim()
@@ -1591,6 +1600,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                     migrateUserData(name, newName)
 
                     // 5. 更新内存中的用户信息 (全局配置)
+                    revokeUserSessions(name)
                     user.name = newName
 
                     handleFinalUpdate()
@@ -1649,6 +1659,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                       if (client.userInfo?.name === targetName) client.close(SYNC_CLOSE_CODE.normal)
                     }
                   }
+                  revokeUserSessions(targetName)
+                  releaseUserSpace(targetName, true)
                   global.lx.config.users.splice(idx, 1)
                   deletedCount++
                 }
@@ -4435,11 +4447,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 7. Get Cache Progress
       if (pathname === '/api/music/cache/progress' && req.method === 'GET') {
         const ids = urlObj.searchParams.get('ids')?.split(',') || []
+        const owner = getCacheRequestUsername(req)
+        if (!owner) { res.writeHead(401); res.end('Unauthorized'); return }
         const progress: any = {}
         ids.forEach(id => {
-          if (fileCache.cacheProgress.has(id)) {
-            progress[id] = fileCache.cacheProgress.get(id)
-          }
+          const value = fileCache.cacheProgress.get(fileCache.getProgressKey(id, owner))
+          if (value) progress[id] = value
         })
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true, data: progress }))
@@ -4849,7 +4862,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           if (!customDir) throw new Error('未配置自定义目录')
           const filePath = path.resolve(customDir, filename)
           // 安全检查：防止路径穿越
-          if (!filePath.startsWith(path.resolve(customDir))) throw new Error('非法路径')
+          resolveContainedPath(customDir, filename)
           if (!fs.existsSync(filePath)) {
             res.writeHead(404, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: '文件不存在' }))
@@ -5456,6 +5469,17 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       // [新增] Download Proxy API
       if (pathname === '/api/music/download' && req.method === 'GET') {
+        const proxyToken = urlObj.searchParams.get('token')
+        if (proxyToken && !req.headers['x-user-token']) req.headers['x-user-token'] = proxyToken
+        const proxyAdmin = req.headers['x-frontend-auth'] === global.lx.config['admin.password']
+        const cookieSession = playerSessions.get(parseCookies(req.headers.cookie)[SESSION_COOKIE_NAME])
+        const cookieOwner = cookieSession && Date.now() - cookieSession.createdAt <= SESSION_TTL && global.lx.config.users.some(u => u.name === cookieSession.user) ? cookieSession.user : null
+        const proxyUser = verifyUserAuth(req) || cookieOwner
+        if (!proxyAdmin && ((global.lx.config['player.enableAuth'] && !checkPlayerAuth(req)) ||
+            (global.lx.config['user.enablePublicRestriction'] && !proxyUser && !(global.lx.config['player.enableAuth'] && checkPlayerAuth(req))))) {
+          res.writeHead(401); res.end('Unauthorized'); return
+        }
+
         const urlStr = urlObj.searchParams.get('url')
         const filename = urlObj.searchParams.get('filename') || 'download.mp3'
         const isInline = urlObj.searchParams.get('inline') === '1'
@@ -5468,15 +5492,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
         try {
           const isTaggingMode = urlObj.searchParams.get('tag') === '1'
-          const taskId = urlObj.searchParams.get('taskId')
-          console.log(`[下载代理] 正在获取音频流: ${urlStr} (写入标签: ${isTaggingMode}, 任务ID: ${taskId})`)
+          const rawTaskId = urlObj.searchParams.get('taskId')
+          const taskId = rawTaskId ? fileCache.getProgressKey(rawTaskId, proxyUser || '_open') : null
+          console.log(`[下载代理] 正在获取音频流 (写入标签: ${isTaggingMode}, 任务ID: ${taskId})`)
 
           // 使用原生 http/https 模块以获得最高的流媒体转发性能
           const http = require('http')
           const https = require('https')
 
           // Manual redirect handling for maximum control and stability
-          const doFetch = (targetUrl: string, attempt: number) => {
+          const doFetch = async (targetUrl: string, attempt: number) => {
             if (attempt > 5) {
               console.error('[下载代理] 触发过多重定向，已终止')
               if (!res.headersSent) {
@@ -5487,9 +5512,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
 
             try {
-              const parsedUrl = new URL(targetUrl)
+              const { url: parsedUrl, address, family } = await resolvePublicUrl(targetUrl)
+              if (res.destroyed || res.writableEnded) return
               const options: any = {
                 method: 'GET',
+                lookup: (_host: string, opts: any, callback: any) => opts.all ? callback(null, [{ address, family }]) : callback(null, address, family),
+                agent: false,
                 headers: {
                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                   'Referer': parsedUrl.origin
@@ -5509,7 +5537,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   const location = proxyRes.headers.location
                   if (location) {
                     const nextUrl = location.startsWith('http') ? location : new URL(location, targetUrl).href
-                    doFetch(nextUrl, attempt + 1)
+                    proxyRes.resume()
+                    void doFetch(nextUrl, attempt + 1)
                     return
                   }
                 }
@@ -5683,7 +5712,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               })
 
               // 如果客户端（浏览器）中止了请求（例如：用户拖拽进度条、切换歌曲等），应该立刻销毁上游的下载请求，防止持续占用服务器下行带宽
-              req.on('close', () => {
+              res.once('close', () => {
                 if (!proxyReq.destroyed) {
                   proxyReq.destroy()
                 }
@@ -5695,7 +5724,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               console.error('[下载代理] 代理请求捕获异常:', err)
               if (!res.headersSent) {
                 res.writeHead(500)
-                res.end('Internal Server Error')
+                res.end('Invalid or unavailable upstream URL')
               }
             }
           }
@@ -8560,6 +8589,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
     if (!code) return
     res.writeHead(code)
     res.end(msg)
+    } catch (error) {
+      if (!res.headersSent) { res.writeHead(400); res.end('Bad Request') }
+      else res.destroy()
+    }
   })
 
   wss = new WebSocketServer({
