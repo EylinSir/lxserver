@@ -67,3 +67,12 @@ The combined release uses worker v45. The public PR remains a separate profile a
 - [x] Deploy the backend correction `e8256ce` on the customized profile: 45 isolated and 45 live runtime checks, one updated and 262 preserved file hashes, ten authenticated HTTPS assets and actual proxied AAC range bytes/MIME pass. Configuration, environment, mounts and unrelated containers remain unchanged; frontend assets/worker v45 are retained.
 
 A provider authorization error is separate from LX account authentication. A successful source response labeled with the requested quality does not establish actual master audio; observed fallbacks included AAC and MP3. This correction repairs media headers and does not grant provider access or establish physical iPhone playback success.
+
+## Effects and native AirPlay playback
+
+- [x] Reproduce five failures involving forced mobile media capture, resets on existing wireless graphs, and pending pitch/reverb/panner work after AirPlay/Cast handoff.
+- [x] Keep mobile audio native even for forced effects initialization; save edits while bypassing local processing on mobile and wireless routes. Guard resets, server-loaded settings and asynchronous DSP work; apply deferred settings to an existing desktop graph on return to local playback. Explain the saved-setting behavior when opening the effects panel.
+- [x] Pass all 124 tests and TypeScript checking. Eight route/effects regressions also pass against the isolated and live image modules; desktop effects remain functional.
+- [x] Deploy `503e2ab` with worker v46: 45 isolated and 45 live runtime checks, two updated/261 retained file hashes and ten authenticated HTTPS asset hashes pass. Prior fixes/customizations and configuration/environment/mounts/unrelated containers are preserved.
+
+Existing pages that already captured the audio element need a full reload to start with native mobile playback. Physical iPhone/AirPlay playback still needs user confirmation; simulated route transitions do not establish receiver behavior.
