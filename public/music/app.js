@@ -5606,12 +5606,22 @@ function getSourceName(source) {
  * 统一应用代理逻辑，处理 HTTPS 环境下的 HTTP 链接及跨域限制 (CORS) 问题
  * 增强：开启自动代理后，通过探测链接可用性（包括跨域兼容性）来自动决定是否启用服务器代理
  */
-async function applyAutoProxy(url, song) {
+function authorizeMediaUrl(url) {
     if (!url) return url;
+    const parsed = new URL(url, window.location.href);
+    if (parsed.origin !== window.location.origin || !parsed.pathname.startsWith('/api/music/')) return url;
+    const token = getUserAuthHeaders()['x-user-token'];
+    if (token) parsed.searchParams.set('token', token);
+    return parsed.pathname + parsed.search + parsed.hash;
+}
+window.authorizeMediaUrl = authorizeMediaUrl;
+
+async function applyAutoProxy(url, song) {
+    if (!url) return authorizeMediaUrl(url);
 
     // 已经过代理或为本地路径的无需处理
     if (url.startsWith('/api/music/download') || url.startsWith('/') || url.includes(window.location.host)) {
-        return url;
+        return authorizeMediaUrl(url);
     }
 
     // 优先级 1：如果手动开启了“播放音乐代理”，则无条件走代理 (用于解决 IP 封锁或跨域限制)
@@ -5624,7 +5634,7 @@ async function applyAutoProxy(url, song) {
             return proxyUrl;
         }
         const filename = `${song.singer} - ${song.name}.mp3`;
-        return `/api/music/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}&inline=1`;
+        return authorizeMediaUrl(`/api/music/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}&inline=1`);
     }
 
     const isHttpsEnv = window.location.protocol === 'https:';
@@ -5668,10 +5678,10 @@ async function applyAutoProxy(url, song) {
 
         console.log(`[Proxy] Server proxy fallback: ${song.name}`);
         const filename = `${song.singer} - ${song.name}.mp3`;
-        return `/api/music/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}&inline=1`;
+        return authorizeMediaUrl(`/api/music/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}&inline=1`);
     }
 
-    return url;
+    return authorizeMediaUrl(url);
 }
 
 async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, options = {}) {

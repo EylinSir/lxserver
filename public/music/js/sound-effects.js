@@ -172,6 +172,7 @@ window.soundEffects = (function () {
         applySettings();
         renderUI();
         initPitchShifter();
+        window.musicVisualizer?.init();
     }
 
     let pitchShifterInitPromise = null;
@@ -660,7 +661,7 @@ window.soundEffects = (function () {
                     return;
                 }
                 init(true);
-            if (!audioContext || !isGraphBuilt) return;
+                if (!audioContext || !isGraphBuilt) return;
             }
             const oldPitch = settings.pitch;
             settings.pitch = val;

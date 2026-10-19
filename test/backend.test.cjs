@@ -221,3 +221,61 @@ test('safe source validation never silently retries a failed script in native VM
     const result = await loadUserApi({ script: 'fixture', allowUnsafeVM: false, owner: 'alice', id: 'fixture' });
     assert.equal(result.success, false); assert.equal(nativeLoads, 0);
 });
+
+test('cover timeouts stay armed until response bodies finish, then release slots', async () => {
+    const pending = [], timers = [], cleared = [];
+    const { proxyCoverImage } = loadTs('src/server/coverProxy.ts', {
+        '../modules/utils/proxy.js': { getProxyAgent: async () => null },
+        $globals: {
+            console: quiet,
+            fetch: async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: () => new Promise(resolve => pending.push(resolve)) }),
+            setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout: id => cleared.push(id),
+        },
+    });
+    const jobs = ['a', 'b'].map(name => proxyCoverImage(Object.assign(response(), { destroyed: false, writableEnded: false }), `https://fixture.invalid/${name}.jpg`));
+    await tick(); assert.equal(pending.length, 2); assert.equal(timers.length, 2); assert.equal(cleared.length, 0);
+    pending.forEach(resolve => resolve(Buffer.from('fixture image')));
+    await Promise.all(jobs); assert.equal(cleared.length, 2);
+});
+
+test('startup environment logging keeps credential values out of output', () => {
+    const source = read('src/index.ts');
+    const fragment = '{\n' + source.slice(source.indexOf('  const envLog = ['), source.indexOf('\nlet lastConfigHash'));
+    const messages = [];
+    loadTs('src/index.ts', { $globals: {
+        envParamKeys: ['ADMIN_PASSWORD', 'WEBPLAYER_PASSWORD'], envParams: {}, envUsers: [],
+        process: { env: { ADMIN_PASSWORD: 'admin-secret-fixture', WEBPLAYER_PASSWORD: 'player-secret-fixture', LX_USER_alice: 'user-secret-fixture' } },
+        console: { log: value => messages.push(value) },
+    } }, '', fragment);
+    assert.ok(messages.join('').includes('ADMIN_PASSWORD'));
+    assert.ok(!messages.join('').includes('-secret-fixture'));
+});
+
+test('embedded artwork pins public DNS, limits bytes and rejects private redirects', async () => {
+    const { EventEmitter } = require('node:events');
+    let nextRedirect = false, requests = 0;
+    const client = {
+        get(url, options, callback) {
+            requests++;
+            options.lookup(url.hostname, { all: false }, (error, address) => assert.equal(address, '8.8.8.8'));
+            const req = new EventEmitter();
+            req.destroy = error => { if (error) req.emit('error', error); };
+            queueMicrotask(() => {
+                const response = Readable.from([Buffer.from('fixture artwork')]);
+                response.statusCode = nextRedirect ? 302 : 200;
+                response.headers = nextRedirect ? { location: 'http://127.0.0.1/private' } : {};
+                callback(response);
+            });
+            return req;
+        },
+    };
+    const { fetchPublicBuffer } = loadTs('src/server/security.ts', {
+        'node:dns/promises': { lookup: async () => [{ address: '8.8.8.8', family: 4 }] },
+        'node:http': client, 'node:https': client,
+    });
+    assert.equal((await fetchPublicBuffer('https://fixture.invalid/image')).toString(), 'fixture artwork');
+    await assert.rejects(fetchPublicBuffer('https://fixture.invalid/image', 2), /size limit/);
+    nextRedirect = true;
+    await assert.rejects(fetchPublicBuffer('https://fixture.invalid/redirect'), /Private upstream/);
+    assert.equal(requests, 3);
+});

@@ -975,6 +975,8 @@ class DownloadManager {
                 console.log('[DownloadManager] Simple download:', finalUrl);
             }
 
+            if (window.authorizeMediaUrl) finalUrl = window.authorizeMediaUrl(finalUrl);
+
             if (task.useNativeDownload) {
                 if (task.controller.signal.aborted) throw new DOMException('Download paused', 'AbortError');
                 this.triggerNativeDownload(finalUrl, filename);

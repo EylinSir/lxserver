@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
+import http from 'node:http'
+import https from 'node:https'
 
 export const normalizeSourceOwner = (name?: string): string => {
   if (!name || ['open', '_open', 'default'].includes(name)) return 'open'
@@ -58,4 +60,39 @@ export const resolvePublicUrl = async (input: string) => {
   const addresses = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await lookup(hostname, { all: true })
   if (!addresses.length || addresses.some(item => !isPublicAddress(item.address))) throw new Error('Private upstream addresses are not allowed')
   return { url, address: addresses[0].address, family: addresses[0].family }
+}
+
+// Artwork embedded by the download proxy must obey the same network boundary as audio.
+export const fetchPublicBuffer = async (input: string, maxBytes = 10 * 1024 * 1024, redirects = 0): Promise<Buffer> => {
+  if (redirects > 5) throw new Error('Too many redirects')
+  const { url, address, family } = await resolvePublicUrl(input)
+  return new Promise((resolve, reject) => {
+    const client = url.protocol === 'https:' ? https : http
+    const request = client.get(url, {
+      agent: false,
+      lookup: ((_host: string, options: any, callback: any) => options.all
+        ? callback(null, [{ address, family }]) : callback(null, address, family)) as any,
+    }, response => {
+      if ([301, 302, 303, 307, 308].includes(response.statusCode || 0) && response.headers.location) {
+        clearTimeout(timer)
+        response.destroy()
+        fetchPublicBuffer(new URL(response.headers.location, url).href, maxBytes, redirects + 1).then(resolve, reject)
+        return
+      }
+      if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+        response.destroy(); clearTimeout(timer); reject(new Error('Artwork fetch failed')); return
+      }
+      const chunks: Buffer[] = []
+      let received = 0
+      response.on('data', (chunk: Buffer) => {
+        received += chunk.length
+        if (received > maxBytes) request.destroy(new Error('Artwork exceeds size limit'))
+        else chunks.push(chunk)
+      })
+      response.once('end', () => { clearTimeout(timer); resolve(Buffer.concat(chunks)) })
+      response.once('error', error => { clearTimeout(timer); reject(error) })
+    })
+    const timer = setTimeout(() => request.destroy(new Error('Artwork request timeout')), 30000)
+    request.once('error', error => { clearTimeout(timer); reject(error) })
+  })
 }
