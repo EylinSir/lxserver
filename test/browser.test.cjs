@@ -2,6 +2,28 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { read, quiet } = require('./helpers.cjs');
+
+test('playlist categories and hot tags render escaped names without shadowing the escaping helper', () => {
+    const source = read('public/music/js/songlist_manager.js');
+    const start = source.indexOf('    function renderTags()');
+    const end = source.indexOf('\n    function ', start + 10);
+    const container = { innerHTML: '' };
+    vm.runInNewContext(source.slice(source.indexOf('    const API_BASE'), source.indexOf('    let currentState')) +
+        source.slice(start, end) + '\nrenderTags();', {
+        currentState: { tagId: '', hotTags: [{ id: 1, name: '<hot>' }], tags: [{ name: '<category>', list: [{ id: 2, name: '<tag>' }] }] },
+        document: { getElementById: () => container },
+    });
+    for (const name of ['hot', 'category', 'tag']) assert.ok(container.innerHTML.includes('&lt;' + name + '&gt;'));
+});
+
+test('batch controls load before app.js without reading its not-yet-defined page function', () => {
+    const goToPage = () => {};
+    const window = { goToPage };
+    vm.runInNewContext(read('public/music/js/batch_pagination.js'), { window });
+    assert.equal(window.goToPage, goToPage);
+    assert.equal(typeof window.nextPage, 'function');
+    assert.equal(typeof window.changeItemsPerPage, 'function');
+});
 class Events {
     constructor() { this.listeners = new Map(); }
     addEventListener(type, fn) { if (!this.listeners.has(type)) this.listeners.set(type, new Set()); this.listeners.get(type).add(fn); }

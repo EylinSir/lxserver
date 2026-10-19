@@ -28,7 +28,7 @@ function fixture(options = {}) {
         endSession() { context.current = null; emitContext('SESSION_ENDED'); }
     };
     Object.assign(context, { current: null, getCurrentSession() { return this.current; },
-        setOptions(o) { this.options = o; }, getCastState: () => 'NOT_CONNECTED', requestSession: () => Promise.resolve() });
+        setOptions(o) { this.options = o; }, getCastState: () => options.castState || 'NOT_CONNECTED', requestSession: () => { commands.push('picker'); return Promise.resolve(); } });
     const anyChange = () => controller.dispatchEvent(new Event('ANY_CHANGE'));
     const controller = new EventTarget();
     Object.assign(controller, {
@@ -88,6 +88,13 @@ test('Cast handoff pauses native audio, preserves position and never increases r
     assert.ok(!JSON.stringify(f.loads[0]).includes('account-secret'));
     assert.equal(f.playback.volume, 0.12); assert.ok(!f.commands.includes('volume'));
     assert.equal(f.playback.isRemote, true); assert.equal(f.button.attributes['aria-pressed'], 'true');
+});
+
+test('the Cast picker remains accessible when Chrome defers discovery until a click', async () => {
+    const f = fixture({ castState: 'NO_DEVICES_AVAILABLE' });
+    assert.equal(f.button.hidden, false); assert.equal(f.button.disabled, false);
+    f.button.dispatchEvent(new Event('click')); await flush();
+    assert.ok(f.commands.includes('picker'));
 });
 
 test('existing player controls drive remote pause, play, seek, volume and mute', async () => {

@@ -5,7 +5,7 @@
 - [x] Implement mobile-accessible Cast controls, remote transport and local handoff.
 - [x] Implement expiring resource capabilities without sharing general login credentials.
 - [x] Preserve native Safari/AirPlay and existing player behavior.
-- [x] Pass 44 automated tests, TypeScript checking and production compilation.
+- [x] Pass 47 automated tests, TypeScript checking and production compilation.
 - [ ] Verify an isolated release with the existing deployment adaptations.
 - [ ] Deploy and verify runtime APIs, media grants and served assets.
 - [ ] Verify discovery, playback and controls with an actual Cast receiver.
