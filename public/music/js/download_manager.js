@@ -894,13 +894,7 @@ class DownloadManager {
             if (task.cacheUrl) {
                 // 1. 如果有缓存地址，直接使用缓存下载
                 console.log('[DownloadManager] Using server cache for download:', task.song.name);
-                finalUrl = task.cacheUrl;
-
-                // 补全 Token
-                const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
-                if (authToken && !finalUrl.includes('token=')) {
-                    finalUrl += (finalUrl.includes('?') ? '&' : '?') + `token=${encodeURIComponent(authToken)}`;
-                }
+                finalUrl = window.authorizeMediaUrl ? window.authorizeMediaUrl(task.cacheUrl) : task.cacheUrl;
 
                 ext = this.getDownloadExtension(finalUrl, quality);
             } else {

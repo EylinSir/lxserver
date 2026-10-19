@@ -13,7 +13,9 @@ function authorizeOwner(req: IncomingMessage, res: ServerResponse, username?: st
     try { owner = normalizeSourceOwner(username) } catch {
         res.writeHead(400); res.end('Invalid source owner'); return false
     }
-    const admin = req.headers['x-frontend-auth'] === global.lx.config['admin.password']
+    const adminPassword = global.lx.config['admin.password']
+    const admin = typeof adminPassword === 'string' && adminPassword.length > 0 &&
+        req.headers['x-frontend-auth'] === adminPassword
     if (admin) return true
     const user = verifyUserAuth(req)
     const allowed = !unsafe && (owner === 'open'

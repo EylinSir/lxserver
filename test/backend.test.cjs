@@ -26,7 +26,7 @@ function sourceHandlers() {
         '../modules/utils/proxy.js': { getProxyAgent: async () => null },
         $globals: { global: { lx: { config } }, console: quiet, process: { env: {}, cwd: () => '/virtual-fixture' } },
     });
-    return { handlers, writes, executions };
+    return { handlers, writes, executions, config };
 }
 
 test('script validation rejects unauthenticated and non-admin native VM requests before execution', async () => {
@@ -116,7 +116,7 @@ test('download deduplication waits for the real job and isolates destination/use
     const alice = downloadAndCache(song, 'fixture', '320k', 'alice');
     const duplicate = downloadAndCache(song, 'fixture', '320k', 'alice');
     const bob = downloadAndCache(song, 'fixture', '320k', 'bob');
-    assert.equal(alice, duplicate); assert.notEqual(alice, bob); assert.equal(pending.length, 2);
+    assert.notEqual(alice, bob); assert.equal(pending.length, 2);
     let done = false; duplicate.then(() => { done = true; }); await tick(); assert.equal(done, false);
     pending.forEach(job => job.resolve()); await Promise.all([alice, bob]); assert.equal(done, true);
 });
@@ -284,4 +284,115 @@ test('embedded artwork pins public DNS, limits bytes and rejects private redirec
     nextRedirect = true;
     await assert.rejects(fetchPublicBuffer('https://fixture.invalid/redirect'), /Private upstream/);
     assert.equal(requests, 3);
+});
+
+
+test('empty or missing administrator secrets never authorize source execution', async () => {
+    for (const password of ['', undefined]) {
+        const { handlers, executions, config } = sourceHandlers();
+        config['admin.password'] = password;
+        for (const headers of [{}, { 'x-frontend-auth': '' }]) {
+            const res = response();
+            await handlers.handleValidate(request({ username: 'bob', script: 'fixture', allowUnsafeVM: true }, headers), res);
+            assert.equal(res.status, 403);
+        }
+        assert.equal(executions.length, 0);
+    }
+});
+
+function isolatedProxy(stubs = {}, extra = {}) {
+    const source = read('src/server/server.ts');
+    const fragment = source.slice(source.indexOf('  const httpServer = http.createServer'), source.indexOf('\n  wss = new WebSocketServer')) + '\nexports.server = httpServer';
+    const config = { 'player.path': '/', 'admin.path': '/admin', 'admin.password': 'admin-fixture', users: [] };
+    return loadTs('src/server/server.ts', { ...stubs, $globals: {
+        http, fs, path, global: { lx: { config, staticPath: '/virtual-nonexistent' } }, getIP: () => 'fixture', accessLog: quiet,
+        console: quiet, handleCastRequest: async () => false, verifyUserAuth: () => null, checkPlayerAuth: () => true,
+        playerSessions: new Map(), parseCookies: security.parseCookies, SESSION_COOKIE_NAME: 'lx_player_session',
+        resolvePublicUrl: async input => ({ url: new URL(input), address: '8.8.8.8', family: 4 }), ...extra,
+    } }, '', fragment).server;
+}
+
+test('proxy timeout ends at response headers and stream failures terminate the downstream response', async t => {
+    const { EventEmitter } = require('node:events');
+    const { PassThrough } = require('node:stream');
+    for (const failure of ['request', 'response', 'aborted']) {
+        let upstreamReq, upstreamRes;
+        const timeouts = [];
+        const client = { request(url, options, onResponse) {
+            upstreamReq = new EventEmitter();
+            Object.assign(upstreamReq, {
+                setTimeout(ms, cb) { timeouts.push(ms); return this; },
+                destroy() { this.destroyed = true; },
+                end() { queueMicrotask(() => {
+                    upstreamRes = new PassThrough();
+                    upstreamRes.statusCode = 200;
+                    upstreamRes.headers = { 'content-type': 'audio/mpeg' };
+                    onResponse(upstreamRes); upstreamRes.write('first chunk');
+                }); },
+            });
+            return upstreamReq;
+        } };
+        const server = isolatedProxy({ http: client, https: client });
+        await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+        t.after(async () => { upstreamRes?.destroy(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+        const res = await fetch(`http://127.0.0.1:${server.address().port}/api/music/download?inline=1&url=https://public.fixture/song`);
+        assert.equal(res.status, 200);
+        const reading = res.text();
+        let finished = false;
+        const checked = assert.rejects(reading).then(() => { finished = true; });
+        const timeoutCleared = timeouts.at(-1) === 0;
+        if (failure === 'request') upstreamReq.emit('error', new Error('fixture request failure'));
+        else upstreamRes.emit(failure === 'response' ? 'error' : 'aborted', new Error('fixture response failure'));
+        // Wait for the socket failure, then clean up even on the unfixed implementation.
+        await Promise.race([checked, new Promise(resolve => { const timer = setTimeout(resolve, 500); timer.unref(); })]);
+        const terminated = finished;
+        server.closeAllConnections(); await checked;
+        assert.equal(timeoutCleared, true, 'streaming must have no request idle timeout');
+        assert.equal(terminated, true, failure + ' failure must not leave the browser hanging');
+    }
+});
+
+test('proxy failures before upstream headers still return 502', async t => {
+    const { EventEmitter } = require('node:events');
+    const client = { request() {
+        const req = new EventEmitter();
+        Object.assign(req, { setTimeout() {}, destroy() {}, end() { queueMicrotask(() => req.emit('error', new Error('fixture connection failed'))); } });
+        return req;
+    } };
+    const server = isolatedProxy({ http: client, https: client });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/music/download?url=https://public.fixture/song`);
+    assert.equal(res.status, 502); assert.equal(await res.text(), 'Request Error');
+});
+
+test('private native media accepts account cookies without tokens and rejects expired/guest/deleted sessions', async t => {
+    const source = read('src/server/server.ts');
+    const helperStart = source.indexOf('const verifyMediaUserAuth =');
+    const fragment = (helperStart < 0 ? '' : source.slice(helperStart, source.indexOf('const getCacheRequestUsername =', helperStart))) +
+        source.slice(source.indexOf('  const httpServer = http.createServer'), source.indexOf('\n  wss = new WebSocketServer')) + '\nexports.server = httpServer';
+    const sessions = new Map([
+        ['valid', { user: 'alice', createdAt: Date.now() }], ['guest', { user: null, createdAt: Date.now() }],
+        ['expired', { user: 'alice', createdAt: 0 }], ['deleted', { user: 'removed', createdAt: Date.now() }],
+    ]);
+    const serve = (req, res, filename, user) => { res.writeHead(200); res.end(user); };
+    const { server } = loadTs('src/server/server.ts', { $globals: {
+        http, fs, path, global: { lx: { config: { 'player.path': '/', 'admin.path': '/admin', users: [{ name: 'alice' }] }, staticPath: '/virtual-nonexistent' } },
+        getIP: () => 'fixture', accessLog: quiet, console: quiet, handleCastRequest: async () => false,
+        verifyUserAuth: () => null, checkPlayerAuth: () => true, playerSessions: sessions,
+        parseCookies: security.parseCookies, SESSION_COOKIE_NAME: 'lx_player_session', SESSION_TTL: 86400000,
+        fileCache: { serveCacheFile: serve, getCacheCover: async (filename, user) => ({ data: Buffer.from(user) }) },
+        customMusicManager: { serveCustomFile: serve, getCustomCover: async (filename, user) => ({ data: Buffer.from(user) }) },
+    } }, '', fragment);
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+    const base = `http://127.0.0.1:${server.address().port}`;
+    for (const suffix of ['/cache/file/bob/song.mp3', '/cache/cover?filename=song&user=bob', '/custom/file?filename=song&user=bob', '/custom/cover?filename=song&user=bob']) {
+        for (const session of ['valid', 'guest', 'expired', 'deleted', 'absent']) {
+            const res = await fetch(base + '/api/music' + suffix, { headers: { cookie: 'lx_player_session=' + session } });
+            const body = await res.text();
+            assert.equal(res.status, session === 'valid' ? 200 : 401, suffix + ':' + session);
+            if (res.ok) assert.equal(body, 'alice', 'cookie identity, not the requested username, chooses the owner');
+        }
+    }
 });

@@ -27,7 +27,7 @@ test('filesystem containment rejects siblings and symlink escapes for reads and 
   const root = path.join(dir, 'root')
   const outside = path.join(dir, 'outside')
   fs.mkdirSync(root); fs.mkdirSync(outside)
-  fs.symlinkSync(outside, path.join(root, 'link'))
+  fs.symlinkSync(outside, path.join(root, 'link'), 'junction')
   assert.throws(() => resolveContainedPath(root, '../outside/file'))
   assert.throws(() => resolveContainedPath(root, 'link/new-file'))
   assert.equal(resolveContainedPath(root, 'album/song.mp3'), path.join(root, 'album/song.mp3'))

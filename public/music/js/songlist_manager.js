@@ -234,7 +234,7 @@ window.SongListManager = (function () {
             updatePaginationUI();
         } catch (e) {
             console.error('[SongList] Load list failed:', e);
-            container.innerHTML = `<div class="col-span-full py-20 text-center text-red-500">加载失败: ${e.message}</div>`;
+            container.innerHTML = `<div class="col-span-full py-20 text-center text-red-500">加载失败: ${escapeHtml(e.message)}</div>`;
         }
     }
 
@@ -322,7 +322,7 @@ window.SongListManager = (function () {
         } catch (e) {
             console.error('[SongList] Load detail failed:', e);
             if (page === 1) {
-                listContainer.innerHTML = `<div class="text-center text-red-500 p-10">加载失败: ${e.message}</div>`;
+                listContainer.innerHTML = `<div class="text-center text-red-500 p-10">加载失败: ${escapeHtml(e.message)}</div>`;
             }
         }
     }
@@ -934,7 +934,7 @@ window.SongListManager = (function () {
                 document.getElementById('songlist-pagination').classList.add('hidden');
             } catch (e) {
                 console.error('[SongList] Search failed:', e);
-                container.innerHTML = `<div class="col-span-full py-20 text-center text-red-500">搜索失败: ${e.message}</div>`;
+                container.innerHTML = `<div class="col-span-full py-20 text-center text-red-500">搜索失败: ${escapeHtml(e.message)}</div>`;
             }
         },
         handleRowClick: function (index) {
@@ -1038,7 +1038,7 @@ window.SongListManager = (function () {
                         <div class="flex-1 min-w-0">
                             <h4 class="text-sm font-bold t-text-main truncate">${escapeHtml(item.name)}</h4>
                             <p class="text-xs t-text-muted mt-1 uppercase tracking-tighter">
-                                ${item.total || 0} 首 · ${item.play_count || 0} 次播放 · <span class="text-emerald-500/80">tid:${item.id}</span>
+                                ${escapeHtml(item.total || 0)} 首 · ${escapeHtml(item.play_count || 0)} 次播放 · <span class="text-emerald-500/80">tid:${escapeHtml(item.id)}</span>
                             </p>
                         </div>
                         <i class="fas fa-chevron-right text-gray-300 text-xs transition-transform group-hover:translate-x-1"></i>
@@ -1046,7 +1046,7 @@ window.SongListManager = (function () {
                 `).join('');
             } catch (e) {
                 console.error('[UserPlaylist] Load failed:', e);
-                container.innerHTML = `<div class="text-center py-10 text-red-500">加载失败: ${e.message}</div>`;
+                container.innerHTML = `<div class="text-center py-10 text-red-500">加载失败: ${escapeHtml(e.message)}</div>`;
                 subtitle.innerText = '加载失败';
             }
         },
