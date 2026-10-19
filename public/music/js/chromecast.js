@@ -204,7 +204,8 @@
 
     function updateButton() {
         const connected = !!context?.getCurrentSession();
-        button.hidden = !connected && context?.getCastState() === cast.framework.CastState.NO_DEVICES_AVAILABLE;
+        // Opening the picker starts discovery on browsers that defer it until a user gesture.
+        button.hidden = false;
         button.disabled = false;
         button.setAttribute('aria-pressed', String(connected));
         button.title = connected ? '正在投放 · ' + (context.getCurrentSession().getCastDevice().friendlyName || 'Chromecast') : 'Chromecast';

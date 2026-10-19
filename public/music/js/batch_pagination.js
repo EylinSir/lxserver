@@ -524,7 +524,7 @@ window.exitBatchMode = exitBatchMode;
 window.deselectAll = deselectAll;
 window.batchDeleteFromList = batchDeleteFromList;
 window.handleBatchCollect = handleBatchCollect;
-window.goToPage = goToPage;
+// goToPage belongs to app.js, which loads after this module.
 window.nextPage = nextPage;
 window.prevPage = prevPage;
 window.jumpToPage = jumpToPage;

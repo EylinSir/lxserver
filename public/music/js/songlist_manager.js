@@ -5,8 +5,8 @@
 
 window.SongListManager = (function () {
     const API_BASE = '/api/music';
-    const html = value => String(value ?? '').replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' }[char]));
-    const jsArg = value => html(JSON.stringify(String(value ?? '')));
+    const escapeHtml = value => String(value ?? '').replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' }[char]));
+    const jsArg = value => escapeHtml(JSON.stringify(String(value ?? '')));
     let currentState = {
         source: 'wy',
         viewMode: localStorage.getItem('songlist-view-mode') || 'grid', // 'grid' | 'row'
@@ -342,7 +342,7 @@ window.SongListManager = (function () {
                 <div class="flex flex-wrap gap-2">
                     ${currentState.hotTags.map(tag => `
                         <button onclick="window.SongListManager.selectTag(${jsArg(tag.id)}, ${jsArg(tag.name)})"
-                            class="px-3 py-1.5 rounded-lg text-sm transition-all ${currentState.tagId === tag.id ? 'active-option' : 't-bg-main hover:t-bg-track'}">${html(tag.name)}</button>
+                            class="px-3 py-1.5 rounded-lg text-sm transition-all ${currentState.tagId === tag.id ? 'active-option' : 't-bg-main hover:t-bg-track'}">${escapeHtml(tag.name)}</button>
                     `).join('')}
                 </div>
             </div>`;
@@ -351,11 +351,11 @@ window.SongListManager = (function () {
         // All Categories
         currentState.tags.forEach(cat => {
             html += `<div class="mb-6">
-                <h4 class="text-xs font-bold t-text-muted uppercase tracking-wider mb-3">${html(cat.name)}</h4>
+                <h4 class="text-xs font-bold t-text-muted uppercase tracking-wider mb-3">${escapeHtml(cat.name)}</h4>
                 <div class="flex flex-wrap gap-2">
                     ${cat.list.map(tag => `
                         <button onclick="window.SongListManager.selectTag(${jsArg(tag.id)}, ${jsArg(tag.name)})"
-                            class="px-3 py-1.5 rounded-lg text-sm transition-all ${currentState.tagId === tag.id ? 'active-option' : 't-bg-main hover:t-bg-track'}">${html(tag.name)}</button>
+                            class="px-3 py-1.5 rounded-lg text-sm transition-all ${currentState.tagId === tag.id ? 'active-option' : 't-bg-main hover:t-bg-track'}">${escapeHtml(tag.name)}</button>
                     `).join('')}
                 </div>
             </div>`;
@@ -422,7 +422,7 @@ window.SongListManager = (function () {
                 <div class="group cursor-pointer flex items-center gap-3.5 p-3 rounded-2xl t-bg-panel border t-border-main hover:border-emerald-500/40 hover:shadow-md transition-all hover:-translate-y-0.5"
                      onclick="window.SongListManager.openDetail('${item.id}', '${itemSource}')">
                     <div class="relative w-16 h-16 md:w-20 md:h-20 flex-shrink-0 overflow-hidden rounded-xl shadow-sm">
-                        <img data-src="${html(item.img || '/music/assets/logo.svg')}" src="/music/assets/logo.svg"
+                        <img data-src="${escapeHtml(item.img || '/music/assets/logo.svg')}" src="/music/assets/logo.svg"
                              class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder"
                              onerror="this.src='/music/assets/logo.svg'; this.classList.add('is-placeholder');">
                         ${itemSource ? `<span class="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-semibold bg-black/60 backdrop-blur-md text-white rounded shadow-sm z-10">${sourceLabel}</span>` : ''}
@@ -433,7 +433,7 @@ window.SongListManager = (function () {
                         </div>
                     </div>
                     <div class="flex-1 min-w-0 flex flex-col justify-center">
-                        <h3 class="text-sm md:text-base font-bold t-text-main truncate group-hover:text-emerald-500 transition-colors" title="${html(item.name)}">${html(item.name)}</h3>
+                        <h3 class="text-sm md:text-base font-bold t-text-main truncate group-hover:text-emerald-500 transition-colors" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h3>
                         ${item.author ? `<p class="text-xs t-text-muted mt-1 truncate">${item.author}</p>` : ''}
                         <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 font-medium">
                             ${item.total ? `<span><i class="fas fa-music text-[10px] mr-1"></i>${item.total}首</span>` : ''}
@@ -451,7 +451,7 @@ window.SongListManager = (function () {
                 return `
                 <div class="group cursor-pointer" onclick="window.SongListManager.openDetail('${item.id}', '${itemSource}')">
                     <div class="relative aspect-square overflow-hidden rounded-2xl shadow-md transition-all group-hover:shadow-xl group-hover:-translate-y-1">
-                        <img data-src="${html(item.img || '/music/assets/logo.svg')}" src="/music/assets/logo.svg"
+                        <img data-src="${escapeHtml(item.img || '/music/assets/logo.svg')}" src="/music/assets/logo.svg"
                              class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder"
                              onerror="this.src='/music/assets/logo.svg'; this.classList.add('is-placeholder');">
                         ${itemSource ? `<span class="absolute top-2 right-2 px-2 py-0.5 text-[10px] font-medium bg-black/60 backdrop-blur-md text-white rounded-md shadow-sm z-10">${sourceLabel}</span>` : ''}
@@ -462,7 +462,7 @@ window.SongListManager = (function () {
                         </div>
                     </div>
                     <div class="mt-3">
-                        <h3 class="text-sm font-bold t-text-main line-clamp-2 leading-snug group-hover:text-emerald-500 transition-colors" title="${html(item.name)}">${html(item.name)}</h3>
+                        <h3 class="text-sm font-bold t-text-main line-clamp-2 leading-snug group-hover:text-emerald-500 transition-colors" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h3>
                         ${item.author ? `<p class="text-xs t-text-muted mt-1.5 truncate">${item.author}</p>` : ''}
                         ${item.time ? `<p class="text-[11px] text-gray-400 mt-0.5 truncate">${item.time}</p>` : ''}
                         <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 font-medium">
@@ -998,10 +998,10 @@ window.SongListManager = (function () {
                     <div class="flex items-center gap-4 p-3 rounded-xl hover:t-bg-main transition-all cursor-pointer group"
                          onclick="window.SongListManager.selectUserPlaylist(${jsArg(item.id)})">
                         <div class="relative flex-shrink-0">
-                            <img src="${html(item.img || '/music/assets/logo.svg')}" class="w-12 h-12 rounded-lg object-cover shadow-sm group-hover:scale-105 transition-transform">
+                            <img src="${escapeHtml(item.img || '/music/assets/logo.svg')}" class="w-12 h-12 rounded-lg object-cover shadow-sm group-hover:scale-105 transition-transform">
                         </div>
                         <div class="flex-1 min-w-0">
-                            <h4 class="text-sm font-bold t-text-main truncate">${html(item.name)}</h4>
+                            <h4 class="text-sm font-bold t-text-main truncate">${escapeHtml(item.name)}</h4>
                             <p class="text-xs t-text-muted mt-1 uppercase tracking-tighter">
                                 ${item.total || 0} 首 · ${item.play_count || 0} 次播放 · <span class="text-emerald-500/80">tid:${item.id}</span>
                             </p>
