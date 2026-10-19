@@ -13,7 +13,7 @@
 
 Capabilities live only in bounded process memory (two hours, sixteen per owner, 1,024 total) and are revoked after track replacement/disconnection. Receiver URLs contain no account credential. Internal music targets are allowlisted; external URLs use the existing public-address validation, pinned DNS connection and redirect validation. Cached/custom media retains its usual ownership/containment rules. Tagging/mutation parameters are excluded from proxy targets. CORS, exposed range headers, no-store responses and HEAD support permit receiver reads and seeking.
 
-The music worker caches the new first-party modules under `lx-music-web-v42`. Google's SDK stays network-loaded. SDK failure or unsupported browsers leave local playback available.
+The combined deployment's music worker caches the first-party modules under `lx-music-web-v43`. The separate upstream PR profile uses v42. Google's SDK stays network-loaded. SDK failure or unsupported browsers leave local playback available.
 
 References: [Google Web Sender setup](https://developers.google.com/cast/docs/web_sender), [integration](https://developers.google.com/cast/docs/web_sender/integrate), [supported media](https://developers.google.com/cast/docs/media).
 

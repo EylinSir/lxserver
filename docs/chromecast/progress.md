@@ -30,6 +30,7 @@ The existing customization history includes eleven commits from October 12–13,
 
 - [x] Reproduce and fix nine behavioral conflicts across fixed audio policies, automatic login, sync surfaces, Cast/recovery handoff and custom VU rendering.
 - [x] Pass all 91 tests, type checking and production compilation; retain the existing lyric/artwork, security and playback regressions.
-- [ ] Validate and deploy the corrected frontend while preserving the combined backend and custom assets.
+- [x] Deploy code `6cafc09`: 41 isolated and 41 live runtime checks pass, seven changed and 256 preserved file hashes match, all five sources initialize, and signed-in HTTPS/browser checks pass. Configuration, six mounts and 51 unrelated containers remain unchanged.
+- [x] Port the four shared Cast/recovery/sync corrections to upstream PR #451 (`abd404a`), with all 54 tests and type checks passing.
 
 See [the compatibility audit](../combined-conflict-audit.md) for reproductions, fixes and validation limits. Frontend worker v43 refreshes the corrected assets.
