@@ -52,8 +52,6 @@ const musicVisualizer = (function () {
             return;
         }
 
-        if (!window.Wave) return;
-
         try {
             console.log('[Visualizer] Initializing AudioContext & Visualizer graph...');
             audioContext = window._sharedAudioContext || (window.soundEffects && window.soundEffects.getContext && window.soundEffects.getContext()) || (window._sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)());

@@ -2,7 +2,7 @@
 
 `public/music/js/playback.js` adapts the native audio element behind the player's existing media properties, methods and events. Local media events pass through. While casting, the adapter routes controls to the remote output and suppresses native events, preventing duplicate playback and false local recovery. Other audio modules retain the real DOM element.
 
-`chromecast.js` loads Google's official Web Sender SDK in supported secure browser contexts and uses the Default Media Receiver; no custom application registration or server dependency is required. RemotePlayer status drives transport events, position and volume. LOAD commands are serialized and versioned so stale preparation cannot replace a newer track. Completion is delivered once. Session resumption adopts existing media without another LOAD. The shared controls remain available on mobile layouts.
+`chromecast.js` loads Google's official Web Sender SDK in supported secure browser contexts and uses the Default Media Receiver; no custom application registration or server dependency is required. RemotePlayer status drives transport events, position and volume. LOAD commands are serialized and versioned so stale preparation cannot replace a newer track. Completion is delivered once. Session resumption adopts existing media without another LOAD. The shared controls remain available on mobile layouts. Equal side columns keep the transport centered, with repeat on the left and speed/wireless controls on the right. Local crossfade is suspended while casting, including an in-progress fade, to preserve receiver volume.
 
 `src/server/castAccess.ts` issues opaque, random capabilities:
 
@@ -13,6 +13,6 @@
 
 Capabilities live only in bounded process memory (two hours, sixteen per owner, 1,024 total) and are revoked after track replacement/disconnection. Receiver URLs contain no account credential. Internal music targets are allowlisted; external URLs use the existing public-address validation, pinned DNS connection and redirect validation. Cached/custom media retains its usual ownership/containment rules. Tagging/mutation parameters are excluded from proxy targets. CORS, exposed range headers, no-store responses and HEAD support permit receiver reads and seeking.
 
-The music worker caches the new first-party modules under `lx-music-web-v39`. Google's SDK stays network-loaded. SDK failure or unsupported browsers leave local playback available.
+The music worker caches the new first-party modules under `lx-music-web-v41`. Google's SDK stays network-loaded. SDK failure or unsupported browsers leave local playback available.
 
 References: [Google Web Sender setup](https://developers.google.com/cast/docs/web_sender), [integration](https://developers.google.com/cast/docs/web_sender/integrate), [supported media](https://developers.google.com/cast/docs/media).

@@ -6873,7 +6873,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     }
 
     // [Crossfade] 如果开启了淡入淡出，则先执行淡出
-    if (settings.enableCrossfade && !noPlay && audio && !audio.paused && !audio.ended && audio.src) {
+    if (settings.enableCrossfade && audio && !audio.isRemote && !noPlay && !audio.paused && !audio.ended && audio.src) {
         await fadeVolume(0, 300);
     }
 
@@ -7040,13 +7040,13 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
 
         try {
-            if (settings.enableCrossfade) audio.volume = 0;
-            else audio.volume = typeof currentVolume !== 'undefined' ? currentVolume : 1;
+            if (settings.enableCrossfade && !audio.isRemote) audio.volume = 0;
+            else if (!audio.isRemote) audio.volume = typeof currentVolume !== 'undefined' ? currentVolume : 1;
 
             shouldAutoRecoverPlayback = true;
             await audio.play();
 
-            if (settings.enableCrossfade) fadeVolume(typeof currentVolume !== 'undefined' ? currentVolume : 1, 1000);
+            if (settings.enableCrossfade && !audio.isRemote) fadeVolume(typeof currentVolume !== 'undefined' ? currentVolume : 1, 1000);
 
             setPlayerStatus('', !audio.paused);
             updatePlayButton(!audio.paused);
@@ -7564,7 +7564,7 @@ async function togglePlay() {
     if (audio.paused) {
         try {
             // [Crossfade] 如果开启了淡入淡出，先将进度置为 0，播放后再淡入
-            if (settings.enableCrossfade) {
+            if (settings.enableCrossfade && !audio.isRemote) {
                 audio.volume = 0;
             }
             if (currentPlaybackErrorHandler) {
@@ -7575,7 +7575,7 @@ async function togglePlay() {
             await audio.play();
             updatePlayButton(!audio.paused);
 
-            if (settings.enableCrossfade) {
+            if (settings.enableCrossfade && !audio.isRemote) {
                 fadeVolume(typeof currentVolume !== 'undefined' ? currentVolume : 1, 600);
             }
         } catch (e) {
@@ -7584,7 +7584,7 @@ async function togglePlay() {
         }
     } else {
         // [Crossfade] 如果开启了淡入淡出，先淡出再暂停
-        if (settings.enableCrossfade) {
+        if (settings.enableCrossfade && !audio.isRemote) {
             await fadeVolume(0, 600);
         }
         shouldAutoRecoverPlayback = false;
@@ -7668,6 +7668,8 @@ let volumeFadeInterval = null;
 function fadeVolume(targetVolume, duration = 800) {
     if (volumeFadeInterval) clearInterval(volumeFadeInterval);
 
+    if (audio.isRemote) return Promise.resolve();
+
     const startVolume = audio.volume;
     const steps = 20;
     const increment = (targetVolume - startVolume) / steps;
@@ -7676,6 +7678,11 @@ function fadeVolume(targetVolume, duration = 800) {
 
     return new Promise((resolve) => {
         volumeFadeInterval = setInterval(() => {
+            if (audio.isRemote) {
+                clearInterval(volumeFadeInterval);
+                resolve();
+                return;
+            }
             currentStep++;
             let nextVolume = startVolume + (increment * currentStep);
 
@@ -7707,7 +7714,7 @@ audio.addEventListener('timeupdate', () => {
     const duration = audio.duration;
 
     // [Crossfade] 自然播放接近结束时提前淡出
-    if (settings.enableCrossfade && duration > 5 && (duration - current < 1.0)) {
+    if (settings.enableCrossfade && !audio.isRemote && duration > 5 && (duration - current < 1.0)) {
         if (!window._isFadingOut) {
             window._isFadingOut = true;
             fadeVolume(0, 1000);

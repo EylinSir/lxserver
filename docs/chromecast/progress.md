@@ -1,19 +1,17 @@
 # Chromecast progress
 
-- [x] Review existing playback, authentication, deployment adaptations and Google's current SDK documentation.
-- [x] Obtain approval for desktop/Android implementation and deployment.
+- [x] Review existing playback, authentication and Google Web Sender integration.
 - [x] Implement mobile-accessible Cast controls, remote transport and local handoff.
 - [x] Implement expiring resource capabilities without sharing general login credentials.
 - [x] Preserve native Safari/AirPlay and existing player behavior.
-- [x] Pass 48 automated tests, TypeScript checking and production compilation.
-- [x] Verify an isolated release with the existing deployment adaptations (35 runtime checks and 30 existing metadata/artwork checks).
-- [x] Deploy and verify runtime APIs, media grants and served assets (35 live checks and matching release hashes).
-- [x] Verify desktop Chrome discovery, playback, pause, seek and disconnect with an Onkyo TX-RZ50. Local audio stays paused during casting; paused disconnect preserves position and clears the route indicator.
-- [x] Move AirPlay beside the speed selector in the bottom playback row, including mobile layouts; pass all 11 browser regression checks and refresh the frontend cache version.
-- [x] Deploy the AirPlay layout update and verify the signed-in live page and Safari control order; configuration, six mounts and 51 unrelated containers remain unchanged.
-- [x] Refine the bottom row into equal side columns around centered previous/play/next controls, with repeat on the left and speed/wireless controls on the right; 11 browser regression checks pass.
-- [x] Deploy the balanced layout and verify zero play-button center offset on desktop and at 320px, with no mobile control overlap; configuration, mounts and 51 unrelated containers preserved.
+- [x] Keep transport centered with equal side columns; group speed and wireless controls on the right.
+- [x] Integrate on the latest upstream `dev`, retaining its HTTP cookie, metadata, playback recovery and synchronization fixes.
+- [x] Prevent local crossfade from modifying Cast volume, including fades already running during handoff.
+- [x] Pass 50 automated checks, TypeScript checking and production compilation.
+- [x] Start the compiled server with isolated temporary data; verify HTTP cookie login, authenticated player markup, Cast assets and worker version.
+
+An earlier compatible deployment passed 35 isolated/live runtime checks, 30 existing metadata/artwork checks and release asset verification. Desktop Chrome and an Onkyo TX-RZ50 accepted MP3 and reported advancing playback, pause, seek and disconnect; local audio stayed paused while casting. Responsive controls were checked at desktop and 320px widths with zero center offset and no control overlap. These hardware/layout checks describe that deployed version; the latest upstream integration has automated and isolated-startup coverage, not another physical receiver run.
 
 Live validation also reproduced and fixed playlist-category escaping-helper shadowing and a batch-module export referring to a function defined by a later script. Regression tests cover both startup/rendering failures.
 
-The receiver accepted MP3 media and reported playback progress. Android and other receiver/codec combinations require their own device checks. Audible output was not independently monitored.
+Physical Android, other receiver/codec combinations, independent audible monitoring and iOS lock-screen/DSP transitions remain separate manual checks.
