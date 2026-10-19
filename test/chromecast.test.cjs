@@ -113,7 +113,9 @@ test('receiver completion advances the queue exactly once and new sources use ne
 test('pause during a pending LOAD wins over its original autoplay request', async () => {
     let release; const gate = new Promise(resolve => { release = resolve; });
     const f = fixture({ loadGate: () => gate }); f.start(); await flush();
-    f.playback.pause(); release(); await flush(); assert.equal(f.playback.paused, true);
+    assert.equal(f.playback.paused, false);
+    f.playback.pause(); assert.equal(f.playback.paused, true);
+    release(); await flush(); assert.equal(f.playback.paused, true);
 });
 
 test('stale URL preparation cannot replace a newly selected track', async () => {
