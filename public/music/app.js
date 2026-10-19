@@ -8036,14 +8036,17 @@ function handlePlaybackStallOrWait() {
     if (!playbackStallDetectionTimer) {
         const stallRequestId = currentRecoveryState?.thisRequestId;
         const stallSongId = cleanSongData(currentPlayingSong)?.id;
+        const stallWasRemote = !!audio.isRemote;
 
         playbackStallDetectionTimer = setTimeout(async () => {
             playbackStallDetectionTimer = null;
+            if (!!audio.isRemote !== stallWasRemote || (audio.isRemote && !audio.readyState)) return;
             if (audio.paused || audio.ended || isServerReconnecting) return;
             if (currentRecoveryState?.thisRequestId !== stallRequestId || cleanSongData(currentPlayingSong)?.id !== stallSongId) return;
 
             // 超过 4 秒一直处于卡顿状态，探测服务端连通性
             const isOnline = await checkServerOnline();
+            if (!!audio.isRemote !== stallWasRemote || (audio.isRemote && !audio.readyState)) return;
             if (audio.paused || audio.ended || isServerReconnecting) return;
             if (currentRecoveryState?.thisRequestId !== stallRequestId || cleanSongData(currentPlayingSong)?.id !== stallSongId) return;
 
@@ -11842,10 +11845,15 @@ async function fetchSettingsFromServer() {
 }
 
 
+function setSyncStatusHTML(html) {
+    for (const id of ['sync-status', 'sync-modal-status']) {
+        const element = document.getElementById(id);
+        if (element) element.innerHTML = html;
+    }
+}
+
 function updateSyncStatus(html, showLogout = true) {
-    const statusEl = document.getElementById('sync-status');
     const settingsOption = document.getElementById('sync-settings-file-option');
-    if (!statusEl) return;
 
     let fullHtml = html;
     // Show logout button if requested AND we have active data or connection
@@ -11859,7 +11867,7 @@ function updateSyncStatus(html, showLogout = true) {
             fullHtml += ` <button onclick="showRemoteOverwriteModal('${username}')" class="ml-2 text-emerald-500 hover:text-emerald-600 text-[10px] md:text-xs font-bold px-2 py-0.5 rounded border border-emerald-200 hover:bg-emerald-300/10 transition-all inline-flex items-center gap-1" title="连接远程服务器"><i class="fas fa-satellite-dish"></i><span class="hidden sm:inline">连接远程服务器</span></button>`;
         }
     }
-    statusEl.innerHTML = fullHtml;
+    setSyncStatusHTML(fullHtml);
     // [新增] 状态变化后刷新登录界面禁用状态
     if (typeof updateAdminUI === 'function') updateAdminUI();
 }
@@ -11971,7 +11979,6 @@ async function handleLocalLogin() {
     const passInput = document.getElementById('sync-local-pass');
     const user = (userInput && userInput.value.trim()) || localStorage.getItem('lx_sync_user') || '';
     const pass = (passInput && passInput.value) || localStorage.getItem('lx_sync_pass') || '';
-    const statusEl = document.getElementById('sync-status');
     const currentToken = (typeof userToken !== 'undefined' && userToken) || localStorage.getItem('lx_user_token');
 
     if (!user || (!pass && !currentToken)) {
@@ -11980,14 +11987,14 @@ async function handleLocalLogin() {
     }
 
     if (userInput && !userInput.value) userInput.value = user;
-    if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin text-emerald-500"></i> 正在登录...';
+    setSyncStatusHTML('<i class="fas fa-spinner fa-spin text-emerald-500"></i> 正在登录...');
 
     try {
         syncManager.initLocal(user, pass);
         const success = await syncManager.client.login();
 
         if (success) {
-            if (statusEl) statusEl.innerHTML = '<i class="fas fa-check-circle text-emerald-500"></i> 登录成功，正在同步...';
+            setSyncStatusHTML('<i class="fas fa-check-circle text-emerald-500"></i> 登录成功，正在同步...');
 
             // [核心优化] 如果已有有效 Token，则不用再请求 /api/user/login 获取新 Token
             if (currentToken) {
@@ -12057,10 +12064,10 @@ async function handleLocalLogin() {
                 }, 1000);
             }
         } else {
-            if (statusEl) statusEl.innerHTML = '<i class="fas fa-times-circle text-red-500"></i> 登录失败: 用户名或密码错误/凭证已失效';
+            setSyncStatusHTML('<i class="fas fa-times-circle text-red-500"></i> 登录失败: 用户名或密码错误/凭证已失效');
         }
     } catch (e) {
-        if (statusEl) statusEl.innerHTML = `<i class="fas fa-exclamation-circle text-red-500"></i> 错误: ${e.message}`;
+        setSyncStatusHTML(`<i class="fas fa-exclamation-circle text-red-500"></i> 错误: ${e.message}`);
     }
 }
 
@@ -12133,17 +12140,16 @@ function handleRemoteBack() {
     document.getElementById('sync-remote-code').value = ''; // Optional clear
 }
 
-function handleRemoteConnect() {
-    const url = document.getElementById('sync-remote-url').value;
-    const code = document.getElementById('sync-remote-code').value;
-    const statusEl = document.getElementById('sync-status');
+function handleRemoteConnect(form = 'settings') {
+    const url = document.getElementById(form === 'modal' ? 'sync-url' : 'sync-remote-url')?.value || '';
+    const code = document.getElementById(form === 'modal' ? 'sync-code' : 'sync-remote-code')?.value || '';
 
     if (!code) {
         showError('请输入连接码');
         return;
     }
 
-    statusEl.innerHTML = '<i class="fas fa-spinner fa-spin text-blue-500"></i> 正在连接远程服务器...';
+    setSyncStatusHTML('<i class="fas fa-spinner fa-spin text-blue-500"></i> 正在连接远程服务器...');
 
     try {
         let authInfo = null;
@@ -12202,14 +12208,14 @@ function handleRemoteConnect() {
                     console.log('[Cache] WS认证信息已保存');
                 }
             } else {
-                statusEl.innerHTML = `<i class="fas fa-times-circle text-red-500"></i> 连接失败: ${msg || '未知错误'}`;
+                setSyncStatusHTML(`<i class="fas fa-times-circle text-red-500"></i> 连接失败: ${msg || '未知错误'}`);
             }
         };
 
         syncManager.client.connect();
 
     } catch (e) {
-        statusEl.innerHTML = `<i class="fas fa-exclamation-circle text-red-500"></i> 错误: ${e.message}`;
+        setSyncStatusHTML(`<i class="fas fa-exclamation-circle text-red-500"></i> 错误: ${e.message}`);
     }
 }
 
@@ -13619,7 +13625,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             if (oldUsername) currentListData.username = oldUsername; // Preserve username
 
                             renderMyLists(data);
-                            document.getElementById('sync-status').innerHTML = '<i class="fas fa-check-circle text-blue-500"></i> 数据已同步';
+                            setSyncStatusHTML('<i class="fas fa-check-circle text-blue-500"></i> 数据已同步');
                         },
                         getSyncMode: async () => {
                             return new Promise((resolve) => {

@@ -7,7 +7,7 @@
 - [x] Keep transport centered with equal side columns; group speed and wireless controls on the right.
 - [x] Integrate on the latest upstream `dev`, retaining its HTTP cookie, metadata, playback recovery and synchronization fixes.
 - [x] Prevent local crossfade from modifying Cast volume, including fades already running during handoff.
-- [x] Pass 50 automated checks, TypeScript checking and production compilation.
+- [x] Pass 54 automated checks, TypeScript checking and production compilation.
 - [x] Start the compiled server with isolated temporary data; verify HTTP cookie login, authenticated player markup, Cast assets and worker version.
 
 An earlier compatible deployment passed 35 isolated/live runtime checks, 30 existing metadata/artwork checks and release asset verification. Desktop Chrome and an Onkyo TX-RZ50 accepted MP3 and reported advancing playback, pause, seek and disconnect; local audio stayed paused while casting. Responsive controls were checked at desktop and 320px widths with zero center offset and no control overlap. These hardware/layout checks describe that deployed version; the latest upstream integration has automated and isolated-startup coverage, not another physical receiver run.
@@ -15,3 +15,5 @@ An earlier compatible deployment passed 35 isolated/live runtime checks, 30 exis
 Live validation also reproduced and fixed playlist-category escaping-helper shadowing and a batch-module export referring to a function defined by a later script. Regression tests cover both startup/rendering failures.
 
 Physical Android, other receiver/codec combinations, independent audible monitoring and iOS lock-screen/DSP transitions remain separate manual checks.
+
+- [x] Follow-up compatibility audit: retain seeks during pending Cast LOAD, reject stale local-recovery timers after route changes, and synchronize unique sync-status views with the correct initiating connection form. Four focused regressions cover these shared fixes.

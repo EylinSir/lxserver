@@ -4391,13 +4391,13 @@
                     <input type="password" id="sync-code" placeholder="输入连接码"
                         class="shadow appearance-none border rounded w-full py-2 px-3 t-text-main leading-tight focus:outline-none focus:shadow-outline">
                 </div>
-                <div id="sync-status" class="mb-4 text-xs text-gray-500"></div>
+                <div id="sync-modal-status" class="mb-4 text-xs text-gray-500"></div>
                 <div class="flex justify-between">
                     <button onclick="closeSyncModal()"
                         class="bg-gray-300 hover:bg-gray-400 t-text-main font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                         取消
                     </button>
-                    <button onclick="handleRemoteConnect()"
+                    <button onclick="handleRemoteConnect('modal')"
                         class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                         连接 (Connect)
                     </button>

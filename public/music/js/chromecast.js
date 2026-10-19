@@ -47,6 +47,7 @@
             this.grants = [];
             this.chain = Promise.resolve();
             this.pending = null;
+            this.pendingSeek = false;
             this.desiredPaused = true;
             this.level = session.getVolume?.() ?? player.volumeLevel ?? 0.5;
             this.silent = session.isMute?.() ?? player.isMuted ?? false;
@@ -56,6 +57,7 @@
             this.source = value;
             this.version++;
             this.pending = null;
+            this.pendingSeek = false;
             this.loaded = false;
             this.finished = false;
             this.error = null;
@@ -70,6 +72,7 @@
             if (!Number.isFinite(value)) return;
             this.position = Math.max(0, this.length ? Math.min(value, this.length) : value);
             if (this.loaded) { player.currentTime = this.position; controller.seek(); }
+            else this.pendingSeek = true;
             playback.emit('seeked');
         }
         get duration() { return this.length; }
@@ -138,6 +141,7 @@
                         singer: song.singer, source: song.source, songmid: song.songmid, albumName: metadata.albumName } };
                     const request = new chrome.cast.media.LoadRequest(info);
                     request.currentTime = this.position;
+                    this.pendingSeek = false;
                     request.autoplay = !this.desiredPaused;
                     this.contentId = media.url;
                     await this.session.loadMedia(request);
@@ -146,9 +150,12 @@
                     this.grants = credentials;
                     this.loaded = true;
                     this.error = null;
+                    const seekAfterLoad = this.pendingSeek ? this.position : null;
+                    this.pendingSeek = false;
                     playback.emit('loadedmetadata');
                     playback.emit('canplay');
                     this.sync();
+                    if (seekAfterLoad !== null) this.currentTime = seekAfterLoad;
                     // A pause requested while LOAD was in flight must still take effect.
                     if (this.desiredPaused && !player.isPaused) controller.playOrPause();
                 } catch (error) {
