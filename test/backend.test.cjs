@@ -249,6 +249,12 @@ test('startup environment logging keeps credential values out of output', () => 
     } }, '', fragment);
     assert.ok(messages.join('').includes('ADMIN_PASSWORD'));
     assert.ok(!messages.join('').includes('-secret-fixture'));
+    const configFragment = source.slice(source.indexOf('const mergeConfigFileEnv ='), source.indexOf('\nconst margeConfig ='));
+    loadTs('src/index.ts', { $globals: {
+        envParamKeys: ['ADMIN_PASSWORD'], envParams: {}, envUsers: [],
+        console: { log: value => messages.push(value) },
+    } }, '\nmergeConfigFileEnv({"env.ADMIN_PASSWORD":"config-secret-fixture","env.LX_USER_alice":"user-secret-fixture"});', configFragment);
+    assert.ok(!messages.join('').includes('-secret-fixture'));
 });
 
 test('embedded artwork pins public DNS, limits bytes and rejects private redirects', async () => {
