@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lx-sync-server-v3';
+const CACHE_NAME = 'lx-sync-server-v4';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -70,7 +70,7 @@ self.addEventListener('activate', (event) => {
         caches.keys().then((cacheNames) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
-                    if (cacheName !== CACHE_NAME) {
+                    if (cacheName.startsWith('lx-sync-server-') && cacheName !== CACHE_NAME) {
                         return caches.delete(cacheName);
                     }
                 })

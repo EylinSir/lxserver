@@ -5,7 +5,7 @@
   "scripts": {
     "prebuild": "node scripts/download-binary.js && node scripts/update-build-hash.js",
     "build": "rimraf server && tsc --project tsconfig.json && tsc-alias -p tsconfig.json",
-    "test": "node --test test/*.test.cjs",
+    "test": "node --test test/*.test.cjs && npm run test:unit",
     "test:unit": "tsx --test test/*.test.ts",
     "prestart": "node scripts/download-binary.js && node scripts/update-build-hash.js",
     "start": "node ./index.js",
@@ -85,7 +85,8 @@
     "tsc-alias": "^1.9.7",
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "esbuild": "^0.28.2"
   },
   "nodemonConfig": {
     "ext": "js,ts",

@@ -99,6 +99,7 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string, 
     const doFetch = async (fetchUrl: string): Promise<{ buf: Buffer, ct: string } | null> => {
         if (res.destroyed || res.writableEnded) return null
         await coverAcquire()
+        let timer: ReturnType<typeof setTimeout> | undefined
         try {
             if (res.destroyed || res.writableEnded) return null
 
@@ -121,12 +122,11 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string, 
             }
 
             const controller = new AbortController()
-            const timer = setTimeout(() => controller.abort(), 20000)
+            timer = setTimeout(() => controller.abort(), 20000)
             const imgResp = await fetch(fetchUrl, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36' },
                 signal: controller.signal,
             })
-            clearTimeout(timer)
             if (!imgResp.ok) return null
             const buf = Buffer.from(await imgResp.arrayBuffer())
             if (buf.length === 0) return null
@@ -138,6 +138,7 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string, 
             console.error('[封面代理] 代理请求失败:', fetchUrl, (e as Error)?.message)
             return null
         } finally {
+            if (timer) clearTimeout(timer)
             coverRelease()
         }
     }

@@ -77,6 +77,7 @@ window.soundEffects = (function () {
     }
 
     function init(force = false) {
+        if (document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless) return;
         if (audioContext && isGraphBuilt) return;
         loadSettings();
         if (!force && (isMobileDevice() || !hasActiveEffects())) {
@@ -589,6 +590,7 @@ window.soundEffects = (function () {
         },
         setEQ: function (index, val) {
             if (!audioContext || !isGraphBuilt) init(true);
+            if (!audioContext || !isGraphBuilt) return;
             val = parseInt(val);
             settings.eq[index] = val;
             if (eqFilters[index]) eqFilters[index].gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
@@ -598,6 +600,7 @@ window.soundEffects = (function () {
         },
         applyPreset: function (name) {
             if (!audioContext || !isGraphBuilt) init(true);
+            if (!audioContext || !isGraphBuilt) return;
             const allPresets = [...defaultPresets, ...customPresets];
             const p = allPresets.find(p => p.name === name);
             if (p) {
@@ -623,6 +626,7 @@ window.soundEffects = (function () {
         },
         setReverb: function (id) {
             if (!audioContext || !isGraphBuilt) init(true);
+            if (!audioContext || !isGraphBuilt) return;
             settings.reverb.id = id;
             const rev = reverbOptions.find(r => r.id === id);
             if (rev) {
@@ -650,6 +654,7 @@ window.soundEffects = (function () {
                     return;
                 }
                 init(true);
+            if (!audioContext || !isGraphBuilt) return;
             }
             const oldPitch = settings.pitch;
             settings.pitch = val;
@@ -683,6 +688,7 @@ window.soundEffects = (function () {
         },
         setPanner: function (key, val) {
             if (!audioContext || !isGraphBuilt) init(true);
+            if (!audioContext || !isGraphBuilt) return;
             if (key === 'enable') settings.panner.enable = val;
             else settings.panner[key] = parseInt(val);
             updatePanner();
@@ -694,6 +700,7 @@ window.soundEffects = (function () {
         getAnalyser: () => analyser || window._sharedAudioAnalyser || null,
         setReverbGain: function (type, val) {
             if (!audioContext || !isGraphBuilt) init(true);
+            if (!audioContext || !isGraphBuilt) return;
             if (type === 'main') settings.reverb.mainGain = val;
             else settings.reverb.sendGain = val;
             saveSettings();

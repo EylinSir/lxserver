@@ -46,13 +46,13 @@ const musicVisualizer = (function () {
             return;
         }
 
-        // [Mobile Fix] On mobile devices (iOS & Android), creating Web Audio createMediaElementSource silences native audio output,
-        // suspends when backgrounded/locked, and causes severe sample rate / pitch mismatch drift when minimizing and reopening.
-        // To preserve native background playback and true pitch on all mobile devices, skip Web Audio hijacking when no external DSP is active.
-        if (isMobileDevice() && !hasEffectsAnalyser) {
-            console.log('[Visualizer] Mobile device detected. Skipping AudioContext capture to preserve native background playback and true pitch.');
+        // Preserve native Safari/AirPlay playback unless the user explicitly enables DSP.
+        if (audio.webkitCurrentPlaybackTargetIsWireless ||
+            (!hasEffectsAnalyser && (isMobileDevice() || typeof audio.webkitShowPlaybackTargetPicker === 'function'))) {
             return;
         }
+
+        if (!window.Wave) return;
 
         try {
             console.log('[Visualizer] Initializing AudioContext & Visualizer graph...');
