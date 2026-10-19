@@ -7044,8 +7044,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             shouldAutoRecoverPlayback = true;
             await audio.play();
 
-            setPlayerStatus('', true);
-            updatePlayButton(true);
+            setPlayerStatus('', !audio.paused);
+            updatePlayButton(!audio.paused);
 
             if (RecoveryToast.isActive()) {
                 const targetPlatform = typeof getSourceName === 'function' ? getSourceName(playbackSong.source) : playbackSong.source.toUpperCase();
@@ -7563,7 +7563,7 @@ async function togglePlay() {
             audio.volume = typeof currentVolume !== 'undefined' ? currentVolume : 1;
             shouldAutoRecoverPlayback = true;
             await audio.play();
-            updatePlayButton(true);
+            updatePlayButton(!audio.paused);
         } catch (e) {
             shouldAutoRecoverPlayback = false;
             console.error("[Player] Play blocked:", e);
@@ -7976,6 +7976,7 @@ function handlePlaybackStallOrWait() {
     if (lyricPlayer) {
         lyricPlayer.pause();
     }
+    if (audio.isRemote && !audio.readyState) return;
     if (audio.paused || audio.ended || isServerReconnecting) return;
 
     if (!playbackStallDetectionTimer) {

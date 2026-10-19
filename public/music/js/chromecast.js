@@ -73,7 +73,7 @@
             playback.emit('seeked');
         }
         get duration() { return this.length; }
-        get paused() { return this.stopped; }
+        get paused() { return this.loaded ? this.stopped : this.desiredPaused; }
         get ended() { return this.finished; }
         get readyState() { return this.loaded ? 4 : 0; }
         get volume() { return this.level; }
@@ -96,6 +96,7 @@
         pause() {
             this.desiredPaused = true;
             if (this.loaded && !player.isPaused) controller.playOrPause();
+            else if (!this.loaded) playback.emit('pause');
         }
         async play() {
             this.desiredPaused = false;
