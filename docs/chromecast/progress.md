@@ -76,3 +76,12 @@ A provider authorization error is separate from LX account authentication. A suc
 - [x] Deploy `503e2ab` with worker v46: 45 isolated and 45 live runtime checks, two updated/261 retained file hashes and ten authenticated HTTPS asset hashes pass. Prior fixes/customizations and configuration/environment/mounts/unrelated containers are preserved.
 
 Existing pages that already captured the audio element need a full reload to start with native mobile playback. Physical iPhone/AirPlay playback still needs user confirmation; simulated route transitions do not establish receiver behavior.
+
+## Playback authentication recovery
+
+- [x] Reproduce valid API credentials alongside an expired/missing native-media cookie: audio returns 401 while the server-availability endpoint returns HTTP 200 with `valid:false`. The user reported Windows Chrome/all songs affected, then spontaneous recovery before this patch; the exact browser incident remains an inference from the reproduced gap and timing.
+- [x] Renew the API token and media cookie together; retry URL authentication once with refreshed headers. Repair native playback sessions before excluding providers, retain the original track/resume time, reject stale recovery after a track change and show a login prompt when recovery fails. Remove account-password values from startup logging and duplicate-password errors.
+- [x] Pass all 134 tests, type checking and compilation. Each isolated/live module passes ten session regressions and eight retained AirPlay/effects regressions, alongside 45 runtime checks and ten authenticated HTTPS asset hashes.
+- [x] Publish `b3aea76` through atomic file updates with worker v47. Three files updated/260 retained hashes verified; container ID/start/restart count, configuration/environment/mounts and unrelated containers preserved. Compose selects a tested image containing the same files for future recreation; the current process retains its prior base image. Startup-log redaction takes effect on its next start.
+
+QQ search errors were also observed during the reported interval; the investigation does not establish that every provider failed or that the external search service is repaired. Existing tabs load the frontend correction on their next full reload.
