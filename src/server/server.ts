@@ -36,6 +36,7 @@ import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSync
 import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import { parseCookies, resolveContainedPath, resolvePublicUrl, fetchPublicBuffer } from './security'
+import { createCastHandler } from './castAccess'
 import needle from 'needle'
 import { getProxyAgent } from '../modules/utils/proxy.js'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
@@ -1089,12 +1090,31 @@ const serveStatic = (req: IncomingMessage, res: http.ServerResponse, filePath: s
   }
 }
 
+const handleCastRequest = createCastHandler(req => {
+  const headers: IncomingMessage['headers'] = {}
+  for (const key of ['cookie', 'x-user-name', 'x-user-token', 'x-frontend-auth']) {
+    if (typeof req.headers[key] === 'string') headers[key] = req.headers[key]
+  }
+  const saved = { headers, url: '/api/music/cast/session', socket: req.socket } as IncomingMessage
+  const allowed = () => {
+    if (headers['x-frontend-auth'] && headers['x-frontend-auth'] === global.lx.config['admin.password']) return true
+    const user = verifyUserAuth(saved)
+    if (headers['x-user-token'] && !user) return false
+    if (global.lx.config['player.enableAuth'] && !checkPlayerAuth(saved)) return false
+    return !global.lx.config['user.enablePublicRestriction'] || !!user ||
+      (!!global.lx.config['player.enableAuth'] && checkPlayerAuth(saved))
+  }
+  if (!allowed()) return null
+  const sessionId = parseCookies(headers.cookie)[SESSION_COOKIE_NAME]
+  return { owner: verifyUserAuth(saved) || playerSessions.get(sessionId)?.user || sessionId || 'public', headers, valid: allowed }
+})
+
 const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promise((resolve, reject) => {
   const httpServer = http.createServer(async (req, res) => {
     try {
     // CORS 跨域处理
     res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, DELETE, PATCH, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', '*')
     res.setHeader('Access-Control-Allow-Private-Network', 'true')
 
@@ -1105,6 +1125,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
     }
 
     const ip = getIP(req)
+    if (await handleCastRequest(req, res)) return
     const urlObj = new URL(req.url ?? '', `http://${req.headers.host}`)
     accessLog.info(`${req.method} ${urlObj.pathname} from ${ip}`)
     const pathname = urlObj.pathname
@@ -5467,7 +5488,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       }
 
       // [新增] Download Proxy API
-      if (pathname === '/api/music/download' && req.method === 'GET') {
+      if (pathname === '/api/music/download' && (req.method === 'GET' || req.method === 'HEAD')) {
         const proxyToken = urlObj.searchParams.get('token')
         if (proxyToken && !req.headers['x-user-token']) req.headers['x-user-token'] = proxyToken
         const proxyAdmin = req.headers['x-frontend-auth'] === global.lx.config['admin.password']
@@ -5514,7 +5535,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               const { url: parsedUrl, address, family } = await resolvePublicUrl(targetUrl)
               if (res.destroyed || res.writableEnded) return
               const options: any = {
-                method: 'GET',
+                method: req.method,
                 lookup: (_host: string, opts: any, callback: any) => opts.all ? callback(null, [{ address, family }]) : callback(null, address, family),
                 agent: false,
                 headers: {
@@ -5543,7 +5564,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 }
 
                 // 处理最终响应
-                let contentType = proxyRes.headers['content-type'] || 'application/octet-stream'
+                let contentType = (req as any).castContentType || proxyRes.headers['content-type'] || 'application/octet-stream'
                 if (contentType.includes('audio/') || contentType.includes('video/')) {
                   contentType = contentType.split(';')[0].trim()
                 }
