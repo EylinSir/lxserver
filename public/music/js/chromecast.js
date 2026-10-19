@@ -123,9 +123,9 @@
                     metadata.title = song.name || 'LX Music';
                     metadata.artist = song.singer || '';
                     metadata.albumName = window.getSongAlbumName?.(song) || '';
-                    const pic = window.getImgUrl?.(song) || song.pic;
-                    if (pic && !/\/music\/assets\/logo\.(svg|png)(?:[?#]|$)/i.test(pic)) {
-                        try {
+                    try {
+                        const pic = window.getImgUrl?.(song) || song.pic;
+                        if (pic && !/\/music\/assets\/logo\.(svg|png)(?:[?#]|$)/i.test(pic)) {
                             const art = new URL(pic, location.href);
                             if (art.origin === location.origin && /\/api\/music\/(cache|custom)\/cover$/.test(art.pathname)) {
                                 const cover = await grant(pic, 'image/jpeg');
@@ -134,8 +134,8 @@
                             } else if (art.protocol === 'https:' && !art.searchParams.has('token')) {
                                 metadata.images = [new chrome.cast.Image(art.href)];
                             }
-                        } catch { /* Artwork must never prevent audio playback. */ }
-                    }
+                        }
+                    } catch { /* Artwork must never prevent audio playback. */ }
                     if (version !== this.version || output !== this) throw abort();
                     info.metadata = metadata;
                     info.customData = { lxMusicCast: true, song: { id: song.id, name: song.name,

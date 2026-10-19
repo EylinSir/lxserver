@@ -203,3 +203,11 @@ test('default logo artwork is omitted from Cast metadata', async () => {
     const f = fixture(); f.window.getImgUrl = () => '/music/assets/logo.svg';
     f.start(); await flush(); assert.equal(f.loads[0].media.metadata.images, undefined);
 });
+
+
+test('an optional artwork resolver failure never prevents receiver audio loading', async () => {
+    const f = fixture(); f.window.getImgUrl = () => { throw Error('malformed artwork'); };
+    f.start(); await flush();
+    assert.equal(f.loads.length, 1); assert.equal(f.playback.isRemote, true);
+    assert.equal(f.loads[0].media.metadata.images, undefined); assert.equal(f.errors.length, 0);
+});

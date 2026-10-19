@@ -137,3 +137,11 @@ test('local cover URLs avoid query credentials and clean tokens from saved artwo
         assert.ok(!url.href.includes('account-secret'));
     }
 });
+
+
+test('malformed artwork falls back without breaking player rendering', () => {
+    const window = { location: { origin: 'https://music.test', href: 'https://music.test/', protocol: 'https:' } };
+    const context = { window, URL };
+    vm.runInNewContext(fn('authorizeMediaUrl') + fn('getImgUrl') + '\nwindow.getImgUrl = getImgUrl;', context);
+    assert.equal(window.getImgUrl({ img: 'https://[' }), '/music/assets/logo.svg');
+});

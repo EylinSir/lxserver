@@ -4663,7 +4663,7 @@ function getImgUrl(item) {
         }
     }
 
-    return authorizeMediaUrl(rawUrl);
+    return authorizeMediaUrl(rawUrl) || '/music/assets/logo.svg';
 }
 window.getImgUrl = getImgUrl;
 
@@ -5625,7 +5625,8 @@ function getSourceName(source) {
  */
 function authorizeMediaUrl(url) {
     if (!url) return url;
-    const parsed = new URL(url, window.location.href);
+    let parsed;
+    try { parsed = new URL(url, window.location.href); } catch { return ''; }
     if (parsed.origin !== window.location.origin || !parsed.pathname.startsWith('/api/music/')) return url;
     // Native media and downloads use the same-origin HttpOnly session cookie.
     parsed.searchParams.delete('token');
