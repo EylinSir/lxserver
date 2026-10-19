@@ -10,6 +10,7 @@
 - [x] Deploy and verify runtime APIs, media grants and served assets (35 live checks and matching release hashes).
 - [x] Verify desktop Chrome discovery, playback, pause, seek and disconnect with an Onkyo TX-RZ50. Local audio stays paused during casting; paused disconnect preserves position and clears the route indicator.
 - [x] Move AirPlay beside the speed selector in the bottom playback row, including mobile layouts; pass all 11 browser regression checks and refresh the frontend cache version.
+- [x] Deploy the AirPlay layout update and verify the signed-in live page and Safari control order; configuration, six mounts and 51 unrelated containers remain unchanged.
 
 Live validation also reproduced and fixed playlist-category escaping-helper shadowing and a batch-module export referring to a function defined by a later script. Regression tests cover both startup/rendering failures.
 
