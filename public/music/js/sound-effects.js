@@ -75,7 +75,8 @@ window.soundEffects = (function () {
     function isMobileDevice() {
         if (isIOSDevice()) return true;
         const ua = navigator.userAgent;
-        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+        const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (isTouch && window.innerWidth < 1024);
     }
 
     function init(force = false) {

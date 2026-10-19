@@ -3,6 +3,34 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { read, quiet } = require('./helpers.cjs');
 
+test('combined profile retains disabled crossfade for previously saved settings', () => {
+    const source = read('public/music/app.js');
+    const start = source.indexOf('function normalizeStoredSettings(');
+    const end = source.indexOf('\n}', start) + 2;
+    const context = {};
+    vm.runInNewContext(source.slice(start, end), context);
+    const settings = { enableCrossfade: true, serverCacheNamingPattern: 'simple' };
+    assert.equal(context.normalizeStoredSettings(settings).enableCrossfade, false);
+});
+
+test('a transient preload failure stays eligible for foreground playback', async () => {
+    const source = read('public/music/app.js');
+    const song = { id: 'retry-track', name: 'Retry track' };
+    let selected;
+    const context = { settings: { enablePreloader: true }, currentIndex: 0, currentPlaylist: [{ id: 'current' }, song],
+        getNextIndex: () => 1, playMode: 'list', preSelectedNextIndex: null,
+        window: { QualityManager: { getBestQuality: () => 'flac' } }, prefetchManager: { get: () => null },
+        resolveSongUrl: async () => { throw new Error('temporary network failure'); },
+        playSong: next => { selected = next; }, console: quiet };
+    vm.runInNewContext(source.slice(source.indexOf('async function prefetchNextSong('), source.indexOf('// --- Server Cache Helpers ---')) +
+        source.slice(source.indexOf('function playNext('), source.indexOf('function playPrev(')), context);
+    await context.prefetchNextSong();
+    assert.equal(song._unplayable, undefined);
+    song._unplayable = true; // Old preload markers must not prevent a foreground retry either.
+    context.playNext();
+    assert.equal(selected, song);
+});
+
 test('Cast play and pause preserve receiver volume when local crossfade is enabled', async () => {
     const source = read('public/music/app.js');
     const fragment = source.slice(source.indexOf('async function togglePlay()'), source.indexOf('function updatePlayButton('));
