@@ -59,3 +59,11 @@ See [the compatibility audit](../combined-conflict-audit.md) for reproductions, 
 - [x] Back up and deploy code `fc98ffc`: 45 live checks and ten authenticated HTTPS asset hashes pass. Configuration bytes, environment values, six mounts and 51 unrelated containers are preserved. Desktop/320px controls are centered without overlap, artwork loads without account query tokens, and playback remains paused at its prior position.
 
 The combined release uses worker v45. The public PR remains a separate profile and is not merged into the official repository by this deployment.
+
+## Safari proxy media compatibility
+
+- [x] Reproduce a CDN response carrying M4A audio with `application/x-www-form-urlencoded`, then normalize generic MIME labels using recognized media extensions on successful proxy responses. Preserve explicit document/error types, failed statuses, byte ranges and upstream address validation.
+- [x] Pass all 116 tests, TypeScript checking and production compilation. The regression fails on the preceding implementation; it covers mislabeled AAC, generic FLAC, explicit JSON and upstream rejection.
+- [x] Deploy the backend correction `e8256ce` on the customized profile: 45 isolated and 45 live runtime checks, one updated and 262 preserved file hashes, ten authenticated HTTPS assets and actual proxied AAC range bytes/MIME pass. Configuration, environment, mounts and unrelated containers remain unchanged; frontend assets/worker v45 are retained.
+
+A provider authorization error is separate from LX account authentication. A successful source response labeled with the requested quality does not establish actual master audio; observed fallbacks included AAC and MP3. This correction repairs media headers and does not grant provider access or establish physical iPhone playback success.
