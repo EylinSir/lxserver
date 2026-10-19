@@ -144,6 +144,14 @@ test('disconnect restores remote position and volume without duplicate local pla
     assert.ok(f.deleted.includes('1'));
 });
 
+test('disconnect clears the Cast button even when the SDK still exposes its previous session', async () => {
+    const f = fixture(); f.start(); await flush();
+    const event = new Event('SESSION_STATE_CHANGED'); event.sessionState = 'SESSION_ENDED';
+    f.context.dispatchEvent(event); await flush();
+    assert.equal(f.playback.isRemote, false);
+    assert.equal(f.button.attributes['aria-pressed'], 'false');
+});
+
 test('failed receiver LOAD restores the original local playback intent', async () => {
     const f = fixture({ failLoad: true }); f.start(); await flush();
     assert.equal(f.playback.isRemote, false); assert.equal(f.native.paused, false);
