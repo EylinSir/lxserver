@@ -4055,7 +4055,9 @@
                 <span id="time-total">00:00</span>
             </div>
 
-            <div class="flex items-center gap-6 md:gap-6 w-full justify-center md:mb-2 relative">
+            <div id="player-controls"
+                class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 md:gap-3 w-full md:mb-2 relative">
+                <div class="flex items-center justify-start min-w-0">
                 <!-- Play Mode Button with Dropdown -->
                 <div class="relative group">
                     <button id="play-mode-btn" onclick="togglePlayModeMenu(event)"
@@ -4093,6 +4095,10 @@
                     </div>
                 </div>
 
+                </div>
+
+                <!-- Keep the main transport centered regardless of wireless availability. -->
+                <div class="flex items-center justify-center gap-2 md:gap-6">
                 <button class="t-text-muted hover:text-emerald-600 text-lg transition-colors p-2"
                     onclick="playPrev()"><i class="fas fa-step-backward"></i></button>
                 <button id="btn-play"
@@ -4102,12 +4108,10 @@
                 </button>
                 <button class="t-text-muted hover:text-emerald-600 text-lg transition-colors p-2"
                     onclick="playNext()"><i class="fas fa-step-forward"></i></button>
+                </div>
 
-                <!-- Chromecast Button -->
-                <button id="btn-cast" type="button" hidden disabled aria-label="Chromecast" aria-pressed="false"
-                    title="Chromecast" class="p-2 rounded-lg t-text-muted hover:text-emerald-500">
-                    <i class="fab fa-chromecast" aria-hidden="true"></i>
-                </button>
+                <!-- Secondary controls align to the right without shifting the transport. -->
+                <div class="flex items-center justify-end gap-1 md:gap-2 min-w-0">
                 <!-- Playback Rate Button -->
                 <div class="relative group">
                     <button id="playback-rate-btn" onclick="togglePlaybackRateMenu(event)"
@@ -4141,11 +4145,17 @@
                             data-rate="2.0">2.0x</button>
                     </div>
                 </div>
+                <!-- Chromecast Button -->
+                <button id="btn-cast" type="button" hidden disabled aria-label="Chromecast" aria-pressed="false"
+                    title="Chromecast" class="p-2 rounded-lg t-text-muted hover:text-emerald-500">
+                    <i class="fab fa-chromecast" aria-hidden="true"></i>
+                </button>
                 <!-- AirPlay Button -->
                 <button id="btn-airplay" type="button" hidden disabled aria-label="AirPlay" aria-pressed="false"
                     title="AirPlay" class="p-2 rounded-lg t-text-muted hover:text-emerald-500">
                     <i class="fas fa-tv" aria-hidden="true"></i>
                 </button>
+                </div>
             </div>
         </div>
 
