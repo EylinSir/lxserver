@@ -137,7 +137,7 @@ test('public proxy blocks private upstreams while protected mode requires creden
     const config = { 'player.enableAuth': false, 'player.path': '/', 'admin.path': '/admin', 'admin.password': 'admin-fixture', 'user.enablePublicRestriction': true, users: [] };
     let probes = 0;
     const { server } = loadTs('src/server/server.ts', { $globals: {
-        http, fs, path, global: { lx: { config, staticPath: '/virtual-nonexistent' } }, getIP: () => 'fixture', accessLog: quiet, console: quiet,
+        http, fs, path, global: { lx: { config, staticPath: '/virtual-nonexistent' } }, getIP: () => 'fixture', accessLog: quiet, console: quiet, handleCastRequest: async () => false,
         verifyUserAuth: () => null, checkPlayerAuth: () => true, playerSessions: new Map(), parseCookies: security.parseCookies, SESSION_COOKIE_NAME: 'lx_player_session',
         resolvePublicUrl: async url => { probes++; return security.resolvePublicUrl(url); },
     } }, '', fragment);
@@ -161,7 +161,7 @@ test('public proxy uses the validated address and revalidates redirects', async 
     const fragment = source.slice(source.indexOf('  const httpServer = http.createServer'), source.indexOf('\n  wss = new WebSocketServer')) + '\nexports.server = httpServer';
     const config = { 'player.path': '/', 'admin.path': '/admin', 'admin.password': 'admin-fixture', users: [] };
     const { server } = loadTs('src/server/server.ts', { $globals: {
-        http, fs, path, global: { lx: { config, staticPath: '/virtual-nonexistent' } }, getIP: () => 'fixture', accessLog: quiet, console: quiet,
+        http, fs, path, global: { lx: { config, staticPath: '/virtual-nonexistent' } }, getIP: () => 'fixture', accessLog: quiet, console: quiet, handleCastRequest: async () => false,
         verifyUserAuth: () => null, checkPlayerAuth: () => true, playerSessions: new Map(), parseCookies: security.parseCookies, SESSION_COOKIE_NAME: 'lx_player_session',
         resolvePublicUrl: async input => {
             const url = new URL(input);

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lx-music-web-v37';
+const CACHE_NAME = 'lx-music-web-v38';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -29,6 +29,8 @@ const ASSETS_TO_CACHE = [
     './js/log_viewer.js',
     './js/ios-background-audio.js',
     './js/airplay.js',
+    './js/playback.js',
+    './js/chromecast.js',
     // 第三方库
     './assets/tailwindcss.js',
     './js/crypto-js.min.js',

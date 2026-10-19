@@ -35,7 +35,7 @@ window.currentSearchScope = 'network'; // 'network', 'local_list', 'local_all' -
 let currentPlayingSong = null; // Track currently playing song independently of view
 window.batchCollectSongs = null; // Store songs for batch collection modal
 window.playlistAddTargetSong = null; // Explicit single-song target from any song list
-const audio = document.getElementById('audio-player');
+const audio = window.LXPlayback || document.getElementById('audio-player');
 if (audio) {
     audio.setAttribute('playsinline', '');
     audio.setAttribute('webkit-playsinline', '');
@@ -44,6 +44,26 @@ if (audio) {
     if ('mozPreservesPitch' in audio) audio.mozPreservesPitch = true;
 }
 let currentPlaybackRate = 1.0;
+let localPlaybackRateBeforeCast = null;
+window.addEventListener('lx-cast-route', event => {
+    if (event.detail.active) {
+        localPlaybackRateBeforeCast = currentPlaybackRate;
+        currentPlaybackRate = 1;
+    } else if (localPlaybackRateBeforeCast !== null) {
+        currentPlaybackRate = localPlaybackRateBeforeCast;
+        localPlaybackRateBeforeCast = null;
+    }
+    updatePlaybackRateUI();
+});
+window.addEventListener('lx-cast-track', event => {
+    if (!event.detail) return;
+    currentPlayingSong = event.detail;
+    window.currentPlayingSong = currentPlayingSong;
+    const index = currentPlaylist.findIndex(song => song.id === currentPlayingSong.id);
+    if (index >= 0) currentIndex = index;
+    updatePlayerInfo(currentPlayingSong, null);
+    updateMediaSessionMetadata(currentPlayingSong);
+});
 
 // Initialize Unified Search for Global (Favorites/Search)
 window.goToPage = function (page) {
@@ -8247,6 +8267,12 @@ let isMuted = false;
 // 初始化音量
 audio.volume = currentVolume;
 updateVolumeUI();
+audio.addEventListener('volumechange', () => {
+    if (!audio.isRemote) return;
+    currentVolume = audio.volume;
+    isMuted = audio.muted;
+    updateVolumeUI();
+});
 
 // 设置音量
 function setVolume(e) {
@@ -8342,6 +8368,10 @@ function togglePlaybackRateMenu(e) {
 
 // 设置播放倍速
 function setPlaybackRate(rate) {
+    if (audio.isRemote && parseFloat(rate) !== 1) {
+        showInfo('Chromecast 当前使用正常播放速度');
+        return;
+    }
     currentPlaybackRate = parseFloat(rate);
     audio.playbackRate = currentPlaybackRate;
     if (lyricPlayer) {
@@ -9664,6 +9694,7 @@ window.removeCacheItem = removeCacheItem;
 window.clearServerCache = clearServerCache;
 window.handleHotSearchClick = handleHotSearchClick;
 window.playSong = playSong;
+window.getCastSong = () => currentPlayingSong ? { ...currentPlayingSong, quality: currentQuality } : null;
 window.resolveSongUrl = resolveSongUrl;
 window.resolveDownloadSongUrl = resolveDownloadSongUrl;
 window.togglePlay = togglePlay;

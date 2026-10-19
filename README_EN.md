@@ -35,6 +35,8 @@ This project features a powerful built-in **Web Player**, allowing you to enjoy 
 
 ## ✨ Web Player Key Features
 
+Chromecast support is available in Cast-enabled desktop/Android Chrome over HTTPS. Select the Cast button beside the playback controls to transfer music to a receiver. See [requirements and usage](docs/chromecast/requirements.md). Safari/iPhone playback retains AirPlay.
+
 ### 1. Modern Interface & Full Playback Controls
 
 Featuring a clean, responsive UI with automatic Light/Dark mode and full-screen lyrics mode. The integrated player bar offers sound quality switching, playback speed, and sleep timers.
