@@ -55,7 +55,7 @@ See [the compatibility audit](../combined-conflict-audit.md) for reproductions, 
 
 - [x] Merge PR review corrections through `2e833cf` with the custom audio/login/VU profile, retaining the previous nine compatibility corrections.
 - [x] Pass all 116 combined tests (104 CJS + 12 TypeScript), type checking and production compilation.
-- [ ] Validate an isolated image against cloned data/configuration and exact release/retained-file hashes.
-- [ ] Back up and deploy only LX Music; verify live APIs, HTTPS assets, custom controls and configuration preservation.
+- [x] Validate the isolated image: 45 runtime checks, all five sources initialized, 11 updated and 252 retained file hashes match.
+- [x] Back up and deploy code `fc98ffc`: 45 live checks and ten authenticated HTTPS asset hashes pass. Configuration bytes, environment values, six mounts and 51 unrelated containers are preserved. Desktop/320px controls are centered without overlap, artwork loads without account query tokens, and playback remains paused at its prior position.
 
 The combined release uses worker v45. The public PR remains a separate profile and is not merged into the official repository by this deployment.

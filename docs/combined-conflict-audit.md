@@ -26,3 +26,10 @@ Nine behavioral defects were reproduced against the baseline and corrected. Thes
 - Four portable corrections (pending Cast seeks, stale local recovery, sync-status surfaces and modal fields) also landed on the separate upstream PR branch, checkpoint `abd404a`; its 54 tests and type checks pass. Deployment-specific audio/login/VU policies remain in the combined profile.
 
 Tests simulate the newly reproduced transitions. They do not establish every physical receiver/browser combination, audible output or iOS lock-screen behavior. Earlier hardware results are recorded separately.
+
+
+## Reviewed fixes merged into the custom profile
+
+The later combined release `fc98ffc` merges the reviewed PR corrections through `2e833cf` while retaining all nine earlier compatibility fixes and the custom login/VU/audio behavior. The full combined suite passes 116 tests, type checking and production compilation. The deployed image overlays only three compiled backend files and eight frontend files on the exact preceding audited image; 252 other backend/package/static files retain their hashes.
+
+Isolated and live validation each pass 45 runtime checks, including cookie-only private media and scoped Cast access; all five sources initialize. Ten authenticated HTTPS asset bodies match. Browser checks confirm loaded artwork without reusable account query tokens, preserved fixed audio settings, centered desktop/320px transport without overlap and unchanged paused position. Configuration bytes, environment values, six mounts and 51 unrelated containers are preserved. Worker v45 refreshes the combined assets; the separate public PR profile uses v44. Protected backup and rollback evidence remain outside Git. Physical receiver playback was not repeated for this release.
