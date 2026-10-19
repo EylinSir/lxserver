@@ -6,8 +6,14 @@
 - [x] Implement expiring resource capabilities without sharing general login credentials.
 - [x] Preserve native Safari/AirPlay and existing player behavior.
 - [x] Pass 48 automated tests, TypeScript checking and production compilation.
-- [ ] Verify an isolated release with the existing deployment adaptations.
-- [ ] Deploy and verify runtime APIs, media grants and served assets.
-- [ ] Verify discovery, playback and controls with an actual Cast receiver.
+- [x] Verify an isolated release with the existing deployment adaptations (35 runtime checks and 30 existing metadata/artwork checks).
+- [x] Deploy and verify runtime APIs, media grants and served assets (35 live checks and matching release hashes).
+- [x] Verify desktop Chrome discovery, playback, pause, seek and disconnect with an Onkyo TX-RZ50. Local audio stays paused during casting; paused disconnect preserves position and clears the route indicator.
+- [x] Move AirPlay beside the speed selector in the bottom playback row, including mobile layouts; pass all 11 browser regression checks and refresh the frontend cache version.
+- [x] Deploy the AirPlay layout update and verify the signed-in live page and Safari control order; configuration, six mounts and 51 unrelated containers remain unchanged.
+- [x] Refine the bottom row into equal side columns around centered previous/play/next controls, with repeat on the left and speed/wireless controls on the right; 11 browser regression checks pass.
+- [x] Deploy the balanced layout and verify zero play-button center offset on desktop and at 320px, with no mobile control overlap; configuration, mounts and 51 unrelated containers preserved.
 
-Hardware completion requires an actual receiver result; mocked sender tests do not establish receiver compatibility or audible playback.
+Live validation also reproduced and fixed playlist-category escaping-helper shadowing and a batch-module export referring to a function defined by a later script. Regression tests cover both startup/rendering failures.
+
+The receiver accepted MP3 media and reported playback progress. Android and other receiver/codec combinations require their own device checks. Audible output was not independently monitored.
