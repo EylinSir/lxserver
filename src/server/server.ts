@@ -5601,6 +5601,18 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
                 // 处理最终响应
                 let contentType = (req as any).castContentType || proxyRes.headers['content-type'] || 'application/octet-stream'
+                // Some audio CDNs label M4A bytes as form data. Safari needs a media MIME type.
+                // Only repair generic labels on successful responses; preserve explicit error documents.
+                const mediaTypes: Record<string, string> = {
+                  m4a: 'audio/mp4', mp4: 'audio/mp4', mp3: 'audio/mpeg', flac: 'audio/flac',
+                  aac: 'audio/aac', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', ape: 'audio/ape',
+                }
+                const upstreamType = contentType.split(';')[0].trim().toLowerCase()
+                if (proxyRes.statusCode >= 200 && proxyRes.statusCode < 300 &&
+                    ['application/octet-stream', 'binary/octet-stream', 'application/x-www-form-urlencoded'].includes(upstreamType)) {
+                  const extension = parsedUrl.pathname.match(/\.([a-z0-9]+)$/i)?.[1].toLowerCase()
+                  if (extension && mediaTypes[extension]) contentType = mediaTypes[extension]
+                }
                 if (contentType.includes('audio/') || contentType.includes('video/')) {
                   contentType = contentType.split(';')[0].trim()
                 }

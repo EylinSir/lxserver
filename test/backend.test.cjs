@@ -154,7 +154,16 @@ test('public proxy uses the validated address and revalidates redirects', async 
     const upstream = http.createServer((req, res) => {
         upstreamHits++;
         if (req.url === '/redirect') { res.writeHead(302, { Location: 'http://127.0.0.1/private' }); res.end(); }
-        else { res.writeHead(200, { 'Content-Type': 'audio/mpeg' }); res.end('fixture audio'); }
+        else {
+            const fixtures = {
+                '/wrong-type.m4a': [200, 'application/x-www-form-urlencoded; charset=UTF-8'],
+                '/generic.FLAC': [200, 'application/octet-stream'],
+                '/error.m4a': [200, 'application/json'],
+                '/denied.m4a': [403, 'application/x-www-form-urlencoded'],
+            };
+            const [status, type] = fixtures[req.url] || [200, 'audio/mpeg'];
+            res.writeHead(status, { 'Content-Type': type }); res.end('fixture audio');
+        }
     });
     await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
     const source = read('src/server/server.ts');
@@ -177,8 +186,12 @@ test('public proxy uses the validated address and revalidates redirects', async 
     });
     const proxy = target => `http://127.0.0.1:${server.address().port}/api/music/download?inline=1&url=${encodeURIComponent(`http://public.fixture:${upstream.address().port}/${target}`)}`;
     const stream = await fetch(proxy('audio')); assert.equal(stream.status, 200); assert.equal(await stream.text(), 'fixture audio');
+    const aac = await fetch(proxy('wrong-type.m4a')); assert.equal(aac.status, 200); assert.equal(aac.headers.get('content-type'), 'audio/mp4'); assert.equal(await aac.text(), 'fixture audio');
+    const flac = await fetch(proxy('generic.FLAC')); assert.equal(flac.headers.get('content-type'), 'audio/flac'); await flac.text();
+    const error = await fetch(proxy('error.m4a')); assert.equal(error.headers.get('content-type'), 'application/json'); await error.text();
+    const denied = await fetch(proxy('denied.m4a')); assert.equal(denied.status, 403); assert.equal(denied.headers.get('content-type'), 'application/x-www-form-urlencoded'); await denied.text();
     const redirect = await fetch(proxy('redirect')); assert.equal(redirect.status, 500); await redirect.text();
-    assert.equal(upstreamHits, 2);
+    assert.equal(upstreamHits, 6);
 });
 
 test('cached-file endpoint rejects traversal and symlinks while serving nested music', async t => {
