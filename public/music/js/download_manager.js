@@ -206,6 +206,7 @@ class DownloadManager {
                         serverQueueId: item.id,
                         serverSongKey: item.songKey || '',
                         quality: item.quality || item.requestedQuality || '',
+                        requestedQuality: item.requestedQuality || item.quality || '',
                         status: item.status || 'waiting',
                         // [Fix] 使用 ?? 避免服务端返回 0 时覆盖本地真实进度
                         progress: item.progress ?? 0,
@@ -226,6 +227,7 @@ class DownloadManager {
                     task.serverQueueRegistered = true;
                     task.serverQueueId = item.id;
                     task.serverSongKey = item.songKey || task.serverSongKey;
+                    task.requestedQuality = item.requestedQuality || task.requestedQuality || item.quality;
                     task.quality = item.quality || task.quality;
                     task.status = item.status || task.status;
                     // [Fix] 使用 ?? 避免服务端返回 0 时覆盖本地真实进度
@@ -705,8 +707,8 @@ class DownloadManager {
         const results = await this.mapWithConcurrency(songs, 8, async (song) => {
             // _serverFile 是前端定位服务器文件用的私有字段，不提交给服务端、也不入本地任务存储
             const { _serverFile, ...cleanSong } = song;
-            const targetPref = cleanSong.quality || window.settings?.preferredQuality || 'flac';
-            const quality = cleanSong.quality || (window.QualityManager ? window.QualityManager.getBestQuality(cleanSong, targetPref) : targetPref);
+            const targetPref = cleanSong.explicitQuality || window.settings?.preferredQuality || cleanSong.quality || 'flac';
+            const quality = cleanSong.explicitQuality || (window.QualityManager ? window.QualityManager.getBestQuality(cleanSong, targetPref) : targetPref);
             const cacheResult = await checkServerCache(cleanSong, quality, true);
             return { song: cleanSong, quality, cacheResult };
         });
@@ -748,6 +750,7 @@ class DownloadManager {
                     nativeDownloadDispatched: false,
                     serverSongKey,
                     quality: quality,
+                    requestedQuality: quality,
                     status: 'waiting',
                     errorMsg: '',
                     progress: 0,
@@ -817,9 +820,10 @@ class DownloadManager {
             const downloadResolver = await this.waitForDownloadResolver();
 
             // 1. Resolve URL
-            const requestedQuality = task.quality || (window.QualityManager ? window.QualityManager.getBestQuality(task.song, window.settings?.preferredQuality || 'flac') : 'flac');
+            const requestedQuality = task.requestedQuality || task.quality || (window.QualityManager ? window.QualityManager.getBestQuality(task.song, window.settings?.preferredQuality || 'flac') : 'flac');
             const requestedSource = task.song?.source || '';
             task.quality = requestedQuality;
+            task.requestedQuality = task.requestedQuality || requestedQuality;
 
             const result = await downloadResolver(task.song, requestedQuality, true);
             if (!result || !result.url) throw new Error('解析失败');
@@ -884,8 +888,9 @@ class DownloadManager {
 
         try {
             // 1. Resolve URL and Quality
-            const quality = task.quality || (window.QualityManager ? window.QualityManager.getBestQuality(task.song, window.settings?.preferredQuality || 'flac') : 'flac');
+            const quality = task.requestedQuality || task.quality || (window.QualityManager ? window.QualityManager.getBestQuality(task.song, window.settings?.preferredQuality || 'flac') : 'flac');
             task.quality = quality;
+            task.requestedQuality = task.requestedQuality || quality;
             this.renderTask(task);
 
             let finalUrl = '';
@@ -1147,6 +1152,7 @@ class DownloadManager {
         if (!task || (task.status !== 'paused' && task.status !== 'error')) return;
 
         task.status = 'waiting';
+        task.quality = task.requestedQuality || task.quality;
         task.downloadedBytes = 0;
         task.totalBytes = 0;
         task.progress = 0;

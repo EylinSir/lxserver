@@ -11,7 +11,10 @@ const QUALITY_ORDER_LOW_TO_HIGH = [...QUALITY_PRIORITY].reverse();
 // The server still performs the final availability check and quality fallback per song.
 const PLATFORM_SELECTABLE_QUALITIES = {
     tx: ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master'],
-    wy: ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'master']
+    wy: ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'master'],
+    kw: ['128k', '320k', 'flac', 'flac24bit', 'hires'],
+    kg: ['128k', '320k', 'flac', 'flac24bit', 'hires'],
+    mg: ['128k', '320k', 'flac']
 };
 
 // 音质显示名称

@@ -5456,52 +5456,66 @@ async function resolveDownloadSongUrl(song, quality, isSilent = true) {
     const tried = new Set();
     let lastError = null;
 
-    const tryResolveCandidate = async (candidateSong, preferredQuality) => {
-        const requestedQuality = preferredQuality || settings.preferredQuality || 'flac';
-        let candidateQuality = window.QualityManager?.QUALITY_PRIORITY?.includes(requestedQuality)
-            ? requestedQuality
-            : (window.QualityManager
-                ? window.QualityManager.getBestQuality(candidateSong, requestedQuality)
-                : requestedQuality);
+    const requestedQuality = quality || settings.preferredQuality || 'flac';
+    const qualityPriority = window.QualityManager?.QUALITY_PRIORITY || ['flac', '320k', '128k'];
+    const startIndex = qualityPriority.indexOf(requestedQuality);
+    const qualitiesToTry = startIndex >= 0 ? qualityPriority.slice(startIndex) : [requestedQuality];
 
-        while (candidateQuality) {
-            const candidateId = candidateSong.id || candidateSong.songmid || candidateSong.songId || candidateSong.hash || candidateSong.copyrightId || candidateSong.mid || candidateSong.mediaMid || `${candidateSong.name || ''}_${candidateSong.singer || ''}_${candidateSong.interval || ''}`;
-            const key = `${candidateSong.source || ''}_${candidateId}_${candidateQuality}`;
-            if (tried.has(key)) break;
-            tried.add(key);
+    const trySingle = async (candidateSong, targetQuality) => {
+        const candidateId = candidateSong.id || candidateSong.songmid || candidateSong.songId || candidateSong.hash || candidateSong.copyrightId || candidateSong.mid || candidateSong.mediaMid || `${candidateSong.name || ''}_${candidateSong.singer || ''}_${candidateSong.interval || ''}`;
+        const key = `${candidateSong.source || ''}_${candidateId}_${targetQuality}`;
+        if (tried.has(key)) return null;
+        tried.add(key);
 
-            try {
-                const result = await fetchSongUrl(candidateSong, candidateQuality, 'download', isSilent);
-                if (result.errorMsg) throw new Error(result.errorMsg);
-                return result;
-            } catch (err) {
-                lastError = err;
-                console.warn(`[DownloadResolve] 解析失败: ${candidateSong.name} via ${candidateSong.source} (${candidateQuality})`, err);
-                if (!window.QualityManager || settings.enableAutoDegradeQuality === false) break;
-                candidateQuality = window.QualityManager.getNextLowerQuality(candidateQuality, candidateSong);
-            }
+        try {
+            const result = await fetchSongUrl(candidateSong, targetQuality, 'download', isSilent);
+            if (result.errorMsg) throw new Error(result.errorMsg);
+            return result;
+        } catch (err) {
+            lastError = err;
+            console.warn(`[DownloadResolve] 解析失败: ${candidateSong.name} via ${candidateSong.source} (${targetQuality})`, err);
+            return null;
         }
-
-        return null;
     };
 
-    const originalResult = await tryResolveCandidate(song, quality);
-    if (originalResult) return originalResult;
+    // 1. 先在原平台尝试所请求音质
+    const originalExact = await trySingle(song, requestedQuality);
+    if (originalExact) return originalExact;
 
-    if (settings.enableAutoSwitchSource === false) {
-        throw lastError || new Error('解析失败');
+    // 2. 原平台没有该音质时，优先在备选源中寻找所请求音质（而非立即降级原源）
+    let matches = [];
+    if (settings.enableAutoSwitchSource !== false) {
+        matches = await findOtherSourceMatches(song, isSilent, { ignoreSupportedFilter: true });
+        for (const matchedSong of matches) {
+            const matchedExact = await trySingle(matchedSong, requestedQuality);
+            if (matchedExact) {
+                return {
+                    ...matchedExact,
+                    songInfo: matchedSong,
+                    switchedSource: true,
+                    originalSource: song.source
+                };
+            }
+        }
     }
 
-    const matches = await findOtherSourceMatches(song, isSilent, { ignoreSupportedFilter: true });
-    for (const matchedSong of matches) {
-        const matchedResult = await tryResolveCandidate(matchedSong, quality);
-        if (matchedResult) {
-            return {
-                ...matchedResult,
-                songInfo: matchedSong,
-                switchedSource: true,
-                originalSource: song.source
-            };
+    // 3. 所有候选源均无目标音质时，再按音质降级阶梯逐级尝试（原源与备选源共同兜底）
+    if (window.QualityManager && settings.enableAutoDegradeQuality !== false) {
+        for (const lowerQuality of qualitiesToTry.slice(1)) {
+            const fallbackOriginal = await trySingle(song, lowerQuality);
+            if (fallbackOriginal) return fallbackOriginal;
+
+            for (const matchedSong of matches) {
+                const fallbackMatched = await trySingle(matchedSong, lowerQuality);
+                if (fallbackMatched) {
+                    return {
+                        ...fallbackMatched,
+                        songInfo: matchedSong,
+                        switchedSource: true,
+                        originalSource: song.source
+                    };
+                }
+            }
         }
     }
 
@@ -5751,6 +5765,69 @@ async function applyAutoProxy(url, song) {
     return authorizeMediaUrl(url);
 }
 
+const cacheUpgradeCooldown = new Map(); // songKey -> timestamp
+
+function checkAndTriggerBackgroundCacheUpgrade(song, desiredQuality, currentCachedQuality) {
+    if (!song || !desiredQuality || !currentCachedQuality) return;
+    if (!window.QualityManager) return;
+    const priority = window.QualityManager.QUALITY_PRIORITY;
+    const desiredIndex = priority.indexOf(desiredQuality);
+    const currentIndex = priority.indexOf(currentCachedQuality);
+    // If desired quality is not higher rank (smaller index) than current cached quality, no upgrade needed
+    if (desiredIndex === -1 || currentIndex === -1 || desiredIndex >= currentIndex) return;
+
+    if (settings.enableServerCache === false) return;
+
+    const songId = song.id || song.songmid || song.songId || '';
+    const key = `${song.source || ''}_${songId}_${desiredQuality}`;
+    const now = Date.now();
+    const lastAttempt = cacheUpgradeCooldown.get(key) || 0;
+    // 30-minute cooldown per song and quality target to avoid repeated API hits
+    if (now - lastAttempt < 30 * 60 * 1000) return;
+    cacheUpgradeCooldown.set(key, now);
+
+    console.log(`[CacheUpgrade] Cached quality (${currentCachedQuality}) < desired (${desiredQuality}) for ${song.name}, checking upgrade in background...`);
+
+    setTimeout(async () => {
+        try {
+            const resolver = window.resolveDownloadSongUrl || window.resolveSongUrl;
+            if (typeof resolver !== 'function') return;
+            const res = await resolver(song, desiredQuality, true);
+            if (!res || !res.url) return;
+            const resolvedQuality = res.quality || res.type || desiredQuality;
+            const resolvedIndex = priority.indexOf(resolvedQuality);
+            if (resolvedIndex === -1 || resolvedIndex >= currentIndex) return;
+
+            console.log(`[CacheUpgrade] Upgraded version found for ${song.name}: ${resolvedQuality}. Downloading to server cache...`);
+
+            const resolvedSong = res.songInfo || song;
+            const headers = { 'Content-Type': 'application/json', ...(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {}) };
+            const payload = {
+                songInfo: (window.SystemDownloadManager && window.SystemDownloadManager.getSongInfoForServer)
+                    ? window.SystemDownloadManager.getSongInfoForServer(resolvedSong)
+                    : resolvedSong,
+                url: window.SystemDownloadManager ? window.SystemDownloadManager.extractRawDownloadUrl(res.url) : res.url,
+                quality: resolvedQuality,
+                requestedSource: song.source || '',
+                downloadSource: res.downloadSource || resolvedSong.source,
+                sourceName: res.sourceName || '',
+                enableOnlyDownloadMode: window.settings?.enableOnlyDownloadMode || false,
+                cacheLyric: window.settings?.enableServerLyricCache !== false,
+                embedLyric: !!(window.settings?.embedLyricToFile ?? true)
+            };
+
+            await fetch('/api/music/cache/download', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(payload)
+            });
+            console.log(`[CacheUpgrade] Background cache upgrade started for ${song.name} (${resolvedQuality})`);
+        } catch (e) {
+            console.warn(`[CacheUpgrade] Background upgrade failed for ${song.name}:`, e.message || e);
+        }
+    }, 2000);
+}
+
 async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, options = {}) {
     const cleanedSong = cleanSongData(song);
     const cacheKey = `lx_url_${cleanedSong.id}_${quality}`;
@@ -5760,7 +5837,11 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
         console.log(`[Cache] Direct Local File Hit: ${song.name}`);
         let localUrl = await applyAutoProxy(song.url, song);
         const localFolder = /folder=music/.test(song.url) ? 'music' : 'cache';
-        return { url: localUrl, sourceType: 'server_cache', quality: song.quality || quality, folder: localFolder };
+        const actualQuality = song.quality || quality;
+        if (typeof checkAndTriggerBackgroundCacheUpgrade === 'function') {
+            checkAndTriggerBackgroundCacheUpgrade(cleanedSong, quality, actualQuality);
+        }
+        return { url: localUrl, sourceType: 'server_cache', quality: actualQuality, folder: localFolder };
     }
 
     const shouldBypassServerCache = isRetry === 'local_retry' || isRetry === 'download';
@@ -5774,6 +5855,9 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
             let serverCacheUrl = cacheResult.url;
             // 应用代理逻辑 (以防服务器缓存返回的是原始 HTTP 链接)
             serverCacheUrl = await applyAutoProxy(serverCacheUrl, song);
+            if (typeof checkAndTriggerBackgroundCacheUpgrade === 'function') {
+                checkAndTriggerBackgroundCacheUpgrade(cleanedSong, quality, actualQuality);
+            }
             return { url: serverCacheUrl, sourceType: 'server_cache', quality: actualQuality, folder: cacheResult.folder };
         }
     }

@@ -2181,7 +2181,7 @@ window.LocalMusicManager = {
             img: item.img,
             interval: item.interval,
             quality: item.quality,
-            types: item.quality ? { [item.quality]: {} } : {},
+            types: item.types || (item.quality ? { [item.quality]: {} } : {}),
             _serverFile: item.filename ? { filename: item.filename, folder: item.folder } : null
         };
     },
