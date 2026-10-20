@@ -1,5 +1,17 @@
 # Chromecast progress
 
+## Complete customization submission and version identity — 2026-10-20
+
+- [x] Include all remaining tracked customizations in the official submission while preserving the user's earlier commit history: VU themes/geometry/stereo routing, native/pass-through audio policy, compact login, search compatibility, quality badges, foreground preload retry and the combined conflict fixes.
+- [x] Include the subsequent QQ/Safari MIME normalization, mobile/wireless effects guards, playback-session recovery, credential-log removal and closed-drawer animation optimization.
+- [x] Replace fabricated Player/About/runtime-config v1.0.0 fallbacks. Read the running package version, synchronize generated version metadata at build/start, and show the source fingerprint beside the Player version. About uses the same metadata.
+- [x] Add regressions for stale/missing metadata, reproducible build identities, source/version changes, matching Player/About labels and escaped About substitutions; refresh worker v49.
+- [x] Pass all 141 tests (129 CJS + 12 TypeScript), TypeScript checking, production compilation, JS syntax and diff checks. The compiled server passes 48 isolated HTTP checks using disposable account/data/configuration, including version/fingerprint agreement, login, media ranges and Cast access. No configured external provider or physical receiver was used in this run.
+- [ ] Update PR #451 with the complete profile and current results.
+- [ ] Deploy the exact verified build to Synology when reachable, preserving configuration, account/music data, mounts and unrelated services. The initial SSH check reports Host is down; no live change has been made.
+
+The dated sections below record earlier verification and the historical separation of public/custom profiles. This submission combines them; earlier hardware results are not a fresh physical receiver test of the new build. The user's pre-existing customizations retain their original commits and attribution.
+
 - [x] Review existing playback, authentication and Google Web Sender integration.
 - [x] Implement mobile-accessible Cast controls, remote transport and local handoff.
 - [x] Implement expiring resource capabilities without sharing general login credentials.

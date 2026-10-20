@@ -1980,6 +1980,17 @@ function exitListSecondaryModes() {
     }
 }
 
+function getPlayerBuildInfo() {
+    const config = window.CONFIG || {};
+    const version = typeof config.version === 'string' && config.version.trim() && config.version !== 'unknown'
+        ? config.version.trim() : 'unknown';
+    const buildHash = typeof config.buildHash === 'string' && /^[a-f0-9]{7,64}$/i.test(config.buildHash)
+        ? config.buildHash : 'unknown';
+    const label = version === 'unknown' ? '版本信息不可用'
+        : version + (buildHash === 'unknown' ? '' : ' · build ' + buildHash);
+    return { version, buildHash, label };
+}
+
 // Load About Content
 async function loadAboutContent() {
     const aboutContainer = document.getElementById('about-content');
@@ -1991,9 +2002,8 @@ async function loadAboutContent() {
         const text = await response.text();
 
         // Render Markdown or HTML directly
-        const version = (window.CONFIG && window.CONFIG.version) || 'v1.0.0';
-        const buildHash = (window.CONFIG && window.CONFIG.buildHash) || 'unknown';
-        let content = text.replace(/{{version}}/g, version);
+        const { version, buildHash } = getPlayerBuildInfo();
+        let content = text.replace(/{{version}}/g, () => escapeHtmlText(version));
         content = content.replace(/{{buildHash}}/g, buildHash);
 
         if (content.trim().startsWith('<style') || content.trim().startsWith('<div') || content.trim().startsWith('<')) {
@@ -2012,11 +2022,9 @@ async function loadAboutContent() {
 
 // Set Version on Load
 document.addEventListener('DOMContentLoaded', () => {
-    if (window.CONFIG && window.CONFIG.version) {
-        const versionEl = document.getElementById('app-version');
-        if (versionEl) {
-            versionEl.innerText = window.CONFIG.version + ' Web';
-        }
+    const versionEl = document.getElementById('app-version');
+    if (versionEl) {
+        versionEl.innerText = getPlayerBuildInfo().label + ' Web';
     }
 
     // 恢复搜索来源缓存

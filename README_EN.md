@@ -41,6 +41,8 @@ Chromecast support is available in Cast-enabled desktop/Android Chrome over HTTP
 
 Featuring a clean, responsive UI with automatic Light/Dark mode and full-screen lyrics mode. The integrated player bar offers sound quality switching, playback speed, and sleep timers.
 
+Player and About show the package version and source build fingerprint (for example, `v2.1.3 · build 123abcd`), so custom changes within the same release remain identifiable. Build/start scripts refresh this metadata from `package.json` and the sources. Unavailable metadata is reported explicitly instead of displaying a fictitious `v1.0.0`.
+
 <p align="center">
   <img src="md/player.png" width="800" alt="Web Player Interface">
 </p>

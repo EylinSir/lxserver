@@ -37,6 +37,7 @@ import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import { parseCookies, resolveContainedPath, resolvePublicUrl, fetchPublicBuffer } from './security'
 import { createCastHandler } from './castAccess'
+import { getBuildInfo } from './buildInfo'
 import needle from 'needle'
 import { getProxyAgent } from '../modules/utils/proxy.js'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
@@ -1297,17 +1298,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
     // [动态配置注入] 优先拦截 /js/config.js 请求，确保后端配置能注入到前端 window.CONFIG
     if (pathname === '/js/config.js') {
-      // 从静态文件读取版本号和构建哈希
-      const staticConfigPath = path.join(global.lx.staticPath, 'js', 'config.js')
-      let version = 'v1.0.0'
-      let buildHash = 'unknown'
-      try {
-        const content = fs.readFileSync(staticConfigPath, 'utf-8')
-        const matchVersion = content.match(/version:\s*['"]([^'"]+)['"]/)
-        if (matchVersion) version = matchVersion[1]
-        const matchHash = content.match(/buildHash:\s*['"]([^'"]+)['"]/)
-        if (matchHash) buildHash = matchHash[1]
-      } catch { }
+      const { version, buildHash } = getBuildInfo(global.lx.staticPath)
 
       // 构造前端配置 暴露给前端
       const frontendConfig = {

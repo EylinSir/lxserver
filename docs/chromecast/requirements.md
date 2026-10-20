@@ -9,3 +9,5 @@ Support online music, server cache/downloads and configured custom music directo
 Never send account tokens, cookies or administrator credentials to a receiver. Its media capability must permit only one immutable read resource, expire, and stop working after the issuing credentials are revoked. Existing ownership, filesystem and public-upstream restrictions remain mandatory.
 
 Acceptance: automated local/remote handoff and race tests, actual HTTP range/HEAD/CORS and authorization tests, existing AirPlay regressions, type checking, production compilation, isolated release startup and deployed API/asset verification. Report real receiver playback separately from simulations and network advertisements.
+
+Player and About must identify the running package version plus a reproducible source build fingerprint. Custom builds sharing an upstream release number must remain distinguishable. Missing generated config must not fabricate an older release; package metadata remains authoritative when available, otherwise show an unavailable state.
