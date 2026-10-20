@@ -1163,8 +1163,16 @@ async function ensureUserAuthToken(options = {}) {
     const token = typeof userToken !== 'undefined' ? userToken : localStorage.getItem('lx_user_token');
 
     if (token && !force) {
-        userToken = token;
-        return true;
+        try {
+            const response = await fetch('/api/music/auth/verify', {
+                headers: { 'x-user-token': token }, cache: 'no-store', signal: AbortSignal.timeout(5000)
+            });
+            const result = response.ok ? await response.json() : null;
+            if (result?.valid && result.user === username) {
+                userToken = token;
+                return true;
+            }
+        } catch (_) { return false; }
     }
 
     if (!username || !password) {
@@ -1213,7 +1221,8 @@ async function restorePlaybackSession(allowRefresh = true) {
             cache: 'no-store', signal: AbortSignal.timeout(5000)
         });
         if (!response.ok) return false;
-        valid = (await response.json()).valid;
+        const session = await response.json();
+        valid = session.valid === true && session.user === localStorage.getItem('lx_sync_user');
     } catch (_) { return false; }
     if (valid !== false) return false;
     if (allowRefresh) {
@@ -1224,7 +1233,8 @@ async function restorePlaybackSession(allowRefresh = true) {
                 const response = await fetch('/api/music/auth/verify', {
                     headers: { 'x-user-token': token }, cache: 'no-store', signal: AbortSignal.timeout(5000)
                 });
-                if (response.ok && (await response.json()).valid === true) return true;
+                const session = response.ok ? await response.json() : null;
+                if (session?.valid && session.user === localStorage.getItem('lx_sync_user')) return true;
             } catch (_) { }
         }
         if (localStorage.getItem('lx_sync_pass') && await ensureUserAuthToken({ force: true })) return true;
@@ -12024,22 +12034,31 @@ async function handleLocalLogin() {
         if (success) {
             setSyncStatusHTML('<i class="fas fa-check-circle text-emerald-500"></i> 登录成功，正在同步...');
 
-            // [核心优化] 如果已有有效 Token，则不用再请求 /api/user/login 获取新 Token
+            // Bind the native-media cookie before list artwork or audio uses this account.
+            let tokenReady = false;
             if (currentToken) {
-                userToken = currentToken;
-                console.log('[Auth] 检测到现有的 User Token，跳过登录接口直接尝试数据同步。');
-            } else if (pass) {
+                const tokenRes = await fetch('/api/music/auth/verify', {
+                    headers: { 'x-user-token': currentToken }, cache: 'no-store'
+                });
+                const tokenData = tokenRes.ok ? await tokenRes.json() : null;
+                if (tokenData?.valid && tokenData.user === user) {
+                    userToken = currentToken;
+                    tokenReady = true;
+                }
+            }
+            if (!tokenReady && pass) {
                 try {
-                    const tokenRes = await fetch('/api/user/login', {
+                    const tokenRes = await fetch('/api/music/auth', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username: user, password: pass })
+                        body: JSON.stringify({ username: user, password: pass, mode: 'user' })
                     });
                     if (tokenRes.ok) {
                         const tokenData = await tokenRes.json();
                         if (tokenData.token) {
                             userToken = tokenData.token;
                             localStorage.setItem('lx_user_token', userToken);
+                            tokenReady = true;
                             console.log('[Auth] 新用户 Token 已获取并保存');
                         }
                     }
@@ -12047,6 +12066,8 @@ async function handleLocalLogin() {
                     console.warn('[Auth] Token 获取失败，回退到旧式认证方式:', e);
                 }
             }
+            if (!tokenReady) throw new Error('登录已失效，请重新登录');
+            localStorage.setItem('lx_sync_user', user);
 
             // [新增] 显示并加载 Token 管理面板
             const tokenSection = document.getElementById('token-management-section');

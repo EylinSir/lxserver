@@ -4,6 +4,9 @@
 
 ### Expanded review before deployment
 
+- [x] Final thread audit found three older unresolved findings: unescaped playlist metadata/click arguments, account Tokens retaining a guest media cookie, and Cast quotas using unvalidated cookie IDs. Reproduced nine cases against `6a48885` and corrected them. Existing Token/login paths now bind the matching account cookie before media; account verification promotes guest/other-account sessions; playlist row/grid templates escape remote metadata and safely encode click arguments; Cast ownership accepts only live stored sessions.
+- [x] Follow-up passes all159tests (147CJS+12TS), type/build/JS/diff and53 compiled-server HTTP checks, including actual guest-to-account cookie promotion and private media reads. Follow-up fingerprint `9925f04`, worker51.
+
 - [x] Reproduce token-only cookie recovery failure, loss of a valid Token without a saved password, touch-desktop resize loss of DSP control, and missing player-password login/restore behavior.
 - [x] Restore a native media cookie through the existing Token-authenticated verification endpoint before considering password renewal; retain Token-only credentials. Keep an already established desktop effects graph controllable after resize while still yielding to AirPlay/Cast. Restore explicit account/player-password login modes, mode-aware persistence and automatic recovery without a username for guests.
 - [x] Pass all 149 tests (137 CJS + 12 TypeScript), type/build/JS/diff checks and 50 isolated compiled-server HTTP checks. Repin version `v2.1.3`, fingerprint `93301ce`, worker v50; the earlier v49 artifact is superseded before deployment.

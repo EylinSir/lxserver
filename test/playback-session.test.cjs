@@ -26,7 +26,7 @@ test('token-only playback recovery restores the native cookie without dropping a
     const context = { userToken: 'valid-token', isUserLoggedIn: () => true, AbortSignal,
         localStorage: { getItem: k => saved.get(k), removeItem: k => saved.delete(k) },
         fetch: async (url, options) => { requests.push(options); return { ok: true,
-            json: async () => ({ valid: options.headers?.['x-user-token'] === 'valid-token' }) }; },
+            json: async () => ({ valid: options.headers?.['x-user-token'] === 'valid-token', user: options.headers ? 'listener' : null }) }; },
         ensureUserAuthToken: async () => assert.fail('no password renewal needed') };
     vm.runInNewContext(fn('restorePlaybackSession'), context);
     assert.equal(await context.restorePlaybackSession(), true);
@@ -50,8 +50,8 @@ for (const valid of [true, false]) {
     test(`native playback session check handles cookie valid=${valid}`, async () => {
         let renewals = 0;
         const context = { isUserLoggedIn: () => true, AbortSignal,
-            localStorage: { getItem: key => key === 'lx_sync_pass' ? 'fixture-password' : null },
-            fetch: async () => ({ ok: true, json: async () => ({ valid }) }),
+            localStorage: { getItem: key => key === 'lx_sync_pass' ? 'fixture-password' : key === 'lx_sync_user' ? 'listener' : null },
+            fetch: async () => ({ ok: true, json: async () => ({ valid, user: valid ? 'listener' : null }) }),
             ensureUserAuthToken: async () => { renewals++; return true; } };
         vm.runInNewContext(fn('restorePlaybackSession'), context);
         assert.equal(await context.restorePlaybackSession(), !valid); assert.equal(renewals, valid ? 0 : 1);
@@ -72,7 +72,7 @@ function recoveryContext(restore) {
 
 test('a rejected media cookie stops after one renewal instead of looping through providers', async () => {
     let renewals = 0;
-    const context = { isUserLoggedIn: () => true, AbortSignal,
+    const context = { isUserLoggedIn: () => true, AbortSignal, localStorage: { getItem: () => 'listener' },
         fetch: async () => ({ ok: true, json: async () => ({ valid: false }) }),
         ensureUserAuthToken: async () => { renewals++; return true; } };
     vm.runInNewContext(fn('restorePlaybackSession'), context);

@@ -426,12 +426,12 @@ window.SongListManager = (function () {
                 const sourceLabel = SOURCE_LABELS[itemSource] || itemSource;
                 return `
                 <div class="group cursor-pointer flex items-center gap-3.5 p-3 rounded-2xl t-bg-panel border t-border-main hover:border-emerald-500/40 hover:shadow-md transition-all hover:-translate-y-0.5"
-                     onclick="window.SongListManager.openDetail('${item.id}', '${itemSource}')">
+                     onclick="window.SongListManager.openDetail(${jsArg(item.id)}, ${jsArg(itemSource)})">
                     <div class="relative w-16 h-16 md:w-20 md:h-20 flex-shrink-0 overflow-hidden rounded-xl shadow-sm">
                         <img data-src="${escapeHtml(item.img || '/music/assets/logo.svg')}" src="/music/assets/logo.svg"
                              class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder"
                              onerror="this.src='/music/assets/logo.svg'; this.classList.add('is-placeholder');">
-                        ${itemSource ? `<span class="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-semibold bg-black/60 backdrop-blur-md text-white rounded shadow-sm z-10">${sourceLabel}</span>` : ''}
+                        ${itemSource ? `<span class="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-semibold bg-black/60 backdrop-blur-md text-white rounded shadow-sm z-10">${escapeHtml(sourceLabel)}</span>` : ''}
                         <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                             <div class="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow transform scale-50 group-hover:scale-100 transition-transform duration-300">
                                 <i class="fas fa-play text-xs ml-0.5"></i>
@@ -440,11 +440,11 @@ window.SongListManager = (function () {
                     </div>
                     <div class="flex-1 min-w-0 flex flex-col justify-center">
                         <h3 class="text-sm md:text-base font-bold t-text-main truncate group-hover:text-emerald-500 transition-colors" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h3>
-                        ${item.author ? `<p class="text-xs t-text-muted mt-1 truncate">${item.author}</p>` : ''}
+                        ${item.author ? `<p class="text-xs t-text-muted mt-1 truncate">${escapeHtml(item.author)}</p>` : ''}
                         <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 font-medium">
-                            ${item.total ? `<span><i class="fas fa-music text-[10px] mr-1"></i>${item.total}首</span>` : ''}
-                            ${(item.play_count || item.playCount) ? `<span><i class="fas fa-headphones text-[10px] mr-1"></i>${item.play_count || formatPlayCount(item.playCount)}</span>` : ''}
-                            ${item.time ? `<span class="truncate"><i class="far fa-calendar-alt text-[10px] mr-1"></i>${item.time}</span>` : ''}
+                            ${item.total ? `<span><i class="fas fa-music text-[10px] mr-1"></i>${escapeHtml(item.total)}首</span>` : ''}
+                            ${(item.play_count || item.playCount) ? `<span><i class="fas fa-headphones text-[10px] mr-1"></i>${escapeHtml(item.play_count || formatPlayCount(item.playCount))}</span>` : ''}
+                            ${item.time ? `<span class="truncate"><i class="far fa-calendar-alt text-[10px] mr-1"></i>${escapeHtml(item.time)}</span>` : ''}
                         </div>
                     </div>
                 </div>`;
@@ -455,12 +455,12 @@ window.SongListManager = (function () {
                 const itemSource = item.source || currentState.source;
                 const sourceLabel = SOURCE_LABELS[itemSource] || itemSource;
                 return `
-                <div class="group cursor-pointer" onclick="window.SongListManager.openDetail('${item.id}', '${itemSource}')">
+                <div class="group cursor-pointer" onclick="window.SongListManager.openDetail(${jsArg(item.id)}, ${jsArg(itemSource)})">
                     <div class="relative aspect-square overflow-hidden rounded-2xl shadow-md transition-all group-hover:shadow-xl group-hover:-translate-y-1">
                         <img data-src="${escapeHtml(item.img || '/music/assets/logo.svg')}" src="/music/assets/logo.svg"
                              class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder"
                              onerror="this.src='/music/assets/logo.svg'; this.classList.add('is-placeholder');">
-                        ${itemSource ? `<span class="absolute top-2 right-2 px-2 py-0.5 text-[10px] font-medium bg-black/60 backdrop-blur-md text-white rounded-md shadow-sm z-10">${sourceLabel}</span>` : ''}
+                        ${itemSource ? `<span class="absolute top-2 right-2 px-2 py-0.5 text-[10px] font-medium bg-black/60 backdrop-blur-md text-white rounded-md shadow-sm z-10">${escapeHtml(sourceLabel)}</span>` : ''}
                         <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                             <div class="w-12 h-12 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg transform scale-50 group-hover:scale-100 transition-transform duration-300">
                                 <i class="fas fa-play ml-1"></i>
@@ -469,11 +469,11 @@ window.SongListManager = (function () {
                     </div>
                     <div class="mt-3">
                         <h3 class="text-sm font-bold t-text-main line-clamp-2 leading-snug group-hover:text-emerald-500 transition-colors" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h3>
-                        ${item.author ? `<p class="text-xs t-text-muted mt-1.5 truncate">${item.author}</p>` : ''}
-                        ${item.time ? `<p class="text-[11px] text-gray-400 mt-0.5 truncate">${item.time}</p>` : ''}
+                        ${item.author ? `<p class="text-xs t-text-muted mt-1.5 truncate">${escapeHtml(item.author)}</p>` : ''}
+                        ${item.time ? `<p class="text-[11px] text-gray-400 mt-0.5 truncate">${escapeHtml(item.time)}</p>` : ''}
                         <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 font-medium">
-                            ${item.total ? `<span><i class="fas fa-music text-[10px] mr-1"></i>${item.total}</span>` : ''}
-                            ${(item.play_count || item.playCount) ? `<span><i class="fas fa-headphones text-[10px] mr-1"></i>${item.play_count || formatPlayCount(item.playCount)}</span>` : ''}
+                            ${item.total ? `<span><i class="fas fa-music text-[10px] mr-1"></i>${escapeHtml(item.total)}</span>` : ''}
+                            ${(item.play_count || item.playCount) ? `<span><i class="fas fa-headphones text-[10px] mr-1"></i>${escapeHtml(item.play_count || formatPlayCount(item.playCount))}</span>` : ''}
                         </div>
                     </div>
                 </div>`;

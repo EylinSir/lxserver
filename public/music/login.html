@@ -124,19 +124,14 @@
                     window.location.replace('./')
                     return
                 }
-                const verifyRes = await fetch('/api/music/auth/verify')
+                const savedToken = localStorage.getItem('lx_user_token')
+                const verifyRes = await fetch('/api/music/auth/verify', {
+                    headers: savedToken ? { 'x-user-token': savedToken } : undefined
+                })
                 const verifyData = await verifyRes.json()
                 if (verifyData.valid) {
                     window.location.replace('./')
                     return
-                }
-                const savedToken = localStorage.getItem('lx_user_token')
-                if (savedToken) {
-                    const tokenRes = await fetch('/api/music/auth/verify', { headers: { 'x-user-token': savedToken } })
-                    if ((await tokenRes.json()).valid) {
-                        window.location.replace('./')
-                        return
-                    }
                 }
                 // Safari Fallback: 如果 Cookie 被清除但本地已存凭证，尝试自动恢复登录
                 const savedMode = localStorage.getItem('lx_login_mode') === 'player' ? 'player' : 'user'

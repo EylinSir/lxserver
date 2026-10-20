@@ -17,7 +17,7 @@ function fixture(initial = {}, automatic = false) {
         fetch: async (url, options = {}) => {
             requests.push({ url, options });
             return { json: async () => url === '/api/music/config' ? { 'player.enableAuth': true } :
-                url === '/api/music/auth/verify' ? { valid: options.headers?.['x-user-token'] === 'valid-token' } :
+                url === '/api/music/auth/verify' ? { valid: initial.test_guest === '1' || options.headers?.['x-user-token'] === 'valid-token' } :
                 JSON.parse(options.body).mode === 'player' ? { success: true, mode: 'player', username: null, token: null } :
                 { success: true, mode: 'user', username: 'listener', token: 'fresh-token' } };
         } };
@@ -57,4 +57,10 @@ test('account login retains its account/token mode and requires a username', asy
     await f.context.handleLogin({ preventDefault() {} });
     assert.equal(JSON.parse(f.requests[0].options.body).mode, 'user');
     assert.equal(f.saved.get('lx_sync_mode'), 'local'); assert.equal(f.saved.get('lx_user_token'), 'fresh-token');
+});
+
+test('login verifies the account Token before accepting an existing guest cookie',async()=>{
+    const f=fixture({test_guest:'1',lx_sync_user:'listener',lx_user_token:'valid-token'},true);await flush();
+    const first=f.requests.find(r=>r.url==='/api/music/auth/verify');
+    assert.equal(first.options.headers?.['x-user-token'],'valid-token');assert.deepEqual(f.redirects,['./']);
 });

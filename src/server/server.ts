@@ -1134,7 +1134,9 @@ const handleCastRequest = createCastHandler(req => {
   }
   if (!allowed()) return null
   const sessionId = parseCookies(headers.cookie)[SESSION_COOKIE_NAME]
-  return { owner: verifyUserAuth(saved) || playerSessions.get(sessionId)?.user || sessionId || 'public', headers, valid: allowed }
+  const session = sessionId ? playerSessions.get(sessionId) : undefined
+  const validSession = session && Date.now() - session.createdAt <= SESSION_TTL ? session : undefined
+  return { owner: verifyUserAuth(saved) || validSession?.user || (validSession ? sessionId : 'public'), headers, valid: allowed }
 })
 
 const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promise((resolve, reject) => {
@@ -6102,7 +6104,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       // [新增] Web播放器认证状态检查 API
       if (pathname === '/api/music/auth/verify' && req.method === 'GET') {
-        const isValid = checkPlayerAuth(req)
+        const user = verifyUserAuth(req)
+        const isValid = checkPlayerAuth(req) && (!req.headers['x-user-token'] || !!user)
+        let sessionUser: string | null = null
         const responseHeaders: Record<string, string> = {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache'
@@ -6113,15 +6117,18 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           const cookies = parseCookies(req.headers['cookie'])
           const sessionId = cookies[SESSION_COOKIE_NAME]
           const existingSession = sessionId ? playerSessions.get(sessionId) : null
-          if (!existingSession || Date.now() - existingSession.createdAt > SESSION_TTL) {
-            const user = verifyUserAuth(req)
+          if (!existingSession || Date.now() - existingSession.createdAt > SESSION_TTL ||
+            (user && existingSession.user !== user)) {
             const newSessionId = generateSessionId()
             playerSessions.set(newSessionId, { createdAt: Date.now(), user: user || null })
             responseHeaders['Set-Cookie'] = buildSessionCookieHeader(req, newSessionId, SESSION_TTL / 1000)
+            sessionUser = user || null
+          } else {
+            sessionUser = existingSession.user || null
           }
         }
         res.writeHead(200, responseHeaders)
-        res.end(JSON.stringify({ valid: isValid }))
+        res.end(JSON.stringify({ valid: isValid, user: sessionUser }))
         return
       }
 
