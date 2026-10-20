@@ -15,10 +15,12 @@ Capabilities live only in bounded process memory (two hours, sixteen per owner, 
 
 Native same-origin audio, artwork and browser downloads use the HttpOnly player session cookie (Secure on HTTPS); the player removes account query tokens from these URLs. Cookie fallback is confined to read-only media handlers and validates the account and session lifetime. Legacy API query-token handling remains for compatibility, but the player does not generate it. API mutations still require their existing header authentication. Local sound-effect changes are saved during wireless playback without building or updating a local graph.
 
-The current combined submission caches first-party modules under `lx-music-web-v49`. Google's SDK stays network-loaded. SDK failure or unsupported browsers leave local playback available.
+The current combined submission caches first-party modules under `lx-music-web-v50`. Google's SDK stays network-loaded. SDK failure or unsupported browsers leave local playback available.
 
 References: [Google Web Sender setup](https://developers.google.com/cast/docs/web_sender), [integration](https://developers.google.com/cast/docs/web_sender/integrate), [supported media](https://developers.google.com/cast/docs/media).
 
 The combined deployment profile retains its existing custom VU themes and pass-through audio policy: stored crossfade is disabled and direct volume updates do not affect a remote receiver. Transient preload failures remain retryable during foreground playback.
 
 The combined profile, including the user's earlier VU/audio/login customizations, is now included in the upstream submission. `/js/config.js` reads the running package version independently of generated frontend metadata; `scripts/update-build-hash.js` synchronizes the public version and source fingerprint during builds/starts. Player and About share that identity and never infer a release number from unavailable metadata.
+
+Cookie recovery first checks native media access without API headers, then restores the cookie through the existing Token-authenticated verification endpoint. Password renewal is only attempted when a saved password exists; Token-only credentials remain intact. Login supports explicit account and player-password modes, with separate guest credential storage and matching automatic restoration. Once a desktop effects graph captures audio, viewport resizing does not disable its controls; wireless routes still bypass local edits.

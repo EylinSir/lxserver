@@ -1168,11 +1168,6 @@ async function ensureUserAuthToken(options = {}) {
     }
 
     if (!username || !password) {
-        if (force) {
-            userToken = null;
-            localStorage.removeItem('lx_user_token');
-            if (typeof updateUserUI === 'function') updateUserUI();
-        }
         return false;
     }
     if (userTokenRefreshPromise) return userTokenRefreshPromise;
@@ -1221,7 +1216,19 @@ async function restorePlaybackSession(allowRefresh = true) {
         valid = (await response.json()).valid;
     } catch (_) { return false; }
     if (valid !== false) return false;
-    if (allowRefresh && await ensureUserAuthToken({ force: true })) return true;
+    if (allowRefresh) {
+        const token = (typeof userToken !== 'undefined' && userToken) || localStorage.getItem('lx_user_token');
+        if (token) {
+            try {
+                // This endpoint issues a fresh native-media cookie for a valid API token.
+                const response = await fetch('/api/music/auth/verify', {
+                    headers: { 'x-user-token': token }, cache: 'no-store', signal: AbortSignal.timeout(5000)
+                });
+                if (response.ok && (await response.json()).valid === true) return true;
+            } catch (_) { }
+        }
+        if (localStorage.getItem('lx_sync_pass') && await ensureUserAuthToken({ force: true })) return true;
+    }
     throw Object.assign(new Error('登录已失效，请重新登录'), { status: 401 });
 }
 

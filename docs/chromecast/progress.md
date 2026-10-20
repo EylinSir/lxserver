@@ -2,6 +2,12 @@
 
 ## Complete customization submission and version identity — 2026-10-20
 
+### Expanded review before deployment
+
+- [x] Reproduce token-only cookie recovery failure, loss of a valid Token without a saved password, touch-desktop resize loss of DSP control, and missing player-password login/restore behavior.
+- [x] Restore a native media cookie through the existing Token-authenticated verification endpoint before considering password renewal; retain Token-only credentials. Keep an already established desktop effects graph controllable after resize while still yielding to AirPlay/Cast. Restore explicit account/player-password login modes, mode-aware persistence and automatic recovery without a username for guests.
+- [x] Pass all 149 tests (137 CJS + 12 TypeScript), type/build/JS/diff checks and 50 isolated compiled-server HTTP checks. Repin version `v2.1.3`, fingerprint `93301ce`, worker v50; the earlier v49 artifact is superseded before deployment.
+
 - [x] Include all remaining tracked customizations in the official submission while preserving the user's earlier commit history: VU themes/geometry/stereo routing, native/pass-through audio policy, compact login, search compatibility, quality badges, foreground preload retry and the combined conflict fixes.
 - [x] Include the subsequent QQ/Safari MIME normalization, mobile/wireless effects guards, playback-session recovery, credential-log removal and closed-drawer animation optimization.
 - [x] Replace fabricated Player/About/runtime-config v1.0.0 fallbacks. Read the running package version, synchronize generated version metadata at build/start, and show the source fingerprint beside the Player version. About uses the same metadata.

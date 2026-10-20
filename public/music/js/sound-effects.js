@@ -82,7 +82,7 @@ window.soundEffects = (function () {
     function canProcessLocally() {
         // Capturing a mobile media element cannot be undone by disconnecting Web Audio.
         // Keep native playback even before Safari reports an AirPlay target.
-        return !isMobileDevice() &&
+        return (isGraphBuilt || !isMobileDevice()) &&
             !document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless &&
             !window.LXPlayback?.isRemote;
     }

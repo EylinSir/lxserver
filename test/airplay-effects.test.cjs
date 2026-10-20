@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const { read, quiet } = require('./helpers.cjs');
 const tick = () => new Promise(setImmediate);
 
-function fixture({ mobile = false, wireless = false, cast = false } = {}) {
+function fixture({ mobile = false, wireless = false, cast = false, touch = false } = {}) {
     const writes = [], targets = [], timers = new Map(), saved = new Map(), events = {};
     let workletReady, reverbReady, timerId = 0;
     const audio = { webkitCurrentPlaybackTargetIsWireless: wireless, addEventListener: (name, cb) => { events[name] = cb; } };
@@ -31,7 +31,7 @@ function fixture({ mobile = false, wireless = false, cast = false } = {}) {
         addEventListener: (name, cb) => { events[name] = cb; } };
     vm.runInNewContext(read('public/music/js/sound-effects.js'), {
         window, AudioWorkletNode: function () { writes.push('worklet'); return node(); }, console: quiet,
-        navigator: { userAgent: mobile ? 'iPhone' : 'Chrome Desktop', platform: mobile ? 'iPhone' : 'MacIntel', maxTouchPoints: mobile ? 5 : 0 },
+        navigator: { userAgent: mobile ? 'iPhone' : touch ? 'Windows Chrome' : 'Chrome Desktop', platform: mobile ? 'iPhone' : 'MacIntel', maxTouchPoints: mobile || touch ? 5 : 0 },
         document: { readyState: 'loading', addEventListener: (name, cb) => { events[name] = cb; }, getElementById: id => id === 'audio-player' ? audio : null },
         localStorage: { getItem: k => saved.get(k) || null, setItem: (k, v) => saved.set(k, v) },
         fetch: () => new Promise(resolve => { reverbReady = () => resolve({ arrayBuffer: async () => new ArrayBuffer(0) }); }),
@@ -104,4 +104,20 @@ test('local desktop controls still build and update the effects graph', async ()
     assert.equal(f.writes.filter(w => w === 'capture').length, 1);
     f.writes.length = 0; f.effects.setEQ(0, 6);
     assert.ok(f.writes.includes('parameter')); assert.equal(f.state().eq[0], 6);
+});
+
+test('resizing a touch-screen desktop preserves control of its existing effects graph', async () => {
+    const f = fixture({ touch: true }); f.effects.setEQ(0, 3); f.finishWorklet(); await tick();
+    assert.equal(f.writes.filter(w => w === 'capture').length, 1);
+    f.window.innerWidth = 800; f.writes.length = 0;
+    f.effects.setEQ(0, 8); f.effects.setPitch(1.2);
+    assert.ok(f.writes.includes('parameter')); assert.ok(f.targets.includes(1.2));
+    f.audio.webkitCurrentPlaybackTargetIsWireless = true; f.writes.length = 0;
+    f.effects.setEQ(0, 9); assert.deepEqual(f.writes, []);
+});
+
+test('a narrow touch-screen desktop still avoids initial native-audio capture', () => {
+    const f = fixture({ touch: true }); f.window.innerWidth = 800;
+    f.effects.init(true); f.effects.setEQ(0, 3);
+    assert.equal(f.effects.isGraphBuilt(), false); assert.deepEqual(f.writes, []);
 });

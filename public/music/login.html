@@ -60,7 +60,12 @@
 
         <!-- Login Form -->
         <form onsubmit="handleLogin(event)" class="space-y-4">
-            <div class="relative">
+            <select id="auth-mode-input" onchange="updateLoginMode()" aria-label="登录方式"
+                class="w-full px-4 py-3 t-bg-main border-2 t-border-main rounded-xl t-text-main">
+                <option value="user">账号登录</option>
+                <option value="player">播放器访问密码</option>
+            </select>
+            <div class="relative" id="auth-username-field">
                 <div class="absolute left-4 top-1/2 -translate-y-1/2 t-text-muted">
                     <i class="fas fa-user"></i>
                 </div>
@@ -125,15 +130,24 @@
                     window.location.replace('./')
                     return
                 }
+                const savedToken = localStorage.getItem('lx_user_token')
+                if (savedToken) {
+                    const tokenRes = await fetch('/api/music/auth/verify', { headers: { 'x-user-token': savedToken } })
+                    if ((await tokenRes.json()).valid) {
+                        window.location.replace('./')
+                        return
+                    }
+                }
                 // Safari Fallback: 如果 Cookie 被清除但本地已存凭证，尝试自动恢复登录
+                const savedMode = localStorage.getItem('lx_login_mode') === 'player' ? 'player' : 'user'
                 const savedUser = localStorage.getItem('lx_sync_user')
-                const savedPass = localStorage.getItem('lx_sync_pass')
-                if (savedUser && savedPass) {
+                const savedPass = localStorage.getItem(savedMode === 'player' ? 'lx_player_pass' : 'lx_sync_pass')
+                if ((savedMode === 'player' || savedUser) && savedPass) {
                     console.log('[Login] 检测到已保存凭据，正在为 Safari 恢复 Session...')
                     const autoRes = await fetch('/api/music/auth', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username: savedUser, password: savedPass })
+                        body: JSON.stringify({ username: savedMode === 'player' ? '' : savedUser, password: savedPass, mode: savedMode })
                     })
                     const autoData = await autoRes.json()
                     if (autoData.success) {
@@ -147,23 +161,41 @@
         })()
 
         function rememberLocalLogin(data, password) {
+            if (data.mode === 'player') {
+                localStorage.setItem('lx_login_mode', 'player')
+                localStorage.setItem('lx_player_pass', password)
+                for (const key of ['lx_sync_user', 'lx_sync_pass', 'lx_user_token']) localStorage.removeItem(key)
+                if (localStorage.getItem('lx_sync_mode') === 'local') localStorage.removeItem('lx_sync_mode')
+                return
+            }
             if (!data.username) return
+            localStorage.setItem('lx_login_mode', 'user')
+            localStorage.removeItem('lx_player_pass')
             localStorage.setItem('lx_sync_user', data.username)
             localStorage.setItem('lx_sync_pass', password)
             localStorage.setItem('lx_sync_mode', 'local')
             if (data.token) localStorage.setItem('lx_user_token', data.token)
         }
 
+        function updateLoginMode() {
+            const playerMode = document.getElementById('auth-mode-input').value === 'player'
+            document.getElementById('auth-username-field').classList.toggle('hidden', playerMode)
+            const username = document.getElementById('auth-username-input')
+            username.required = !playerMode
+            username.disabled = playerMode
+        }
+
         async function handleLogin(event) {
             event.preventDefault()
-            const username = document.getElementById('auth-username-input').value.trim()
+            const mode = document.getElementById('auth-mode-input').value === 'player' ? 'player' : 'user'
+            const username = mode === 'player' ? '' : document.getElementById('auth-username-input').value.trim()
             const password = document.getElementById('auth-password-input').value
             const errorDiv = document.getElementById('auth-error')
             const errorMsg = document.getElementById('auth-error-msg')
             const submitBtn = document.getElementById('submit-btn')
             const card = document.getElementById('auth-card')
 
-            if (!password) return
+            if (!password || (mode === 'user' && !username)) return
 
             submitBtn.disabled = true
             submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>登录中...'
@@ -173,7 +205,7 @@
                 const res = await fetch('/api/music/auth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({ username, password, mode })
                 })
                 const data = await res.json()
 
@@ -210,7 +242,10 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('auth-username-input').focus()
+            const mode = document.getElementById('auth-mode-input')
+            mode.value = localStorage.getItem('lx_login_mode') === 'player' ? 'player' : 'user'
+            updateLoginMode()
+            document.getElementById(mode.value === 'player' ? 'auth-password-input' : 'auth-username-input').focus()
         })
     </script>
 </body>

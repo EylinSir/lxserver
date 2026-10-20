@@ -20,10 +20,37 @@ test('automatic token renewal also establishes the native media cookie session',
     assert.equal(saved.get('lx_user_token'), 'fresh');
 });
 
+test('token-only playback recovery restores the native cookie without dropping a valid token', async () => {
+    const saved = new Map([['lx_sync_user', 'listener'], ['lx_user_token', 'valid-token']]);
+    const requests = [];
+    const context = { userToken: 'valid-token', isUserLoggedIn: () => true, AbortSignal,
+        localStorage: { getItem: k => saved.get(k), removeItem: k => saved.delete(k) },
+        fetch: async (url, options) => { requests.push(options); return { ok: true,
+            json: async () => ({ valid: options.headers?.['x-user-token'] === 'valid-token' }) }; },
+        ensureUserAuthToken: async () => assert.fail('no password renewal needed') };
+    vm.runInNewContext(fn('restorePlaybackSession'), context);
+    assert.equal(await context.restorePlaybackSession(), true);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].headers, undefined);
+    assert.equal(requests[1].headers['x-user-token'], 'valid-token');
+    assert.equal(saved.get('lx_user_token'), 'valid-token');
+});
+
+test('a forced renewal without saved credentials preserves the existing API token', async () => {
+    const saved = new Map([['lx_sync_user', 'listener'], ['lx_user_token', 'valid-token']]);
+    const context = { userToken: 'valid-token', console: quiet,
+        localStorage: { getItem: k => saved.get(k), removeItem: k => saved.delete(k) } };
+    vm.runInNewContext(fn('ensureUserAuthToken'), context);
+    assert.equal(await context.ensureUserAuthToken({ force: true }), false);
+    assert.equal(context.userToken, 'valid-token');
+    assert.equal(saved.get('lx_user_token'), 'valid-token');
+});
+
 for (const valid of [true, false]) {
     test(`native playback session check handles cookie valid=${valid}`, async () => {
         let renewals = 0;
         const context = { isUserLoggedIn: () => true, AbortSignal,
+            localStorage: { getItem: key => key === 'lx_sync_pass' ? 'fixture-password' : null },
             fetch: async () => ({ ok: true, json: async () => ({ valid }) }),
             ensureUserAuthToken: async () => { renewals++; return true; } };
         vm.runInNewContext(fn('restorePlaybackSession'), context);
