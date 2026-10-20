@@ -7,7 +7,8 @@
 - [x] Replace fabricated Player/About/runtime-config v1.0.0 fallbacks. Read the running package version, synchronize generated version metadata at build/start, and show the source fingerprint beside the Player version. About uses the same metadata.
 - [x] Add regressions for stale/missing metadata, reproducible build identities, source/version changes, matching Player/About labels and escaped About substitutions; refresh worker v49.
 - [x] Pass all 141 tests (129 CJS + 12 TypeScript), TypeScript checking, production compilation, JS syntax and diff checks. The compiled server passes 48 isolated HTTP checks using disposable account/data/configuration, including version/fingerprint agreement, login, media ranges and Cast access. No configured external provider or physical receiver was used in this run.
-- [ ] Update PR #451 with the complete profile and current results.
+- [x] Update official PR #451 with the complete profile, original customization history and current results; code checkpoint `f3535de`. The expanded PR contains 59 changed files. Its new automated review is pending and is separate from the previously resolved review threads.
+- [x] Prepare a pinned six-file release overlay plus full before/after manifests, verification scripts and rollback handoff; schedule a quiet 30-minute connectivity retry that stops after verified deployment.
 - [ ] Deploy the exact verified build to Synology when reachable, preserving configuration, account/music data, mounts and unrelated services. The initial SSH check reports Host is down; no live change has been made.
 
 The dated sections below record earlier verification and the historical separation of public/custom profiles. This submission combines them; earlier hardware results are not a fresh physical receiver test of the new build. The user's pre-existing customizations retain their original commits and attribution.
