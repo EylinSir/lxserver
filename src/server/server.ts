@@ -1,4 +1,5 @@
 import http, { type IncomingMessage } from 'node:http'
+import { resolveCollectionUser } from './collectionAccess'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -2290,22 +2291,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const reqUsername = (req.headers['x-user-name'] as string) || targetUserParam || ''
         const auth = req.headers['x-frontend-auth']
         const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
-        let username: string | null = null
-
-        const canAccessOpen = global.lx.config['user.enablePublicFavorites'] && (
-          global.lx.config['user.enablePublicNonAdminAccess'] || isAdmin || !!verifyUserAuth(req)
+        const verified = verifyUserAuth(req)
+        const canAccessOpen = !!global.lx.config['user.enablePublicFavorites'] && (
+          global.lx.config['user.enablePublicNonAdminAccess'] || isAdmin || !!verified
         )
-        if (targetUserParam === '_open' || reqUsername === '_open' || (!reqUsername && !verifyUserAuth(req))) {
-          if (canAccessOpen) {
-            username = '_open'
-          }
-        }
-        if (!username) {
-          username = verifyUserAuth(req)
-        }
-        if (!username && reqUsername && reqUsername !== '_open') {
-          username = reqUsername
-        }
+        const requested = targetUserParam === '_open' ? '_open' : reqUsername
+        const username = resolveCollectionUser(requested, verified, isAdmin, canAccessOpen, false)
 
 
         if (!username) {
@@ -2334,30 +2325,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const reqUsername = (req.headers['x-user-name'] as string) || targetUserParam || ''
         const auth = req.headers['x-frontend-auth']
         const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
-        let username: string | null = null
-
-        const canAccessOpen = global.lx.config['user.enablePublicFavorites'] && (
-          global.lx.config['user.enablePublicNonAdminAccess'] || isAdmin || !!verifyUserAuth(req)
+        const verified = verifyUserAuth(req)
+        const canAccessOpen = !!global.lx.config['user.enablePublicFavorites'] && (
+          global.lx.config['user.enablePublicNonAdminAccess'] || isAdmin || !!verified
         )
-        if (targetUserParam === '_open' || reqUsername === '_open' || (!reqUsername && !verifyUserAuth(req))) {
-          if (!canAccessOpen) {
-            res.writeHead(403, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: false, error: '权限不足：未开启公开访问。' }))
-            return
-          }
-          if (auth !== global.lx.config['admin.password']) {
-            res.writeHead(403, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: false, error: '权限不足：公共歌单修改受限，请先验证管理员身份。' }))
-            return
-          }
-          username = '_open'
-        }
-        if (!username) {
-          username = verifyUserAuth(req)
-        }
-        if (!username && reqUsername && reqUsername !== '_open') {
-          username = reqUsername
-        }
+        const requested = targetUserParam === '_open' ? '_open' : reqUsername
+        const username = resolveCollectionUser(requested, verified, isAdmin, canAccessOpen, true)
 
 
         if (!username) {
@@ -2393,18 +2366,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const auth = req.headers['x-frontend-auth']
         const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
 
-        const canAccessOpen = global.lx.config['user.enablePublicFavorites'] && (
-          global.lx.config['user.enablePublicNonAdminAccess'] || isAdmin || !!verifyUserAuth(req)
+        const verified = verifyUserAuth(req)
+        const canAccessOpen = !!global.lx.config['user.enablePublicFavorites'] && (
+          global.lx.config['user.enablePublicNonAdminAccess'] || isAdmin || !!verified
         )
-        if ((reqUsername === '_open' || userParam === '_open' || (!reqUsername && !verifyUserAuth(req))) && canAccessOpen) {
-          return '_open'
-        }
-
-        let username = verifyUserAuth(req)
-        if (!username && reqUsername && reqUsername !== '_open') {
-          username = reqUsername
-        }
-        return username || '_open'
+        const requested = userParam === '_open' ? '_open' : reqUsername
+        return resolveCollectionUser(requested, verified, isAdmin, canAccessOpen, req.method !== 'GET')
       }
 
       // GET /api/user/library/artists  — 读取收藏歌手列表（自动补全缺失头像 picUrl）
