@@ -486,21 +486,6 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
 
         let isRequireUnsafe = !apiInfo.allowUnsafeVM && (error.message === 'REQUIRE_UNSAFE_VM' || error.message.includes('初始化超时') || error.message.includes('timeout'))
 
-        // 如果在 VM2 模式下加载失败，且系统允许 VM 模式，尝试测试原生 VM 模式能否成功加载
-        if (!isRequireUnsafe && !apiInfo.allowUnsafeVM && global.lx.config['system.allowUnsafeVM']) {
-            try {
-                const testUnsafeRes = await loadUserApi({
-                    ...apiInfo,
-                    id: `${apiInfo.id}_test_vm`,
-                    allowUnsafeVM: true
-                })
-                if (testUnsafeRes.success) {
-                    console.log(`[自定义源] ${fullApiInfo.name} 在 VM2 模式下失败，但在原生 VM 模式下成功，标记 requireUnsafe = true`)
-                    isRequireUnsafe = true
-                }
-            } catch (e) { }
-        }
-
         return { success: false, apiInstance: null, error: error.message, requireUnsafe: isRequireUnsafe, updateAlert: error.updateAlert }
     }
 }

@@ -158,7 +158,7 @@ async function getServerFolders(song, qualities) {
     return folders || {};
 }
 
-// 给音质选项加上"服务器已缓存/已下载"标注；forServer 时已下载的音质置灰不可选
+// 给音质选项加上"服务器已缓存/已下载"标注
 async function buildQualityOptions(song, qualities, forServer) {
     const labels = await buildQualityOptionLabels(song, qualities);
     const folders = await getServerFolders(song, qualities);
@@ -167,11 +167,11 @@ async function buildQualityOptions(song, qualities, forServer) {
         const folder = (folders || {})[qualities[idx]];
         if (!folder) return { label, disabled: false };
         const stateText = window.ServerFileState.stateText(folder);
-        const blocked = forServer && folder === 'music';
+        const isDownloaded = forServer && folder === 'music';
         return {
             label: `${label} · ${stateText}`,
-            disabled: blocked,
-            hint: blocked ? '该音质已在服务器下载目录，无需重复下载' : stateText
+            disabled: false,
+            hint: isDownloaded ? '该音质已在服务器下载目录，再次下载将覆盖更新' : stateText
         };
     });
 }
@@ -182,7 +182,7 @@ function qualityIndexOfLabel(options, label) {
 
 // 该音质在服务器上的落点：本地列表那一行自带文件名，其余入口按 歌曲ID + 音质 查映射
 async function resolveCachedFile(song, quality) {
-    if (song._serverFile) return { folder: song._serverFile.folder, filename: song._serverFile.filename };
+    if (song._serverFile && (!song.quality || song.quality === quality)) return { folder: song._serverFile.folder, filename: song._serverFile.filename };
     if (!window.ServerFileState) return null;
     await window.ServerFileState.ensure(true);
     if (window.ServerFileState.unavailable) return null;
@@ -455,7 +455,8 @@ async function downloadSong(songOrId, forceQuality = null, suppressAlerts = fals
 
             window.SystemDownloadManager.addTasks([{
                 ...song,
-                quality: targetQuality
+                quality: targetQuality,
+                explicitQuality: targetQuality
             }]);
 
             if (!suppressAlerts) showInfo(`已添加任务，您可以在右侧下载管理面板查看进度`);
@@ -523,7 +524,8 @@ async function downloadSong(songOrId, forceQuality = null, suppressAlerts = fals
                     ...song,
                     taskId: 'server_' + (song.id || song.songmid),
                     isServer: true,
-                    quality: targetQuality // Let DM handle best quality resolution
+                    quality: targetQuality,
+                    explicitQuality: targetQuality
                 }]);
                 if (!suppressAlerts) showInfo(`已添加云端缓存任务`);
                 return true;
@@ -583,7 +585,8 @@ async function batchDownloadSongs(songsToDownload, batchOptions = {}) {
 
             const tasks = songsToDownload.map(s => ({
                 ...s,
-                quality: targetQuality
+                quality: targetQuality,
+                explicitQuality: targetQuality
             }));
 
             await window.SystemDownloadManager.addTasks(tasks);
@@ -630,7 +633,8 @@ async function batchDownloadSongs(songsToDownload, batchOptions = {}) {
                 ...s,
                 taskId: 'server_' + (s.id || s.songmid),
                 isServer: true,
-                quality: targetQuality // 调度器启动时会重新计算最佳音质
+                quality: targetQuality,
+                explicitQuality: targetQuality
             };
         });
         await window.SystemDownloadManager.addTasks(tasks);

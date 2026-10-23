@@ -331,7 +331,7 @@
                             class="t-text-muted hover:t-text-muted transition-colors" title="GitHub">
                             <i class="fab fa-github text-xl"></i>
                         </a>
-                        <div class="text-sm t-text-muted" id="app-version">v1.0.0 Web</div>
+                        <div class="text-sm t-text-muted" id="app-version">版本信息加载中…</div>
                     </div>
                 </div>
             </header>
@@ -727,7 +727,7 @@
                     <!-- Song List Detail View (Overlay within the view) -->
                     <div id="songlist-detail-view"
                         class="absolute inset-0 t-bg-main z-20 flex flex-col hidden translate-x-full transition-transform duration-300 pb-44 md:pb-32">
-                        
+
                         <!-- Song List Floating Mini Bar (Shown when scrolling down inside song list, 小窗) -->
                         <div id="sl-mini-bar" class="hidden flex-shrink-0 border-b t-border-main t-bg-panel/90 backdrop-blur-xl px-3 md:px-5 py-2.5 transition-all duration-300 ease-out transform -translate-y-2 opacity-0 pointer-events-none z-20">
                             <div class="flex items-center justify-between gap-2.5 md:gap-4 w-full">
@@ -3001,6 +3001,7 @@
                                             class="lm-select !w-full !py-2">
                                             <option value="bars">条形阵列</option>
                                             <option value="wave">平滑波浪</option>
+                                            <option value="vumeter">双表头</option>
                                         </select>
                                     </div>
 
@@ -3012,7 +3013,7 @@
                                                 <i class="fas fa-film mr-2 text-emerald-500"></i> 详情页背景
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
-                                                    <span class="setting-tooltip-content">歌词详情页（全屏模式）下的背景视觉特效。</span>
+                                                    <span class="setting-tooltip-content">歌词详情页（全屏模式）下的背景视觉特效，支持高保真立体声双表头。</span>
                                                 </span>
                                             </h4>
                                             <label class="relative inline-flex items-center cursor-pointer">
@@ -3030,6 +3031,7 @@
                                             <option value="pulse">频率脉冲</option>
                                             <option value="dots">点阵频谱</option>
                                             <option value="flower">灵动莲花</option>
+                                            <option value="vumeter">双表头</option>
                                         </select>
                                     </div>
 
@@ -3052,6 +3054,29 @@
                                             class="lm-select !w-full !py-2">
                                             <option value="blocks">方块样式</option>
                                             <option value="connected">连体样式</option>
+                                        </select>
+                                    </div>
+
+                                    <!-- VU Meter Theme -->
+                                    <div
+                                        class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow flex flex-col gap-3">
+                                        <h4 class="text-sm font-bold t-text-main flex items-center">
+                                            <i class="fas fa-gauge-high mr-2 text-emerald-500"></i> 表盘风格
+                                            <span class="setting-tooltip-trigger ml-1">
+                                                <i class="fas fa-question-circle text-[10px]"></i>
+                                                <span class="setting-tooltip-content">
+                                                    选择双表头的经典发烧仪表面板主题风格。
+                                                </span>
+                                            </span>
+                                        </h4>
+                                        <select id="setting-vu-meter-theme"
+                                            onchange="updateSetting('vuMeterTheme', this.value)"
+                                            class="lm-select !w-full !py-2">
+                                            <option value="vintage-amber">经典暖金</option>
+                                            <option value="ocean-blue">湖水湛蓝</option>
+                                            <option value="cyber-cyan">赛博青翠</option>
+                                            <option value="champagne-gold">香槟金典</option>
+                                            <option value="studio-monochrome">黑白监听</option>
                                         </select>
                                     </div>
 
@@ -3429,18 +3454,18 @@
                                                 <div class="flex items-center justify-between">
                                                     <div>
                                                         <h4 class="text-sm font-bold t-text-main flex items-center">
-                                                            禁用预读跳过
+                                                            预读失败重试
                                                             <span class="setting-tooltip-trigger">
                                                                 <i class="fas fa-question-circle"></i>
                                                                 <span class="setting-tooltip-content">
-                                                                    开启后，当后台预读失败时不自动跳过该歌曲，仍会在轮到播放时尝试前台解析与错误恢复。<br>
-                                                                    <span class="text-emerald-500 font-medium">* 默认关闭（预读失败时自动跳过无法播放的歌曲）。</span>
+                                                                    后台预读失败时仍会在轮到播放时尝试解析与错误恢复。<br>
+                                                                    <span class="text-emerald-500 font-medium">* 始终开启，避免临时网络错误导致歌曲被跳过。</span>
                                                                 </span>
                                                             </span>
                                                         </h4>
                                                     </div>
                                                     <label class="relative inline-flex items-center cursor-pointer">
-                                                        <input type="checkbox" id="setting-disable-preload-skip"
+                                                        <input type="checkbox" id="setting-disable-preload-skip" checked disabled
                                                             class="sr-only peer"
                                                             onchange="updateSetting('disablePreloadSkip', this.checked)">
                                                         <div
@@ -3485,12 +3510,12 @@
                                                             <span class="setting-tooltip-trigger ml-1">
                                                                 <i class="fas fa-question-circle"></i>
                                                                 <span
-                                                                    class="setting-tooltip-content">切换歌曲时，音量平滑淡出和淡入，减少切换的突兀感。</span>
+                                                                    class="setting-tooltip-content">当前保持原声音量，淡入淡出已关闭，以避免切歌时音量突变。</span>
                                                             </span>
                                                         </h4>
                                                     </div>
                                                     <label class="relative inline-flex items-center cursor-pointer">
-                                                        <input type="checkbox" id="setting-enable-crossfade"
+                                                        <input type="checkbox" id="setting-enable-crossfade" disabled
                                                             class="sr-only peer"
                                                             onchange="updateSetting('enableCrossfade', this.checked)">
                                                         <div
@@ -3877,7 +3902,7 @@
             <div id="player-detail-bg-overlay" class="absolute inset-0 t-bg-panel/30 backdrop-blur-3xl"></div>
             <!-- Detail Visualizer Canvas (Raised to avoid being blocked by footer) -->
             <canvas id="detail-visualizer"
-                class="absolute bottom-24 left-0 w-full h-[calc(100vh-6rem)] pointer-events-none opacity-30"></canvas>
+                class="absolute bottom-24 left-0 w-full h-[calc(100vh-6rem)] pointer-events-none"></canvas>
         </div>
 
         <!-- Navbar / Controls -->
@@ -3981,7 +4006,7 @@
                     <div id="player-title"
                         class="font-bold t-text-main truncate text-sm md:text-base dynamic-marquee min-w-0 w-fit"
                         data-text="暂无播放">暂无播放</div>
-                    <div id="player-source" class="flex-shrink-0"></div>
+                    <div id="player-source" class="flex-shrink-0 flex items-center gap-1.5"></div>
                 </div>
                 <div class="flex flex-col min-w-0">
                     <div id="player-artist"
@@ -4039,8 +4064,8 @@
                 <div class="flex-1 h-8 flex items-center relative group">
                     <!-- Footer Info/Visualizer Canvas (Moved to match progress bar width) -->
                     <div id="visualizer-container"
-                        class="absolute bottom-6 left-0 w-full h-12 pointer-events-none overflow-hidden flex justify-center items-end transition-all duration-300">
-                        <canvas id="footer-visualizer" class="h-full opacity-40"></canvas>
+                        class="absolute bottom-6 left-0 w-full h-12 pointer-events-none flex justify-center items-end transition-all duration-300">
+                        <canvas id="footer-visualizer" class="w-full h-full"></canvas>
                     </div>
 
                     <div class="w-full bg-gray-200 rounded-full h-1.5 cursor-pointer relative z-10"
@@ -4055,7 +4080,9 @@
                 <span id="time-total">00:00</span>
             </div>
 
-            <div class="flex items-center gap-6 md:gap-6 w-full justify-center md:mb-2 relative">
+            <div id="player-controls"
+                class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 md:gap-3 w-full md:mb-2 relative">
+                <div class="flex items-center justify-start min-w-0">
                 <!-- Play Mode Button with Dropdown -->
                 <div class="relative group">
                     <button id="play-mode-btn" onclick="togglePlayModeMenu(event)"
@@ -4093,6 +4120,10 @@
                     </div>
                 </div>
 
+                </div>
+
+                <!-- Keep the main transport centered regardless of wireless availability. -->
+                <div class="flex items-center justify-center gap-2 md:gap-6">
                 <button class="t-text-muted hover:text-emerald-600 text-lg transition-colors p-2"
                     onclick="playPrev()"><i class="fas fa-step-backward"></i></button>
                 <button id="btn-play"
@@ -4102,7 +4133,10 @@
                 </button>
                 <button class="t-text-muted hover:text-emerald-600 text-lg transition-colors p-2"
                     onclick="playNext()"><i class="fas fa-step-forward"></i></button>
+                </div>
 
+                <!-- Secondary controls align to the right without shifting the transport. -->
+                <div class="flex items-center justify-end gap-1 md:gap-2 min-w-0">
                 <!-- Playback Rate Button -->
                 <div class="relative group">
                     <button id="playback-rate-btn" onclick="togglePlaybackRateMenu(event)"
@@ -4135,6 +4169,17 @@
                             class="playback-rate-option w-full px-3 py-1.5 text-center hover:t-bg-item-hover text-xs md:text-sm transition-colors"
                             data-rate="2.0">2.0x</button>
                     </div>
+                </div>
+                <!-- Chromecast Button -->
+                <button id="btn-cast" type="button" hidden disabled aria-label="Chromecast" aria-pressed="false"
+                    title="Chromecast" class="p-2 rounded-lg t-text-muted hover:text-emerald-500">
+                    <i class="fab fa-chromecast" aria-hidden="true"></i>
+                </button>
+                <!-- AirPlay Button -->
+                <button id="btn-airplay" type="button" hidden disabled aria-label="AirPlay" aria-pressed="false"
+                    title="AirPlay" class="p-2 rounded-lg t-text-muted hover:text-emerald-500">
+                    <i class="fas fa-tv" aria-hidden="true"></i>
+                </button>
                 </div>
             </div>
         </div>
@@ -4371,13 +4416,13 @@
                     <input type="password" id="sync-code" placeholder="输入连接码"
                         class="shadow appearance-none border rounded w-full py-2 px-3 t-text-main leading-tight focus:outline-none focus:shadow-outline">
                 </div>
-                <div id="sync-status" class="mb-4 text-xs text-gray-500"></div>
+                <div id="sync-modal-status" class="mb-4 text-xs text-gray-500"></div>
                 <div class="flex justify-between">
                     <button onclick="closeSyncModal()"
                         class="bg-gray-300 hover:bg-gray-400 t-text-main font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                         取消
                     </button>
-                    <button onclick="handleRemoteConnect()"
+                    <button onclick="handleRemoteConnect('modal')"
                         class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                         连接 (Connect)
                     </button>
@@ -6072,12 +6117,15 @@
     <script src="js/lyric-card.js"></script>
     <script src="js/ios-background-audio.js"></script>
     <script src="js/sound-effects.js"></script>
+    <script src="js/airplay.js"></script>
     <script src="js/download_manager.js"></script>
     <script src="js/local_music.js"></script>
     <script src="js/customDir.js"></script>
     <script src="js/common_ui.js"></script>
     <script src="js/sync_download.js"></script>
+    <script src="js/playback.js"></script>
     <script src="app.js"></script>
+    <script src="js/chromecast.js"></script>
 </body>
 
 <!-- 同步下载面板 Modal -->

@@ -16,6 +16,7 @@ if (typeof (global as any).navigator === 'undefined') {
 
 import { initLogger } from '@/utils/log4js'
 import defaultConfig from './defaultConfig'
+import { migrateLegacyConfig } from './configMigration'
 import { ENV_PARAMS, File } from './constants'
 import { checkAndCreateDirSync } from './utils'
 
@@ -76,7 +77,7 @@ const setBoolConfig = <K extends keyof LX.Config>(key: K, val?: string) => {
         }
         return false
       }),
-  ].map(([e, v]) => `${e}: ${v as string}`)
+  ].map(([e, v]) => `${e}: [configured]`)
   if (envLog.length) console.log(`Load env: \n  ${envLog.join('\n  ')}`)
 }
 
@@ -239,7 +240,7 @@ const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string
     let value = String(v)
     if (envParamKeys.includes(envKey)) {
       if (envParams[envKey] == null) {
-        envLog.push(`${envKey}: ${value}`)
+        envLog.push(`${envKey}: [configured]`)
         envParams[envKey] = value
       }
     } else if (envKey.startsWith('LX_USER_') && value) {
@@ -249,7 +250,7 @@ const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string
           name,
           password: value,
         })
-        envLog.push(`${envKey}: ${value}`)
+        envLog.push(`${envKey}: [configured]`)
       }
     }
   }
@@ -266,6 +267,7 @@ const margeConfig = (p: string) => {
     console.warn('Read config error: ' + (err.message as string))
     return false
   }
+  config = migrateLegacyConfig(config)
   const newConfig = { ...global.lx.config }
   for (const key of Object.keys(defaultConfig) as Array<keyof LX.Config>) {
     // @ts-expect-error
@@ -636,7 +638,7 @@ const checkUserConfig = (users: LX.Config['users']) => {
 
   for (const user of users) {
     if (userNames.includes(user.name)) exit('User name duplicate: ' + user.name)
-    if (!allowDuplicatePasswords && passwords.includes(user.password)) exit('User password duplicate: ' + user.password)
+    if (!allowDuplicatePasswords && passwords.includes(user.password)) exit('User password duplicate (value redacted)')
     userNames.push(user.name)
     passwords.push(user.password)
   }
@@ -680,7 +682,7 @@ if (fs.existsSync(usersJsonPath)) {
 checkUserConfig(global.lx.config.users)
 
 console.log(`[用户] 已注册用户:
-${global.lx.config.users.map(user => `  ${user.name}: ${user.password}`).join('\n') || '  (暂无用户)'}
+${global.lx.config.users.map(user => `  ${user.name}`).join('\n') || '  (暂无用户)'}
 `)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { getUserDirname } = require('@/user')

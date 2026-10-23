@@ -316,6 +316,13 @@
     border-left-width: 0 !important;
 }
 
+/* Translated drawers remain rendered; stop their invisible text animations. */
+#queue-drawer.translate-x-full .animate-marquee,
+#cache-drawer.translate-x-full .animate-marquee,
+#download-drawer.translate-x-full .animate-marquee {
+    animation-play-state: paused !important;
+}
+
 /* Setting Tooltip Styles */
 .setting-tooltip-trigger {
     position: relative;

@@ -3,7 +3,29 @@ import * as path from 'path'
 import { extractMetadata, loadUserApi, initUserApis, getApiStatus } from './userApi'
 import type { IncomingMessage, ServerResponse } from 'http'
 import needle from 'needle'
+import { verifyUserAuth } from './server'
+import { normalizeSourceOwner } from './security'
 import { getProxyAgent } from '../modules/utils/proxy.js'
+
+// Authenticate the requested owner before parsing or executing source scripts.
+function authorizeOwner(req: IncomingMessage, res: ServerResponse, username?: string, unsafe = false, readOnly = false): boolean {
+    let owner: string
+    try { owner = normalizeSourceOwner(username) } catch {
+        res.writeHead(400); res.end('Invalid source owner'); return false
+    }
+    const adminPassword = global.lx.config['admin.password']
+    const admin = typeof adminPassword === 'string' && adminPassword.length > 0 &&
+        req.headers['x-frontend-auth'] === adminPassword
+    if (admin) return true
+    const user = verifyUserAuth(req)
+    const allowed = !unsafe && (owner === 'open'
+        ? readOnly && (!global.lx.config['user.enablePublicRestriction'] || !!user)
+        : user === owner)
+    if (allowed) return true
+    res.writeHead(403, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ success: false, error: 'Source owner or administrator authentication required' }))
+    return false
+}
 
 // 读取请求体
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -23,9 +45,10 @@ export async function handleValidate(req: IncomingMessage, res: ServerResponse) 
     try {
         const body = await readBody(req)
         const { script, username, allowUnsafeVM } = JSON.parse(body)
+        if (!authorizeOwner(req, res, username, !!allowUnsafeVM)) return
 
         // 鉴权逻辑：只有已登录用户（非 default）可以免密码验证
-        const targetOwner = (username && username !== 'default') ? username : 'open'
+        const targetOwner = normalizeSourceOwner(username)
         if (targetOwner === 'open') {
             const auth = req.headers['x-frontend-auth']
             if (auth !== global.lx.config['admin.password']) {
@@ -118,7 +141,8 @@ function getSourceDir(username?: string) {
     const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
     const root = path.join(dataPath, 'users', 'source')
     // 如果 username 是 'open' 或 'default' 或空，则映射到 '_open'
-    const targetDirName = (username && username !== 'default' && username !== 'open') ? username : '_open'
+    const owner = normalizeSourceOwner(username)
+    const targetDirName = owner === 'open' ? '_open' : owner
     return path.join(root, targetDirName)
 }
 
@@ -152,9 +176,10 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
     try {
         const body = await readBody(req)
         const { filename, content, username, allowUnsafeVM } = JSON.parse(body)
+        if (!authorizeOwner(req, res, username, !!allowUnsafeVM)) return
 
         // 确定 owner 用于后续标识
-        const targetOwner = (username && username !== 'default') ? username : 'open'
+        const targetOwner = normalizeSourceOwner(username)
 
         // 检查权限限制 (针对公开源)
         if (targetOwner === 'open') {
@@ -258,6 +283,7 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
     try {
         const body = await readBody(req)
         const { url, filename, username, allowUnsafeVM } = JSON.parse(body)
+        if (!authorizeOwner(req, res, username, !!allowUnsafeVM)) return
 
         if (!url) {
             throw new Error('Missing URL')
@@ -343,7 +369,7 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
             }
         }
 
-        const targetOwner = (username && username !== 'default') ? username : 'open'
+        const targetOwner = normalizeSourceOwner(username)
 
         // 检查权限限制
         if (targetOwner === 'open') {
@@ -418,6 +444,8 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
 // 如果提供了 username，返回 open + username 的源
 // 如果没提供，只返回 open 的源
 export async function handleList(req: IncomingMessage, res: ServerResponse, username: string) {
+    if (!authorizeOwner(req, res, username, false, true)) return
+    username = normalizeSourceOwner(username) === 'open' ? 'default' : username
     const openSources: any[] = []
     const userSources: any[] = []
 
@@ -438,7 +466,7 @@ export async function handleList(req: IncomingMessage, res: ServerResponse, user
 
     // 2. 读取 User 源 (如果有)
     let userStates: Record<string, any> = {}
-    const targetStatesOwner = (username && username !== 'default') ? username : 'open'
+    const targetStatesOwner = normalizeSourceOwner(username)
     const statesDir = getSourceDir(targetStatesOwner)
     const userStatesPath = path.join(statesDir, 'states.json')
     if (fs.existsSync(userStatesPath)) {
@@ -498,7 +526,7 @@ export async function handleList(req: IncomingMessage, res: ServerResponse, user
     })
 
     // ===== 自定义合并后的排序逻辑 =====
-    let targetOwner = (username && username !== 'default') ? username : 'open'
+    let targetOwner = normalizeSourceOwner(username)
     let orderPath = path.join(getSourceDir(targetOwner), 'order.json')
     let order: string[] = []
 
@@ -550,9 +578,10 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
     try {
         const body = await readBody(req)
         const { id, sourceId, enabled, username, allowUnsafeVM } = JSON.parse(body)
+        if (!authorizeOwner(req, res, username, !!allowUnsafeVM)) return
         const targetId = id || sourceId
 
-        let targetOwner = (username && username !== 'default') ? username : 'open'
+        let targetOwner = normalizeSourceOwner(username)
 
         // 检查权限限制
         if (targetOwner === 'open') {
@@ -708,12 +737,13 @@ export async function handleReorder(req: IncomingMessage, res: ServerResponse) {
     try {
         const body = await readBody(req)
         const { username, sourceIds } = JSON.parse(body)
+        if (!authorizeOwner(req, res, username, false)) return
 
         if (!Array.isArray(sourceIds)) {
             throw new Error('sourceIds must be an array')
         }
 
-        let targetOwner = (username && username !== 'default') ? username : 'open'
+        let targetOwner = normalizeSourceOwner(username)
 
         // 检查权限限制 (公开源排序)
         if (targetOwner === 'open') {
@@ -801,10 +831,11 @@ export async function handleDelete(req: IncomingMessage, res: ServerResponse) {
     try {
         const body = await readBody(req)
         const { id, sourceId, username } = JSON.parse(body)
+        if (!authorizeOwner(req, res, username, false)) return
         const targetId = id || sourceId
 
         // 查找逻辑同 Toggle
-        let targetOwner = (username && username !== 'default') ? username : 'open'
+        let targetOwner = normalizeSourceOwner(username)
 
         // 检查权限限制
         if (targetOwner === 'open') {
@@ -887,13 +918,14 @@ export async function handleUpdatePlatforms(req: IncomingMessage, res: ServerRes
     try {
         const body = await readBody(req)
         const { id, sourceId, username, disabledSources } = JSON.parse(body)
+        if (!authorizeOwner(req, res, username, false)) return
         const targetId = id || sourceId
 
         if (!targetId) {
             throw new Error('缺少音源ID')
         }
 
-        let targetOwner = (username && username !== 'default') ? username : 'open'
+        let targetOwner = normalizeSourceOwner(username)
 
         // 核心安全逻辑：如果是全局公开源且为 open 模式，需要验证管理员身份
         if (targetOwner === 'open') {

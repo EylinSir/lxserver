@@ -751,7 +751,7 @@ export const downloadSongToSubPath = async (
       }
 
       const songKey = songId + '_' + finalQuality
-      const prog = fileCache.cacheProgress.get(songKey)
+      const prog = fileCache.cacheProgress.get(fileCache.getProgressKey(songKey, username))
       return prog?.status === 'exists' ? 'exists' : 'ok'
     }
 
@@ -819,7 +819,7 @@ export const downloadSongToSubPath = async (
     }
 
     const songKey = songId + '_' + finalQuality
-    const prog = fileCache.cacheProgress.get(songKey)
+    const prog = fileCache.cacheProgress.get(fileCache.getProgressKey(songKey, username))
     return prog?.status === 'exists' ? 'exists' : 'ok'
 
   } catch (e: any) {

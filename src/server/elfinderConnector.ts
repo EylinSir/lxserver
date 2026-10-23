@@ -3,6 +3,9 @@ import * as fs from 'fs'
 import * as crypto from 'crypto'
 import { ZipArchive } from 'archiver'
 import unzipper from 'unzipper'
+import { resolveContainedPath } from './security'
+
+const temporaryArchives = new Set<string>()
 
 // elFinder 文件管理器连接器
 export class ElFinderConnector {
@@ -23,6 +26,7 @@ export class ElFinderConnector {
 
     // 解码hash为路径
     private decode(hash: string): string {
+        if (typeof hash !== 'string') throw new Error('Invalid target')
         if (hash.startsWith('TMP_')) {
             const tmpPath = Buffer.from(hash.substring(4), 'base64').toString('utf-8')
             const resolved = path.resolve(tmpPath)
@@ -30,20 +34,21 @@ export class ElFinderConnector {
             if (!resolved.startsWith(tmpDir + path.sep) && resolved !== tmpDir) {
                 throw new Error('Invalid temporary path')
             }
+            if (!temporaryArchives.has(resolved)) throw new Error('Invalid temporary archive')
             return resolved
         }
-        try {
-            const rawHash = hash.startsWith('l1_') ? hash.substring(3) : hash
-            const base64 = rawHash.replace(/-/g, '+').replace(/_/g, '/')
-            const relative = Buffer.from(base64, 'base64').toString('utf-8')
-            const resolved = path.resolve(this.root, relative)
-            if (!resolved.startsWith(this.root + path.sep) && resolved !== this.root) {
-                throw new Error('Path traversal detected')
-            }
-            return resolved
-        } catch {
-            return this.root
-        }
+        if (typeof hash !== 'string' || !/^l1_[A-Za-z0-9_-]+$/.test(hash)) throw new Error('Invalid target')
+        const relative = Buffer.from(hash.substring(3), 'base64url').toString('utf8')
+        return resolveContainedPath(this.root, relative)
+    }
+
+    private childPath(parent: string, name: string): string {
+        if (typeof name !== 'string' || !name || name === '.' || name === '..' || /[\\/\0]/.test(name)) throw new Error('Invalid filename')
+        return resolveContainedPath(this.root, path.relative(this.root, path.join(parent, name)))
+    }
+
+    private assertMutable(target: string) {
+        if (target === this.root) throw new Error('Cannot modify the root directory')
     }
 
     // 获取文件/文件夹信息
@@ -125,7 +130,7 @@ export class ElFinderConnector {
 
     // 处理请求
     public async handle(cmd: string, params: any): Promise<any> {
-        console.log(`[文件管理] 处理命令: ${cmd}`, params)
+        console.log(`[文件管理] 处理命令: ${cmd}`)
         try {
             switch (cmd) {
                 case 'open':
@@ -304,7 +309,7 @@ export class ElFinderConnector {
     private async cmdMkdir(params: any): Promise<any> {
         const target = this.decode(params.target)
         const name = params.name
-        const newDir = path.join(target, name)
+        const newDir = this.childPath(target, name)
 
         try {
             await fs.promises.mkdir(newDir)
@@ -319,7 +324,7 @@ export class ElFinderConnector {
     private async cmdMkfile(params: any): Promise<any> {
         const target = this.decode(params.target)
         const name = params.name
-        const newFile = path.join(target, name)
+        const newFile = this.childPath(target, name)
 
         try {
             await fs.promises.writeFile(newFile, '')
@@ -334,7 +339,8 @@ export class ElFinderConnector {
     private async cmdRename(params: any): Promise<any> {
         const target = this.decode(params.target)
         const name = params.name
-        const newPath = path.join(path.dirname(target), name)
+        this.assertMutable(target)
+        const newPath = this.childPath(path.dirname(target), name)
 
         try {
             await fs.promises.rename(target, newPath)
@@ -352,6 +358,8 @@ export class ElFinderConnector {
 
         for (const hash of targets) {
             const filePath = this.decode(hash)
+            this.assertMutable(filePath)
+            resolveContainedPath(this.root, path.relative(this.root, filePath))
             try {
                 const stats = await fs.promises.stat(filePath)
                 if (stats.isDirectory()) {
@@ -379,7 +387,7 @@ export class ElFinderConnector {
         for (const hash of targets) {
             const src = this.decode(hash)
             const name = path.basename(src)
-            const dstPath = path.join(dst, name)
+            const dstPath = this.childPath(dst, name)
 
             try {
                 if (cut) {
@@ -550,7 +558,7 @@ export class ElFinderConnector {
         // 确定目标目录（第一个文件的父目录）
         const firstFile = this.decode(targets[0])
         const dir = path.dirname(firstFile)
-        const archivePath = path.join(dir, name)
+        const archivePath = this.childPath(dir, name)
 
         const output = fs.createWriteStream(archivePath)
         const archive = new ZipArchive({ zlib: { level: 9 } })
@@ -593,7 +601,7 @@ export class ElFinderConnector {
         let extractPath = dir
         if (makedir) {
             const folderName = path.basename(target, path.extname(target))
-            extractPath = path.join(dir, folderName)
+            extractPath = this.childPath(dir, folderName)
             if (!fs.existsSync(extractPath)) {
                 fs.mkdirSync(extractPath)
             }
@@ -670,6 +678,7 @@ export class ElFinderConnector {
 
         return new Promise((resolve, reject) => {
             output.on('close', () => {
+                temporaryArchives.add(zipPath)
                 resolve({
                     zipdl: {
                         file: 'TMP_' + Buffer.from(zipPath).toString('base64'),

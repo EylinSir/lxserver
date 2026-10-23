@@ -154,7 +154,7 @@ const loadTasks = () => {
 
 const getPublicTask = (task: ServerDownloadTask) => {
   const live = task.status === 'downloading' && task.activeSongKey
-    ? fileCache.cacheProgress.get(task.activeSongKey)
+    ? fileCache.cacheProgress.get(fileCache.getProgressKey(task.activeSongKey, task.username))
     : undefined
   const liveStatus = live?.status as ServerDownloadStatus | undefined
   return {
@@ -206,7 +206,7 @@ const runTask = async (task: ServerDownloadTask) => {
     })
 
     if (controller.signal.aborted) return
-    const progress = fileCache.cacheProgress.get(task.activeSongKey)
+    const progress = fileCache.cacheProgress.get(fileCache.getProgressKey(task.activeSongKey, task.username))
     task.status = progress?.status === 'exists' ? 'exists' : 'finished'
     task.progress = 100
     task.total = Number(progress?.total || progress?.received || task.total || 0)
@@ -214,7 +214,9 @@ const runTask = async (task: ServerDownloadTask) => {
     task.speed = 0
     task.errorMsg = ''
   } catch (err: any) {
-    if (controller.signal.aborted || err?.message === 'Aborted') {
+    if (controller.signal.aborted) {
+      // pause/resume owns the requested state while the previous run unwinds.
+    } else if (err?.message === 'Aborted') {
       task.status = 'paused'
       task.errorMsg = '已暂停'
     } else {
@@ -223,7 +225,7 @@ const runTask = async (task: ServerDownloadTask) => {
     }
     task.speed = 0
   } finally {
-    controllers.delete(key)
+    if (controllers.get(key) === controller) controllers.delete(key)
     task.updatedAt = Date.now()
     scheduleSave()
     void processQueue()
@@ -242,7 +244,7 @@ const processQueue = async () => {
         activeByUser.set(username, (activeByUser.get(username) || 0) + 1)
       }
       const next = Array.from(tasks.values()).find(task => (
-        task.status === 'waiting' && (activeByUser.get(task.username) || 0) < getConcurrency(task.username)
+        task.status === 'waiting' && !controllers.has(taskMapKey(task.username, task.id)) && (activeByUser.get(task.username) || 0) < getConcurrency(task.username)
       ))
       if (!next) break
       void runTask(next)

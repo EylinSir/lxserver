@@ -66,17 +66,29 @@ window.soundEffects = (function () {
             return window.iOSBackgroundAudio.isIOS();
         }
         const ua = navigator.userAgent;
-        const isIPad = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        return /iPhone|iPod/.test(ua) || isIPad;
+        if (/Macintosh/i.test(ua) && !('ontouchend' in document)) return false;
+        if (/Windows|Linux|X11/i.test(ua)) return false;
+        if (/iPhone|iPod/.test(ua)) return true;
+        return (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) && ('ontouchend' in document);
     }
 
     function isMobileDevice() {
         if (isIOSDevice()) return true;
         const ua = navigator.userAgent;
-        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+        const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (isTouch && window.innerWidth < 1024);
+    }
+
+    function canProcessLocally() {
+        // Capturing a mobile media element cannot be undone by disconnecting Web Audio.
+        // Keep native playback even before Safari reports an AirPlay target.
+        return (isGraphBuilt || !isMobileDevice()) &&
+            !document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless &&
+            !window.LXPlayback?.isRemote;
     }
 
     function init(force = false) {
+        if (!canProcessLocally()) return;
         if (audioContext && isGraphBuilt) return;
         loadSettings();
         if (!force && (isMobileDevice() || !hasActiveEffects())) {
@@ -102,6 +114,9 @@ window.soundEffects = (function () {
         // Disconnect any bypass link (e.g. created previously by visualizer)
         try { mediaSource.disconnect(); } catch (_) { }
         try { analyser.disconnect(); } catch (_) { }
+        if (window._sharedSplitterNode) {
+            try { mediaSource.connect(window._sharedSplitterNode); } catch (_) { }
+        }
 
         // EQ Filters
         eqFilters = freqs.map(freq => {
@@ -165,12 +180,13 @@ window.soundEffects = (function () {
         applySettings();
         renderUI();
         initPitchShifter();
+        window.musicVisualizer?.init();
     }
 
     let pitchShifterInitPromise = null;
 
     async function initPitchShifter() {
-        if (!audioContext) return null;
+        if (!canProcessLocally() || !audioContext) return null;
         if (pitchShifterNode) return pitchShifterNode;
         if (pitchShifterInitPromise) return pitchShifterInitPromise;
 
@@ -178,6 +194,10 @@ window.soundEffects = (function () {
             try {
                 console.log('[SoundEffects] Loading Pitch Shifter Module from /music/js/pitch-shifter/phase-vocoder.js');
                 await audioContext.audioWorklet.addModule('/music/js/pitch-shifter/phase-vocoder.js');
+                if (!canProcessLocally()) {
+                    pitchShifterInitPromise = null;
+                    return null;
+                }
 
                 if (!pitchShifterNode) {
                     pitchShifterNode = new AudioWorkletNode(audioContext, 'phase-vocoder-processor', {
@@ -210,6 +230,7 @@ window.soundEffects = (function () {
     }
 
     function connectPitchShifter() {
+        if (!canProcessLocally()) return;
         if (pitchShifterNode) {
             // Already loaded, just connect
             try { mixerNode.disconnect(pannerNode); } catch (e) { }
@@ -219,7 +240,7 @@ window.soundEffects = (function () {
             pitchShifterNode.connect(pannerNode);
         } else {
             initPitchShifter().then(node => {
-                if (node && settings.pitch !== 1.0) {
+                if (canProcessLocally() && node && settings.pitch !== 1.0) {
                     try { mixerNode.disconnect(pannerNode); } catch (e) { }
                     try { mixerNode.disconnect(node); } catch (e) { }
                     try { node.disconnect(pannerNode); } catch (e) { }
@@ -231,6 +252,7 @@ window.soundEffects = (function () {
     }
 
     function disconnectPitchShifter() {
+        if (!canProcessLocally()) return;
         if (pitchShifterNode) {
             try { mixerNode.disconnect(pitchShifterNode); } catch (e) { }
             try { pitchShifterNode.disconnect(pannerNode); } catch (e) { }
@@ -315,6 +337,7 @@ window.soundEffects = (function () {
     }
 
     function applySettings() {
+        if (!canProcessLocally()) return;
         // EQ - check if initialized
         if (eqFilters && eqFilters.length > 0) {
             eqFilters.forEach((f, i) => {
@@ -326,11 +349,15 @@ window.soundEffects = (function () {
         // Panner
         updatePanner();
         // Pitch
+        if (settings.pitch !== 1.0) connectPitchShifter();
+        else disconnectPitchShifter();
         applyPitch();
     }
 
+    let reverbRequest = 0;
     function updateReverb() {
-        if (!convolverNode || !audioContext) return;
+        if (!canProcessLocally() || !convolverNode || !audioContext) return;
+        const request = ++reverbRequest;
         const rev = reverbOptions.find(r => r.id === settings.reverb.id);
 
         if (!rev || rev.id === 'none') {
@@ -343,16 +370,16 @@ window.soundEffects = (function () {
                 .then(r => r.arrayBuffer())
                 .then(data => audioContext.decodeAudioData(data))
                 .then(buffer => {
-                    if (!convolverNode) return;
+                    if (!canProcessLocally() || !convolverNode || request !== reverbRequest || settings.reverb.id !== rev.id) return;
                     convolverNode.buffer = buffer;
                     if (dryGainNode) dryGainNode.gain.value = settings.reverb.mainGain;
                     if (wetGainNode) wetGainNode.gain.value = settings.reverb.sendGain;
-                });
+                }).catch(error => console.warn('[SoundEffects] Reverb load failed:', error));
         }
     }
 
     function updatePanner() {
-        if (!pannerNode) return;
+        if (!canProcessLocally() || !pannerNode) return;
         const p = settings.panner;
 
         if (pannerInfo.interval) {
@@ -364,6 +391,11 @@ window.soundEffects = (function () {
         if (p.enable) {
             console.log('[SoundEffects] Starting Panner (Desktop Logic)');
             pannerInfo.interval = setInterval(() => {
+                if (!canProcessLocally()) {
+                    clearInterval(pannerInfo.interval);
+                    pannerInfo.interval = null;
+                    return;
+                }
                 if (!pannerNode) return;
                 pannerInfo.rad += 1;
                 if (pannerInfo.rad > 360) pannerInfo.rad -= 360;
@@ -409,7 +441,7 @@ window.soundEffects = (function () {
     }
 
     function applyPitch() {
-        if (pitchFactorParam) {
+        if (canProcessLocally() && pitchFactorParam) {
             // Use setTargetAtTime for immediate and smooth Web Audio update
             pitchFactorParam.setTargetAtTime(settings.pitch, audioContext.currentTime, 0.05);
         }
@@ -547,6 +579,12 @@ window.soundEffects = (function () {
         }
     }
 
+    function ensureLocalGraph() {
+        if (!canProcessLocally()) return false;
+        if (!audioContext || !isGraphBuilt) init(true);
+        return !!audioContext && isGraphBuilt;
+    }
+
     const manager = {
         init,
         toggle: function () {
@@ -560,8 +598,8 @@ window.soundEffects = (function () {
         open: function () {
             // 打开面板时只加载并显示设置，不在此强制初始化 Web Audio 图
             loadSettings();
-            if (isIOSDevice() && window.showInfo) {
-                window.showInfo('提示：iOS 系统限制，开启自定义音效将导致退至后台或锁屏时暂停播放。如需后台播放请保持音效关闭。', 5000);
+            if (!canProcessLocally() && window.showInfo) {
+                window.showInfo('移动设备、AirPlay 和投放播放使用原生音频，音效设置仅保存，供本地桌面播放使用。', 5000);
             }
             const modal = document.getElementById('sound-effects-modal');
             if (!modal) return;
@@ -588,26 +626,25 @@ window.soundEffects = (function () {
             }, 300);
         },
         setEQ: function (index, val) {
-            if (!audioContext || !isGraphBuilt) init(true);
+            if (!isGraphBuilt) loadSettings();
             val = parseInt(val);
             settings.eq[index] = val;
-            if (eqFilters[index]) eqFilters[index].gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
-            activePresetName = ''; // Reset when manually adjusted
+            activePresetName = '';
             saveSettings();
+            if (ensureLocalGraph() && eqFilters[index]) eqFilters[index].gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
             renderUI();
         },
         applyPreset: function (name) {
-            if (!audioContext || !isGraphBuilt) init(true);
+            if (!isGraphBuilt) loadSettings();
             const allPresets = [...defaultPresets, ...customPresets];
             const p = allPresets.find(p => p.name === name);
             if (p) {
                 settings.eq = [...p.values];
-                activePresetName = name; // Set active preset by name
-                settings.eq.forEach((v, i) => {
-                    // Smoothly transition EQ gains
+                activePresetName = name;
+                saveSettings();
+                if (ensureLocalGraph()) settings.eq.forEach((v, i) => {
                     if (eqFilters[i]) eqFilters[i].gain.setTargetAtTime(v, audioContext.currentTime, 0.1);
                 });
-                saveSettings();
                 renderUI();
                 if (window.showSuccess) window.showSuccess(`应用预设: ${name}`);
             }
@@ -615,55 +652,37 @@ window.soundEffects = (function () {
         resetEQ: function () {
             settings.eq = Array(10).fill(0);
             activePresetName = '';
-            if (eqFilters.length && audioContext) {
+            if (canProcessLocally() && eqFilters.length && audioContext) {
                 eqFilters.forEach(f => f.gain.setTargetAtTime(0, audioContext.currentTime, 0.1));
             }
             saveSettings();
             renderUI();
         },
         setReverb: function (id) {
-            if (!audioContext || !isGraphBuilt) init(true);
+            if (!isGraphBuilt) loadSettings();
             settings.reverb.id = id;
             const rev = reverbOptions.find(r => r.id === id);
             if (rev) {
                 settings.reverb.mainGain = rev.main;
                 settings.reverb.sendGain = rev.send;
-
-                // Animate the DRY/WET sliders visually
                 animateSlider('reverb-main-gain', rev.main * 100);
                 animateSlider('reverb-send-gain', rev.send * 100);
             }
-            updateReverb();
             saveSettings();
-            renderUI(); // Update radio selection state
+            if (ensureLocalGraph()) updateReverb();
+            renderUI();
         },
         setPitch: function (val) {
+            if (!isGraphBuilt) loadSettings();
             val = parseFloat(val);
-            if (!audioContext || !isGraphBuilt) {
-                if (val === 1.0 && !hasActiveEffects()) {
-                    settings.pitch = 1.0;
-                    saveSettings();
-                    const label = document.getElementById('pitch-val');
-                    if (label) label.innerText = '1.00x';
-                    const slider = document.getElementById('pitch-slider');
-                    if (slider) slider.value = 1.0;
-                    return;
-                }
-                init(true);
-            }
             const oldPitch = settings.pitch;
             settings.pitch = val;
-
-            if (settings.pitch !== 1.0 && oldPitch === 1.0) {
-                connectPitchShifter();
-            } else if (settings.pitch === 1.0 && oldPitch !== 1.0) {
-                disconnectPitchShifter();
-            }
-
-            applyPitch();
             saveSettings();
-
-            // Immediate UI update for smooth dragging
+            if ((isGraphBuilt || hasActiveEffects()) && ensureLocalGraph()) {
+                if (val !== 1.0 && (oldPitch === 1.0 || !pitchShifterNode)) connectPitchShifter();
+                else if (val === 1.0 && oldPitch !== 1.0) disconnectPitchShifter();
+                applyPitch();
+            }
             const label = document.getElementById('pitch-val');
             if (label) label.innerText = settings.pitch.toFixed(2) + 'x';
             const slider = document.getElementById('pitch-slider');
@@ -682,23 +701,24 @@ window.soundEffects = (function () {
             if (slider) slider.value = 1.0;
         },
         setPanner: function (key, val) {
-            if (!audioContext || !isGraphBuilt) init(true);
+            if (!isGraphBuilt) loadSettings();
             if (key === 'enable') settings.panner.enable = val;
             else settings.panner[key] = parseInt(val);
-            updatePanner();
             saveSettings();
+            if (ensureLocalGraph()) updatePanner();
             renderUI();
         },
+        isGraphBuilt: () => isGraphBuilt,
         getContext: () => audioContext || window._sharedAudioContext || null,
         getSourceNode: () => mediaSource || window._sharedAudioSourceNode || null,
         getAnalyser: () => analyser || window._sharedAudioAnalyser || null,
         setReverbGain: function (type, val) {
-            if (!audioContext || !isGraphBuilt) init(true);
+            if (!isGraphBuilt) loadSettings();
             if (type === 'main') settings.reverb.mainGain = val;
             else settings.reverb.sendGain = val;
             saveSettings();
 
-            if (window._soundEffectsGains && audioContext) {
+            if (ensureLocalGraph() && window._soundEffectsGains) {
                 if (type === 'main') window._soundEffectsGains.dry.gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
                 else window._soundEffectsGains.wet.gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
             }
@@ -781,6 +801,11 @@ window.soundEffects = (function () {
     // Attach event listeners to sound effects UI elements
     function attachListeners() {
         console.log('[SoundEffects] Attaching event listeners...');
+        const restoreLocalEffects = () => {
+            if (isGraphBuilt && canProcessLocally()) applySettings();
+        };
+        document.getElementById('audio-player')?.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', restoreLocalEffects);
+        window.addEventListener('lx-cast-route', restoreLocalEffects);
         // Reverb Gain Sliders
         const mainGain = document.getElementById('reverb-main-gain');
         if (mainGain) mainGain.oninput = (e) => {
