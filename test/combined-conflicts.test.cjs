@@ -118,3 +118,51 @@ test('a hidden detail-only VU meter does not keep a standalone animation loop ru
     const f = visualizerFixture({ hidden: true, footer: false }); f.window.musicVisualizer.init();
     assert.equal(f.frames(), 0);
 });
+test('the custom VU meter drives needle dynamics during playback and detects light theme appearance', () => {
+    let fillStyles = [];
+    const canvas = {
+        width: 400,
+        height: 80,
+        style: {},
+        getBoundingClientRect: () => ({ width: 400, height: 80 }),
+        getContext: () => ({
+            canvas: { width: 400, height: 80 },
+            save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, arcTo() {}, closePath() {},
+            fill() {}, stroke() {}, clip() {}, fillRect() {}, fillText() {},
+            createLinearGradient: () => ({ addColorStop() {} }),
+            createRadialGradient: () => ({ addColorStop() {} }),
+            set fillStyle(val) { fillStyles.push(val); }
+        })
+    };
+    const audio = { paused: false, currentTime: 12.5, readyState: 4, volume: 1.0, addEventListener() {} };
+    const docEl = { classList: { contains: name => name === 'theme-light' }, getAttribute: () => 'light' };
+    const elements = { 'audio-player': audio, 'footer-visualizer': canvas, 'detail-visualizer': canvas, 'view-player-detail': { classList: { contains: () => false } } };
+    const sandbox = {
+        window: {
+            innerWidth: 1024, devicePixelRatio: 1, addEventListener() {},
+            settings: { showFooterVisualizer: true, footerVisualizerStyle: 'vumeter', vuMeterTheme: 'studio-monochrome' },
+            Wave: class {}
+        },
+        document: { getElementById: id => elements[id], documentElement: docEl },
+        navigator: { userAgent: 'Chrome', maxTouchPoints: 0 },
+        performance: { now: () => 1500 },
+        console: quiet, requestAnimationFrame: () => 1, cancelAnimationFrame() {},
+        getComputedStyle: () => ({ getPropertyValue: () => '' })
+    };
+    vm.runInNewContext(read('public/music/js/visualizer.js'), sandbox);
+    sandbox.window.musicVisualizer.init();
+    
+    // Test the animation needle motion and theme adaptation
+    const ctx = canvas.getContext('2d');
+    let simTime = 1000;
+    sandbox.performance.now = () => (simTime += 100);
+    const standaloneVU = new sandbox.window.LXStudioVUMeterAnimation({ isCompact: true });
+    standaloneVU.draw(null, ctx);
+    standaloneVU.draw(null, ctx);
+    
+    assert.ok(standaloneVU.isLightMode(), 'VU meter should detect light mode');
+    assert.ok(standaloneVU.needleNormL > 0.05, 'Left needle should be dynamically active during playback');
+    assert.ok(standaloneVU.needleNormR > 0.05, 'Right needle should be dynamically active during playback');
+});
+
+
