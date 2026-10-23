@@ -52,10 +52,10 @@ test('source mutations enforce owner identity, normalize public aliases, and rej
     assert.equal(writes.length, 0);
     const own = response();
     await handlers.handleUpdatePlatforms(request({ username: 'alice', id: 'fixture', disabledSources: ['tx'] }, { 'x-user-token': 'alice-fixture' }), own);
-    assert.equal(own.status, 200); assert.match(writes[0][0], /source\/alice\/states.json$/);
+    assert.equal(own.status, 200); assert.match(writes[0][0], /[\\/]source[\\/]alice[\\/]states\.json$/);
     const admin = response();
     await handlers.handleUpdatePlatforms(request({ username: '_open', id: 'fixture' }, { 'x-frontend-auth': 'admin-fixture' }), admin);
-    assert.equal(admin.status, 200); assert.match(writes.at(-1)[0], /source\/_open\/states.json$/);
+    assert.equal(admin.status, 200); assert.match(writes.at(-1)[0], /[\\/]source[\\/]_open[\\/]states\.json$/);
 });
 
 test('deleted accounts cannot authenticate with a remaining session or persistent token', () => {

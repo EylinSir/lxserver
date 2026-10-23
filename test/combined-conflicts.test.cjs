@@ -127,7 +127,7 @@ test('the custom VU meter drives needle dynamics during playback and detects lig
         getBoundingClientRect: () => ({ width: 400, height: 80 }),
         getContext: () => ({
             canvas: { width: 400, height: 80 },
-            save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, arcTo() {}, closePath() {},
+            save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, arcTo() {}, arc() {}, closePath() {},
             fill() {}, stroke() {}, clip() {}, fillRect() {}, fillText() {},
             createLinearGradient: () => ({ addColorStop() {} }),
             createRadialGradient: () => ({ addColorStop() {} }),
