@@ -314,7 +314,7 @@ The configuration file is persisted by default in the data directory at `data/co
 | `SUBSONIC_LEADERBOARD_SOURCE` | `subsonic.leaderboardSource` | Subsonic public leaderboard default platform (single platform, e.g., `tx`, `wy`) | `tx` |
 | `SUBSONIC_LYRIC_TRANSLATION` | `subsonic.lyricTranslation` | Include translations in Subsonic lyrics | `true` |
 | `SUBSONIC_CACHE_ON_PLAY` | `subsonic.cacheOnPlay` | Trigger server caching on Subsonic playback (cached to user dir) | `false` |
-| `SUBSONIC_PLAY_CACHE_FIRST` | `subsonic.playCacheFirst` | Prefer streaming local cached/downloaded files on Subsonic playback | `true` |
+| `SUBSONIC_PLAY_CACHE_FIRST` | `subsonic.playCacheFirst` | Prefer streaming local cached/downloaded files on Subsonic playback (default off, to avoid server egress) | `false` |
 | `SUBSONIC_QUALITY_ENABLED` | `subsonic.quality.enabled` | Enable Subsonic audio quality selection | `true` |
 | `SUBSONIC_QUALITY_PRIORITY` | `subsonic.quality.priority` | Subsonic audio quality priority order (e.g. `flac,320k,128k`) | `flac,320k,128k` |
 | `ARTIST_MAX_FETCH_PAGES` | `artist.maxFetchPages` | Maximum fetch pages for artist tracks | `20` |
