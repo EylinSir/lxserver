@@ -58,6 +58,12 @@
         <!-- Sidebar -->
         <aside id="main-sidebar"
             class="w-72 md:w-72 t-bg-panel shadow-lg flex flex-col z-[60] fixed left-0 top-0 transform -translate-x-full md:relative md:translate-x-0 md:z-30 transition-all duration-300" style="height: 100dvh; padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));">
+            <!-- 电脑版侧边栏折叠按钮 (窄长半透明圆角手柄) -->
+            <button id="sidebar-collapse-btn" onclick="toggleDesktopSidebar(false)"
+                class="sidebar-collapse-pill hidden md:flex items-center justify-center cursor-pointer group"
+                title="折叠侧边栏 (Alt+B)" aria-label="折叠侧边栏">
+                <i class="fas fa-chevron-left text-[11px] transition-transform duration-200 group-hover:-translate-x-0.5"></i>
+            </button>
             <div class="h-16 flex items-center justify-center border-b t-border-main relative">
                 <svg viewBox="0 0 447.942 447.943" class="w-8 h-8 mr-2 rounded-lg shadow-sm"
                     xmlns="http://www.w3.org/2000/svg">
@@ -259,6 +265,13 @@
                 Licensed under Apache-2.0.
             </div>
         </aside>
+
+        <!-- 电脑版侧边栏展开悬浮按钮 (折叠后在侧边悬浮的窄圆角长方形) -->
+        <button id="sidebar-expand-btn" onclick="toggleDesktopSidebar(true)"
+            class="sidebar-expand-pill hidden items-center justify-center cursor-pointer group"
+            title="展开侧边栏 (Alt+B)" aria-label="展开侧边栏">
+            <i class="fas fa-chevron-right text-[11px] transition-transform duration-200 group-hover:translate-x-0.5"></i>
+        </button>
 
         <!-- Content Area -->
         <main class="flex-1 flex flex-col t-bg-main relative overflow-hidden">
@@ -1334,6 +1347,43 @@
                 <!-- Local Music View -->
                 <div id="view-localmusic"
                     class="absolute inset-0 flex flex-col px-2 pt-2 md:px-6 md:pt-6 pb-44 md:pb-32 hidden opacity-0 transition-all duration-300 overflow-hidden">
+
+                    <!-- 自定义目录：侧边目录分类面板 (仅电脑版 + 自定义模式 + 主侧边栏折叠时显示，可再次折叠为窄条) -->
+                    <aside id="cd-dir-side-panel" class="hidden" aria-label="目录分类">
+                        <!-- 展开态 -->
+                        <div class="cd-side-full">
+                            <div class="cd-side-head">
+                                <div class="cd-side-title">
+                                    <span class="cd-side-title-icon"><i class="fas fa-folder-tree"></i></span>
+                                    <span>目录分类</span>
+                                    <span id="cd-side-badge" class="cd-side-badge">全部</span>
+                                </div>
+                                <button type="button" class="cd-side-icon-btn" title="折叠目录面板"
+                                    onclick="window.CustomDirManager.toggleSidePanel(false)">
+                                    <i class="fas fa-angles-left"></i>
+                                </button>
+                            </div>
+                            <div class="cd-side-tools">
+                                <button type="button" class="cd-side-tool" title="展开全部目录"
+                                    onclick="window.CustomDirManager.sideExpandAll(true)"><i class="fas fa-square-plus"></i></button>
+                                <button type="button" class="cd-side-tool" title="折叠全部目录"
+                                    onclick="window.CustomDirManager.sideExpandAll(false)"><i class="fas fa-square-minus"></i></button>
+                                <button type="button" class="cd-multi-switch" title="开启后点击即多选（等同按住 Ctrl）"
+                                    onclick="window.CustomDirManager.toggleMultiMode()">
+                                    <span class="cd-multi-track"><span class="cd-multi-knob"></span></span>
+                                    <span>多选</span>
+                                </button>
+                            </div>
+                            <div id="cd-side-tree" class="cd-side-tree custom-scrollbar"></div>
+                        </div>
+                        <!-- 收起态窄条 -->
+                        <button type="button" class="cd-side-rail" title="展开目录面板"
+                            onclick="window.CustomDirManager.toggleSidePanel(true)">
+                            <i class="fas fa-folder-tree"></i>
+                            <span class="cd-side-rail-text">目录分类</span>
+                            <i class="fas fa-angles-right cd-side-rail-arrow"></i>
+                        </button>
+                    </aside>
 
                     <!-- Settings and Filters Area -->
                     <div
@@ -3774,8 +3824,8 @@
                                                         </div>
                                                     </label>
                                                 </div>
-                                                <div
-                                                    class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-[10px] t-text-muted border-t t-border-main pt-3">
+                                                <div id="shortcuts-cheatsheet-container"
+                                                    class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-[10px] t-text-muted border-t t-border-main pt-3 transition-opacity duration-200">
                                                     <div class="flex justify-between items-center"><span>播放/暂停</span>
                                                         <span
                                                             class="t-bg-track px-2 py-0.5 rounded-md font-mono border t-border-main">Space</span>
@@ -3801,6 +3851,11 @@
                                                         <span
                                                             class="t-bg-track px-2 py-0.5 rounded-md font-mono border t-border-main">Alt
                                                             + 1-6</span>
+                                                    </div>
+                                                    <div class="flex justify-between items-center"><span>折叠/展开侧边栏</span>
+                                                        <span
+                                                            class="t-bg-track px-2 py-0.5 rounded-md font-mono border t-border-main">Alt
+                                                            + B</span>
                                                     </div>
                                                     <div class="flex justify-between items-center"><span>歌词页开关</span>
                                                         <span
@@ -4058,8 +4113,8 @@
             class="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full px-0 md:px-4 order-last md:order-none">
 
             <!-- Progress Bar (Moved up for better mobile layout) -->
-            <div
-                class="w-full flex items-center gap-2 md:gap-3 text-xs t-text-muted font-mono mb-2 md:mb-0 relative py-1">
+            <div id="player-progress-row"
+                class="w-full flex items-center gap-2 md:gap-3 text-xs t-text-muted font-mono mb-2 md:mb-0 relative py-1 transition-all duration-300">
                 <span id="time-current">00:00</span>
                 <div class="flex-1 h-8 flex items-center relative group">
                     <!-- Footer Info/Visualizer Canvas (Moved to match progress bar width) -->
@@ -4718,51 +4773,31 @@
             </div>
 
             <!-- 主内容区 -->
-            <div class="p-4 md:p-5 flex flex-col gap-3.5 max-h-[62vh] overflow-y-auto custom-scrollbar">
-                <!-- 全部 筛选选项 -->
-                <div
-                    class="p-3 rounded-xl border t-border-main bg-white/60 dark:bg-gray-800/60 flex items-center justify-between hover:border-emerald-500/50 transition-all shadow-sm group">
-                    <label class="flex items-center gap-3 cursor-pointer select-none flex-1">
-                        <input type="checkbox" id="cd-dir-all-checkbox"
-                            onchange="window.CustomDirManager.toggleAllCheck(this.checked)"
-                            class="w-4 h-4 rounded border-gray-300 text-emerald-500 focus:ring-emerald-500 cursor-pointer transition-transform group-hover:scale-105">
-                        <div class="flex flex-col">
-                            <span class="text-xs md:text-sm font-bold t-text-main flex items-center gap-1.5">
-                                <i class="fas fa-globe text-emerald-500 text-xs"></i>
-                                全部歌曲（不限制目录）
-                            </span>
-                            <span class="text-[10px] t-text-muted mt-0.5">展示自定义目录下的所有歌曲与子目录文件</span>
-                        </div>
-                    </label>
-                    <span
-                        class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/20">默认</span>
-                </div>
-
-                <!-- 目录树展示卡片 -->
-                <div class="border t-border-main rounded-xl p-3 bg-gray-50/40 dark:bg-gray-900/30 flex flex-col gap-2">
-                    <div
-                        class="flex items-center justify-between pb-1.5 border-b t-border-main text-[11px] t-text-muted">
-                        <span class="font-bold flex items-center gap-1.5 t-text-main text-xs">
-                            <i class="far fa-folder-open text-amber-500"></i>
-                            目录结构层级
-                        </span>
-                        <span id="cd-dir-selected-badge"
-                            class="text-[10px] px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/5 font-mono">全部</span>
+            <div class="p-4 md:p-5 flex flex-col gap-3 overflow-hidden">
+                <div class="cd-modal-card">
+                    <div class="cd-side-tools" style="padding-top:.55rem">
+                        <button type="button" class="cd-side-tool" title="展开全部目录"
+                            onclick="window.CustomDirManager.sideExpandAll(true)"><i class="fas fa-square-plus"></i></button>
+                        <button type="button" class="cd-side-tool" title="折叠全部目录"
+                            onclick="window.CustomDirManager.sideExpandAll(false)"><i class="fas fa-square-minus"></i></button>
+                        <span id="cd-dir-selected-badge" class="cd-side-badge" style="margin-left:.35rem">全部</span>
+                        <button type="button" class="cd-multi-switch" title="开启后点击即多选（等同按住 Ctrl）"
+                            onclick="window.CustomDirManager.toggleMultiMode()">
+                            <span class="cd-multi-track"><span class="cd-multi-knob"></span></span>
+                            <span>多选</span>
+                        </button>
                     </div>
-
                     <!-- 目录树节点挂载容器 -->
-                    <div id="cd-dir-tree-container"
-                        class="flex flex-col gap-1 py-1 max-h-[35vh] overflow-y-auto custom-scrollbar">
-                        <!-- 动态渲染目录层级 -->
-                    </div>
+                    <div id="cd-dir-tree-container" class="cd-side-tree custom-scrollbar" style="max-height:44vh"></div>
                 </div>
 
                 <!-- 底部提示信息与状态反馈 -->
                 <div id="cd-dir-tree-hint" class="text-[11px] t-text-muted px-1 flex items-center gap-1.5">
                     <i class="fas fa-info-circle text-emerald-500 shrink-0"></i>
-                    <span id="cd-dir-tree-hint-text">勾选大层级时其子目录会自动包含并隐藏选框；取消大层级后可自由选择子目录。</span>
+                    <span id="cd-dir-tree-hint-text">点击目录筛选；开启“多选”或按住 Ctrl 可多选。</span>
                 </div>
             </div>
+
 
             <!-- 底部操作栏 -->
             <div

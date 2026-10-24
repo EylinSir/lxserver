@@ -1313,4 +1313,413 @@ aside {
     box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.4) !important;
 }
 
+/* ==========================================================================
+   Desktop Sidebar Collapse / Expand (电脑版侧边栏折叠控制)
+   ========================================================================== */
+@media (min-width: 768px) {
+    #main-sidebar {
+        transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+                    min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+                    opacity 0.25s ease !important;
+        will-change: width, min-width;
+    }
+
+    #main-sidebar > div,
+    #main-sidebar > nav {
+        width: 18rem;
+        min-width: 18rem;
+        flex-shrink: 0;
+    }
+
+    /* 桌面端折叠状态 */
+    #main-sidebar.desktop-collapsed {
+        width: 0 !important;
+        min-width: 0 !important;
+        max-width: 0 !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        margin: 0 !important;
+        border-right: none !important;
+        overflow: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+    }
+}
+
+/* 侧边窄长半透明圆角折叠按钮 (展开时常驻在侧边栏右边缘) */
+.sidebar-collapse-pill {
+    position: absolute;
+    right: -10px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 45;
+    width: 20px;
+    height: 76px;
+    border-radius: 9999px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-dim);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    color: var(--text-muted);
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    outline: none;
+    user-select: none;
+    opacity: 0.75;
+}
+
+.sidebar-collapse-pill:hover {
+    opacity: 1;
+    background: var(--bg-panel);
+    border-color: var(--c-500);
+    color: var(--c-600);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+    transform: translateY(-50%) scale(1.08);
+}
+
+.sidebar-collapse-pill:active {
+    transform: translateY(-50%) scale(0.96);
+}
+
+/* 侧边悬浮窄圆角长方形展开按钮 (折叠后悬浮在窗口左边缘) */
+.sidebar-expand-pill {
+    position: fixed;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 45;
+    width: 16px;
+    height: 76px;
+    border-radius: 0 10px 10px 0;
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-dim);
+    border-left: none;
+    box-shadow: 3px 4px 14px rgba(0, 0, 0, 0.08);
+    color: var(--text-muted);
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    outline: none;
+    user-select: none;
+    opacity: 0.75;
+}
+
+.sidebar-expand-pill:hover {
+    opacity: 1;
+    width: 22px;
+    background: var(--bg-panel);
+    border-color: var(--c-500);
+    color: var(--c-600);
+    box-shadow: 4px 6px 18px rgba(0, 0, 0, 0.14);
+}
+
+.sidebar-expand-pill:active {
+    transform: translateY(-50%) scale(0.96);
+}
+
+@media (max-width: 767px) {
+    .sidebar-collapse-pill,
+    .sidebar-expand-pill {
+        display: none !important;
+    }
+    #cd-dir-side-panel {
+        display: none !important;
+    }
+}
+
+/* ==========================================================================
+   自定义目录 · 侧边目录分类面板 (电脑版、主侧边栏折叠时)
+   ========================================================================== */
+@media (min-width: 768px) {
+    #view-localmusic.cd-side-open { padding-left: calc(1.5rem + 15.5rem + 0.9rem); }
+    #view-localmusic.cd-side-rail { padding-left: calc(1.5rem + 2.9rem + 0.9rem); }
+}
+
+#cd-dir-side-panel {
+    position: absolute;
+    left: 1.5rem;
+    top: 1.5rem;
+    bottom: 8rem;
+    width: 15.5rem;
+    z-index: 20;
+    border-radius: 1.1rem;
+    background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--border-dim);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease;
+    animation: cd-side-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+#cd-dir-side-panel.hidden { display: none; }
+
+@keyframes cd-side-in {
+    from { opacity: 0; transform: translateX(-14px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+#cd-dir-side-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 90px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--c-500) 14%, transparent), transparent);
+    pointer-events: none;
+}
+
+.cd-side-full { display: flex; flex-direction: column; min-height: 0; flex: 1; position: relative; }
+.cd-side-rail { display: none; }
+
+#cd-dir-side-panel.collapsed { width: 2.9rem; }
+#cd-dir-side-panel.collapsed .cd-side-full { display: none; }
+#cd-dir-side-panel.collapsed .cd-side-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.9rem 0;
+    width: 100%;
+    height: 100%;
+    color: var(--c-600);
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    outline: none;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+#cd-dir-side-panel.collapsed .cd-side-rail:hover {
+    background: color-mix(in srgb, var(--c-500) 10%, transparent);
+}
+.cd-side-rail-text {
+    writing-mode: vertical-rl;
+    letter-spacing: 0.35em;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+.cd-side-rail-arrow {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+}
+.cd-side-rail:hover .cd-side-rail-arrow { transform: translateX(2px); color: var(--c-600); }
+
+.cd-side-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.7rem 0.65rem 0.4rem 0.8rem;
+}
+.cd-side-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--text-main);
+    min-width: 0;
+}
+.cd-side-title-icon {
+    width: 1.7rem;
+    height: 1.7rem;
+    border-radius: 0.6rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--c-600);
+    background: color-mix(in srgb, var(--c-500) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c-500) 28%, transparent);
+    flex-shrink: 0;
+}
+.cd-side-badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 9999px;
+    color: var(--c-600);
+    background: color-mix(in srgb, var(--c-500) 14%, transparent);
+    white-space: nowrap;
+}
+.cd-side-badge.on { background: var(--c-500); color: #fff; }
+.cd-side-icon-btn {
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 0.55rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+.cd-side-icon-btn:hover { background: color-mix(in srgb, var(--c-500) 14%, transparent); color: var(--c-600); }
+
+.cd-side-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0 0.7rem 0.45rem 0.75rem;
+    border-bottom: 1px solid var(--border-dim);
+}
+.cd-side-tool {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 0.45rem;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+.cd-side-tool:hover { color: var(--c-600); background: color-mix(in srgb, var(--c-500) 12%, transparent); }
+.cd-side-hint { margin-left: auto; font-size: 9px; color: var(--text-muted); opacity: 0.7; }
+
+.cd-side-tree {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.45rem 0.45rem 0.7rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.cd-node {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.32rem 0.45rem 0.32rem 0.3rem;
+    border-radius: 0.6rem;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    color: var(--text-main);
+    border: 1px solid transparent;
+    position: relative;
+    transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+.cd-node:hover { background: color-mix(in srgb, var(--c-500) 8%, transparent); }
+.cd-node.selected {
+    background: color-mix(in srgb, var(--c-500) 15%, transparent);
+    border-color: color-mix(in srgb, var(--c-500) 35%, transparent);
+    color: var(--c-600);
+    font-weight: 700;
+}
+.cd-node.selected::before {
+    content: '';
+    position: absolute;
+    left: -0.3rem;
+    top: 22%;
+    bottom: 22%;
+    width: 3px;
+    border-radius: 3px;
+    background: var(--c-500);
+}
+.cd-node.included { color: var(--c-600); background: color-mix(in srgb, var(--c-500) 6%, transparent); }
+.cd-node-caret {
+    width: 1rem;
+    height: 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    border-radius: 0.3rem;
+    flex-shrink: 0;
+    transition: transform 0.18s ease, background 0.15s ease;
+}
+.cd-node-caret.has-child:hover { background: color-mix(in srgb, var(--c-500) 18%, transparent); color: var(--c-600); }
+.cd-node-caret.open { transform: none; color: var(--c-600); }
+.cd-node-inc {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 0 6px;
+    border-radius: 6px;
+    color: var(--c-600);
+    border: 1px solid color-mix(in srgb, var(--c-500) 30%, transparent);
+    background: color-mix(in srgb, var(--c-500) 8%, transparent);
+    flex-shrink: 0;
+}
+
+/* 多选开关（等同按住 Ctrl） */
+.cd-multi-switch {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.18rem 0.55rem 0.18rem 0.35rem;
+    border-radius: 9999px;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+    border: 1px solid var(--border-dim);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s ease;
+}
+.cd-multi-switch:hover { border-color: color-mix(in srgb, var(--c-500) 45%, transparent); }
+.cd-multi-track {
+    position: relative;
+    width: 1.6rem;
+    height: 0.9rem;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--text-muted) 35%, transparent);
+    transition: background 0.2s ease;
+}
+.cd-multi-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: calc(0.9rem - 4px);
+    height: calc(0.9rem - 4px);
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cd-multi-switch.on {
+    color: var(--c-600);
+    background: color-mix(in srgb, var(--c-500) 14%, transparent);
+    border-color: color-mix(in srgb, var(--c-500) 40%, transparent);
+}
+.cd-multi-switch.on .cd-multi-track { background: var(--c-500); }
+.cd-multi-switch.on .cd-multi-knob { transform: translateX(0.7rem); }
+
+.cd-modal-card {
+    border: 1px solid var(--border-dim);
+    border-radius: 0.9rem;
+    background: color-mix(in srgb, var(--c-500) 3%, transparent);
+    overflow: hidden;
+}
+.cd-node-icon { font-size: 12px; color: #f59e0b; flex-shrink: 0; }
+.cd-node.selected .cd-node-icon, .cd-node.included .cd-node-icon { color: var(--c-500); }
+.cd-node-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-node-count {
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 0 6px;
+    border-radius: 9999px;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+    flex-shrink: 0;
+}
+.cd-node.selected .cd-node-count { background: var(--c-500); color: #fff; }
+.cd-node-children {
+    margin-left: 0.85rem;
+    padding-left: 0.2rem;
+    border-left: 1px dashed color-mix(in srgb, var(--text-muted) 35%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
 

@@ -280,6 +280,7 @@ window.CustomDirManager = {
             dirContainer.classList.toggle('flex', this.isActive);
         }
         this.updateDirFilterButtonText();
+        this.syncSidePanel();
 
         // 4. 同步批量操作栏按钮（移动、同步、歌词、元信息及批量删除按钮受控）
         this.syncBatchButtonsVisibility();
@@ -534,12 +535,12 @@ window.CustomDirManager = {
                 if (result.allowWriteCustomMusicDir !== undefined) {
                     window.userAllowWriteCustomDir = !!result.allowWriteCustomMusicDir;
                 }
-                
+
                 this.syncBatchButtonsVisibility();
                 if (window.LocalMusicManager && typeof window.LocalMusicManager.syncRemasterVisibility === 'function') {
                     window.LocalMusicManager.syncRemasterVisibility();
                 }
-                
+
                 this.originalData = result.data || [];
                 this.originalData.sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
                 this.applyFilters();
@@ -1187,8 +1188,8 @@ window.CustomDirManager = {
         }
 
         if (window.LocalMusicManager && typeof window.LocalMusicManager.buildPlaylistSong === 'function') {
-            const fakeItem = { 
-                ...item, 
+            const fakeItem = {
+                ...item,
                 folder: 'custom',
                 songInfo: {
                     ...(item.songInfo || {}),
@@ -1316,8 +1317,8 @@ window.CustomDirManager = {
                 unavailableCount++;
                 return;
             }
-            const fakeItem = { 
-                ...item, 
+            const fakeItem = {
+                ...item,
                 folder: 'custom',
                 songInfo: {
                     ...(item.songInfo || {}),
@@ -1505,6 +1506,8 @@ window.CustomDirManager = {
 
     // 更新筛选框上的按钮展示（使用独立 tag 标签展示各个选中层级，不再用分号 ; 拼接）
     updateDirFilterButtonText() {
+        const sidePanelEl = document.getElementById('cd-dir-side-panel');
+        if (sidePanelEl && !sidePanelEl.classList.contains('hidden')) this.renderSidePanel();
         const textEl = document.getElementById('cd-dir-filter-text');
         const btnEl = document.getElementById('cd-dir-filter-btn');
         if (!textEl) return;
@@ -1523,6 +1526,223 @@ window.CustomDirManager = {
             textEl.title = sortedDirs.join(', ');
             if (btnEl) btnEl.classList.remove('active'); // 移除整体全绿背景，让内部每个tag清晰独立
         }
+    },
+
+    // ==========================================
+    // 侧边目录分类面板（电脑版 + 自定义模式 + 主侧边栏折叠）
+    // ==========================================
+    sideExpandedDirs: new Set(),
+    sidePanelCollapsed: false,
+    _sidePanelInited: false,
+
+    // 判断侧边面板是否应显示
+    shouldShowSidePanel() {
+        const isDesktop = window.matchMedia && window.matchMedia('(min-width: 768px)').matches;
+        const sidebar = document.getElementById('main-sidebar');
+        const sidebarCollapsed = !!(sidebar && sidebar.classList.contains('desktop-collapsed'));
+        return !!(this.isActive && isDesktop && sidebarCollapsed);
+    },
+
+    // 同步侧边面板可见性，以及筛选面板中“目录”按钮的显隐
+    syncSidePanel() {
+        const panel = document.getElementById('cd-dir-side-panel');
+        const view = document.getElementById('view-localmusic');
+        if (!panel) return;
+
+        if (!this._sidePanelInited) {
+            this._sidePanelInited = true;
+            try { this.sidePanelCollapsed = localStorage.getItem('lx_cd_side_collapsed') === 'true'; } catch (e) { }
+            panel.addEventListener('click', (e) => this._onSideTreeClick(e));
+            window.addEventListener('resize', () => this.syncSidePanel());
+        }
+
+        const show = this.shouldShowSidePanel();
+        panel.classList.toggle('hidden', !show);
+        panel.classList.toggle('collapsed', this.sidePanelCollapsed);
+        if (view) {
+            view.classList.toggle('cd-side-open', show && !this.sidePanelCollapsed);
+            view.classList.toggle('cd-side-rail', show && this.sidePanelCollapsed);
+        }
+
+        // 面板显示时，筛选面板里的“目录”按钮不再需要
+        const dirContainer = document.getElementById('cd-dir-filter-container');
+        if (dirContainer) {
+            const showInFilter = this.isActive && !show;
+            dirContainer.classList.toggle('hidden', !showInFilter);
+            dirContainer.classList.toggle('flex', showInFilter);
+        }
+
+        if (show) this.renderSidePanel();
+    },
+
+    // 展开/折叠侧边面板
+    toggleSidePanel(expand) {
+        this.sidePanelCollapsed = expand === undefined ? !this.sidePanelCollapsed : !expand;
+        try { localStorage.setItem('lx_cd_side_collapsed', this.sidePanelCollapsed ? 'true' : 'false'); } catch (e) { }
+        this.syncSidePanel();
+    },
+
+    // 展开/折叠全部目录节点
+    sideExpandAll(expand) {
+        this.sideExpandedDirs.clear();
+        if (expand) {
+            const walk = (nodes) => nodes.forEach(n => {
+                if (n.children.length) { this.sideExpandedDirs.add(n.fullPath); walk(n.children); }
+            });
+            walk(this.buildDirTree());
+        }
+        this.renderSidePanel();
+        const modalEl = document.getElementById('cd-dir-tree-modal');
+        if (modalEl && !modalEl.classList.contains('hidden')) this.renderDirTree();
+    },
+
+    // 提交筛选（侧边面板直接生效，无需确认）
+    _commitSideSelection() {
+        if (!this.selectedDirPaths.size) this.dirFilterAll = true;
+        this.pendingDirFilterAll = this.dirFilterAll;
+        this.pendingDirPaths = new Set(this.selectedDirPaths);
+        this.updateDirFilterButtonText();
+        this.applyFilters();
+    },
+
+    // 多选开关（等同按住 Ctrl），侧边面板与弹窗共用
+    multiMode: false,
+
+    toggleMultiMode(on) {
+        this.multiMode = on === undefined ? !this.multiMode : !!on;
+        document.querySelectorAll('.cd-multi-switch').forEach(el => el.classList.toggle('on', this.multiMode));
+    },
+
+    // 计算点击后的选择结果（纯函数）
+    _pick(all, paths, path, multi) {
+        const next = new Set(paths);
+        if (path === '') return { all: true, paths: new Set() };
+        if (multi) {
+            if (next.has(path)) {
+                next.delete(path);
+            } else {
+                for (const p of next) if (path.startsWith(p + '/')) return { all, paths: next }; // 祖先已选
+                for (const p of Array.from(next)) if (p.startsWith(path + '/')) next.delete(p);
+                next.add(path);
+            }
+            return { all: next.size === 0, paths: next };
+        }
+        if (!all && next.size === 1 && next.has(path)) return { all: true, paths: new Set() };
+        return { all: false, paths: new Set([path]) };
+    },
+
+    _onSideTreeClick(e) {
+        this._onTreeClick(e, 'side');
+    },
+
+    // 目录树点击：mode = 'side'（即时生效）| 'modal'（待确认）
+    _onTreeClick(e, mode) {
+        const rerender = () => (mode === 'side' ? this.renderSidePanel() : this.renderDirTree());
+        const caret = e.target.closest('[data-cd-caret]');
+        if (caret) {
+            e.stopPropagation();
+            const p = caret.dataset.cdCaret;
+            if (this.sideExpandedDirs.has(p)) this.sideExpandedDirs.delete(p);
+            else this.sideExpandedDirs.add(p);
+            rerender();
+            return;
+        }
+        const node = e.target.closest('[data-cd-node]');
+        if (!node) return;
+        const multi = e.ctrlKey || e.metaKey || this.multiMode;
+
+        if (mode === 'side') {
+            const r = this._pick(this.dirFilterAll, this.selectedDirPaths, node.dataset.cdNode, multi);
+            this.dirFilterAll = r.all;
+            this.selectedDirPaths = r.paths;
+            this._commitSideSelection();
+        } else {
+            const r = this._pick(this.pendingDirFilterAll, this.pendingDirPaths, node.dataset.cdNode, multi);
+            this.pendingDirFilterAll = r.all;
+            this.pendingDirPaths = r.paths;
+            this.renderDirTree();
+        }
+    },
+
+    // 生成目录树 HTML（节点式，+/- 展开，高亮选中，显示歌曲数）
+    _treeHtml(allMode, pathSet) {
+        const items = this.originalData || [];
+        const treeData = this.buildDirTree();
+        const isAll = allMode || !pathSet || pathSet.size === 0;
+
+        // 选中节点的祖先自动展开
+        if (!isAll) {
+            for (const sel of pathSet) {
+                const parts = sel.split('/');
+                for (let i = 1; i < parts.length; i++) this.sideExpandedDirs.add(parts.slice(0, i).join('/'));
+            }
+        }
+
+        // 一次遍历预计算各目录歌曲数（含子目录）
+        const counts = new Map();
+        for (const it of items) {
+            const parts = (it.subPath || '').trim().split('/').filter(Boolean);
+            let cur = '';
+            for (const part of parts) {
+                cur = cur ? `${cur}/${part}` : part;
+                counts.set(cur, (counts.get(cur) || 0) + 1);
+            }
+        }
+        const isIncluded = (path) => {
+            if (isAll) return false;
+            for (const p of pathSet) if (path.startsWith(p + '/')) return true;
+            return false;
+        };
+
+        const renderNode = (n) => {
+            const hasChild = n.children.length > 0;
+            const open = this.sideExpandedDirs.has(n.fullPath);
+            const selected = !isAll && pathSet.has(n.fullPath);
+            const included = isIncluded(n.fullPath);
+            const cls = `cd-node${selected ? ' selected' : ''}${included ? ' included' : ''}`;
+            const sp = this.escapeAttr(n.fullPath);
+            let html = `<div class="${cls}" data-cd-node="${sp}" title="${sp}">
+                <span class="cd-node-caret ${hasChild ? 'has-child' : ''} ${hasChild && open ? 'open' : ''}" ${hasChild ? `data-cd-caret="${sp}" title="${open ? '折叠' : '展开'}"` : ''}>${hasChild ? `<i class="far ${open ? 'fa-square-minus' : 'fa-square-plus'}"></i>` : ''}</span>
+                <i class="fas ${open && hasChild ? 'fa-folder-open' : 'fa-folder'} cd-node-icon"></i>
+                <span class="cd-node-name">${this.escapeHtml(n.name)}</span>
+                ${included ? '<span class="cd-node-inc">已包含</span>' : ''}
+                <span class="cd-node-count">${counts.get(n.fullPath) || 0}</span>
+            </div>`;
+            if (hasChild && open) {
+                html += `<div class="cd-node-children">${n.children.map(renderNode).join('')}</div>`;
+            }
+            return html;
+        };
+
+        let html = `<div class="cd-node${isAll ? ' selected' : ''}" data-cd-node="" style="margin-bottom:4px">
+            <span class="cd-node-caret"></span>
+            <i class="fas fa-layer-group cd-node-icon" style="color:var(--c-500)"></i>
+            <span class="cd-node-name">全部歌曲</span>
+            <span class="cd-node-count">${items.length}</span>
+        </div>`;
+        if (!treeData.length) {
+            html += '<div style="padding:1.2rem .5rem;text-align:center;font-size:11px;color:var(--text-muted)"><i class="fas fa-folder-open" style="font-size:20px;opacity:.4;display:block;margin-bottom:6px"></i>暂无子目录（所有歌曲均在根路径）</div>';
+        } else {
+            html += treeData.map(renderNode).join('');
+        }
+        return html;
+    },
+
+    // 渲染侧边目录树
+    renderSidePanel() {
+        const treeEl = document.getElementById('cd-side-tree');
+        const badge = document.getElementById('cd-side-badge');
+        if (!treeEl) return;
+
+        const isAll = this.dirFilterAll || !this.selectedDirPaths || this.selectedDirPaths.size === 0;
+        if (badge) {
+            badge.textContent = isAll ? '全部' : `已选 ${this.selectedDirPaths.size}`;
+            badge.classList.toggle('on', !isAll);
+        }
+
+        const prevScroll = treeEl.scrollTop;
+        treeEl.innerHTML = this._treeHtml(this.dirFilterAll, this.selectedDirPaths);
+        treeEl.scrollTop = prevScroll;
     },
 
     // 重置目录筛选为“全部”
@@ -1658,85 +1878,20 @@ window.CustomDirManager = {
         return false;
     },
 
-    // 渲染目录树 DOM
+    // 渲染目录树 DOM（弹窗内，与侧边面板共用节点样式；点击选择，Ctrl/多选开关多选）
     renderDirTree() {
         const container = document.getElementById('cd-dir-tree-container');
         if (!container) return;
 
-        const treeData = this.buildDirTree();
-
-        if (!treeData || treeData.length === 0) {
-            container.innerHTML = `
-                <div class="py-6 text-center text-xs t-text-muted">
-                    <i class="fas fa-folder-open text-2xl mb-2 opacity-40"></i>
-                    <p>当前自定义目录下暂无子目录结构（所有歌曲均在根路径）</p>
-                </div>`;
-            return;
+        if (!container._cdBound) {
+            container._cdBound = true;
+            container.addEventListener('click', (e) => this._onTreeClick(e, 'modal'));
         }
 
-        // 递归渲染节点
-        const renderNode = (node, depth = 0) => {
-            const isSelfChecked = this.pendingDirPaths.has(node.fullPath);
-            const isParentChecked = this.isAncestorChecked(node.fullPath);
-            const isAllMode = this.pendingDirFilterAll;
-            const hasChildren = node.children && node.children.length > 0;
-            const safePath = this.escapeAttr(node.fullPath);
-            const safeName = this.escapeHtml(node.name);
+        const prevScroll = container.scrollTop;
+        container.innerHTML = this._treeHtml(this.pendingDirFilterAll, this.pendingDirPaths);
+        container.scrollTop = prevScroll;
 
-            // 用户明确要求：
-            // 1. 勾选全部时，隐藏/禁用具体目录；取消勾选全部后显示目录
-            // 2. 勾选了大层级，小的层级的复选框就消失；大的没勾选那小的也可以单独勾选
-            let checkboxHtml = '';
-            if (isAllMode) {
-                // 全部勾选状态下不展现具体勾选框，避免混淆
-                checkboxHtml = `<span class="w-4 h-4 shrink-0 flex items-center justify-center text-gray-300 dark:text-gray-600 text-xs">·</span>`;
-            } else if (isParentChecked) {
-                // 父级已被勾选：小的层级的复选框消失，显示“已包含”弱标签
-                checkboxHtml = `
-                    <span class="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded-md border border-emerald-500/25 shrink-0 select-none">
-                        已包含
-                    </span>`;
-            } else {
-                // 正常显示复选框
-                checkboxHtml = `
-                    <input type="checkbox" data-cd-dir-path="${safePath}" ${isSelfChecked ? 'checked' : ''}
-                        onchange="window.CustomDirManager.toggleDirCheck(this.dataset.cdDirPath, this.checked)"
-                        class="w-4 h-4 rounded border-gray-300 text-emerald-500 focus:ring-emerald-500 cursor-pointer shrink-0 transition-transform group-hover:scale-105">`;
-            }
-
-            const indentPx = depth * 22;
-
-            let html = `
-                <div class="flex flex-col select-none">
-                    <div class="flex items-center gap-2.5 py-1.5 px-2 rounded-xl transition-all group ${isSelfChecked ? 'bg-emerald-500/10 border border-emerald-500/30' : 'hover:bg-black/5 dark:hover:bg-white/5'}"
-                        style="margin-left: ${indentPx}px;">
-                        ${checkboxHtml}
-                        <i class="fas ${hasChildren ? 'fa-folder' : 'fa-folder'} ${isSelfChecked ? 'text-emerald-500' : 'text-amber-500'} text-xs shrink-0 transition-colors"></i>
-                        <span class="text-xs t-text-main truncate flex-1 ${isSelfChecked ? 'font-bold text-emerald-600 dark:text-emerald-400' : 'font-medium'}"
-                            title="${safePath}">${safeName}</span>
-                        ${isSelfChecked ? '<span class="text-[9px] font-bold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.2 rounded shrink-0 mr-1"><i class="fas fa-check mr-0.5"></i>已选</span>' : ''}
-                    </div>`;
-
-            if (hasChildren) {
-                html += `<div class="flex flex-col border-l border-dashed border-gray-300 dark:border-gray-700/60 ml-2 pl-0.5 my-0.5">`;
-                node.children.forEach(child => {
-                    html += renderNode(child, depth + 1);
-                });
-                html += `</div>`;
-            }
-
-            html += `</div>`;
-            return html;
-        };
-
-        let finalHtml = '';
-        treeData.forEach(rootNode => {
-            finalHtml += renderNode(rootNode, 0);
-        });
-
-        container.innerHTML = finalHtml;
-
-        // 同步“确定”按钮禁用状态与提示文本（如果啥都没勾选，确定那里置灰禁用）
         this.updateModalConfirmState();
     },
 
@@ -1755,23 +1910,21 @@ window.CustomDirManager = {
         if (badgeEl) {
             if (this.pendingDirFilterAll) {
                 badgeEl.textContent = '全部';
-                badgeEl.className = 'text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold';
+                badgeEl.className = 'cd-side-badge';
             } else if (this.pendingDirPaths.size > 0) {
                 badgeEl.textContent = `已选 ${this.pendingDirPaths.size} 个目录`;
-                badgeEl.className = 'text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-bold shadow-sm';
+                badgeEl.className = 'cd-side-badge on';
             } else {
                 badgeEl.textContent = '未选择任何条件';
-                badgeEl.className = 'text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 border border-red-500/20 font-bold';
+                badgeEl.className = 'cd-side-badge';
             }
         }
 
         if (hintTextEl) {
-            if (!hasSelection) {
-                hintTextEl.innerHTML = '<span class="text-amber-500 font-bold">请至少勾选一个目录或勾选“全部”，否则无法点击确定保存。</span>';
-            } else if (this.pendingDirFilterAll) {
-                hintTextEl.textContent = '当前选择全部歌曲。如需按分类筛选，请取消全选后勾选相应目录。';
+            if (this.pendingDirFilterAll) {
+                hintTextEl.textContent = '当前为全部歌曲。点击目录筛选；开启“多选”或按住 Ctrl 可多选。';
             } else {
-                hintTextEl.textContent = '已勾选的上一级目录会自动包含其子目录；点击“确定”生效筛选。';
+                hintTextEl.textContent = '选中父级会自动包含其子目录；点击“确定”生效筛选。';
             }
         }
     },

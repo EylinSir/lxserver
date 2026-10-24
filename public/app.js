@@ -588,11 +588,14 @@ class App {
             if (!response.ok) throw new Error('Failed to load about.md');
             const text = await response.text();
 
-            // Render Markdown or HTML directly
             const version = (window.CONFIG && window.CONFIG.version) || 'v1.0.0';
             const buildHash = (window.CONFIG && window.CONFIG.buildHash) || 'unknown';
             let content = text.replace(/{{version}}/g, version);
             content = content.replace(/{{buildHash}}/g, buildHash);
+
+            const pPath = (window.CONFIG && window.CONFIG['player.path']) ?? '/';
+            const targetPPath = String(pPath).trim() === '' ? '/' : String(pPath).trim();
+            content = content.replace(/href="\/music"/g, `href="${targetPPath}"`);
 
             if (content.trim().startsWith('<style') || content.trim().startsWith('<div') || content.trim().startsWith('<')) {
                 container.innerHTML = content;
@@ -635,11 +638,28 @@ class App {
                 loginTitleEl.textContent = window.CONFIG.serverName;
             }
         }
-        // 初始化播放器链接
-        const navPlayerLink = document.getElementById('nav-player-link');
-        if (navPlayerLink && window.CONFIG && window.CONFIG['player.path']) {
-            navPlayerLink.href = window.CONFIG['player.path'];
+        // 初始化动态播放器链接 (包括侧边栏和登录面板)
+        this.updatePlayerLinks();
+    }
+
+    updatePlayerLinks(playerPath) {
+        if (playerPath === undefined || playerPath === null) {
+            playerPath = (window.CONFIG && window.CONFIG['player.path']) ?? '/';
         }
+        let target = String(playerPath).trim();
+        if (target === '') target = '/';
+        else if (!target.startsWith('/') && !target.startsWith('http://') && !target.startsWith('https://')) {
+            target = '/' + target;
+        }
+
+        const navPlayerLink = document.getElementById('nav-player-link');
+        if (navPlayerLink) navPlayerLink.href = target;
+
+        const loginPlayerLink = document.getElementById('login-player-link');
+        if (loginPlayerLink) loginPlayerLink.href = target;
+
+        const aboutPlayerLink = document.querySelector('.about-actions a[href*="music"], .about-actions a.about-btn-primary');
+        if (aboutPlayerLink) aboutPlayerLink.href = target;
     }
 
     async loadDashboard() {
@@ -2694,9 +2714,8 @@ class App {
                 form.elements['player.path'].value = pPath === '' ? '/' : pPath;
             }
 
-            // [新增] 同时更新侧边栏链接
-            const navPlayerLink = document.getElementById('nav-player-link');
-            if (navPlayerLink) navPlayerLink.href = (config['player.path'] === '' ? '/' : (config['player.path'] ?? '/'));
+            // 动态同步更新所有播放器链接 (侧边栏、登录面板等)
+            this.updatePlayerLinks(config['player.path']);
 
             // 自定义歌曲目录配置
             if (form.elements['user.enableCustomMusicDir']) {
@@ -3192,9 +3211,8 @@ class App {
                 localStorage.setItem('lx_auth', config['admin.password']);
             }
 
-            // 更新侧边栏播放器链接
-            const navPlayerLink = document.getElementById('nav-player-link');
-            if (navPlayerLink) navPlayerLink.href = playerPath === '' ? '/' : (playerPath ?? '/');
+            // 动态同步更新所有播放器链接
+            this.updatePlayerLinks(playerPath);
 
             // 保存成功后同步「已加载配置」，供下次保存对比
             this.loadedConfig = config;

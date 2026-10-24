@@ -186,9 +186,22 @@ class LXStudioVUMeterAnimation {
         const panelX = marginX;
         const panelY = marginY;
 
-        const scale = Math.min(panelW / (isCompact ? 500 : 840), panelH / (isCompact ? 68 : 210));
-        const cornerR = (isCompact ? 7 : 12) * scale;
+        const isMobilePod = isCompact && (panelW < 440 || (typeof window !== 'undefined' && window.innerWidth < 768));
+        const scale = isMobilePod
+            ? Math.min(panelW / 320, panelH / 40)
+            : Math.min(panelW / (isCompact ? 500 : 840), panelH / (isCompact ? 68 : 210));
+        const cornerR = (isCompact ? 10 : 12) * scale;
 
+        if (isCompact) {
+            // 播放栏紧凑模式：柔和磨砂卡片，与播放栏融为一体，避免硬件外壳的突兀感
+            ctx.fillStyle = isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(17, 20, 26, 0.96)';
+            this.roundRect(ctx, panelX, panelY, panelW, panelH, cornerR);
+            ctx.fill();
+            ctx.strokeStyle = isLight ? 'rgba(15, 23, 42, 0.07)' : 'rgba(255, 255, 255, 0.07)';
+            ctx.lineWidth = 1;
+            this.roundRect(ctx, panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1, cornerR);
+            ctx.stroke();
+        } else {
         // 100% 实体防穿透遮蔽基底
         ctx.fillStyle = isLight ? '#f8fafc' : '#080a0f';
         this.roundRect(ctx, panelX - 1, panelY - 1, panelW + 2, panelH + 2, cornerR);
@@ -247,35 +260,41 @@ class LXStudioVUMeterAnimation {
             this.roundRect(ctx, panelX, panelY, panelW, panelH, cornerR);
             ctx.stroke();
         }
+        }
 
         // 3. 黄金比例空间排版
-        const padX = (isCompact ? 5 : 12) * scale;
-        const padY = (isCompact ? 3 : 8) * scale;
+        const padX = (isCompact ? (isMobilePod ? 4 : 6) : 12) * scale;
+        const padY = (isCompact ? (isMobilePod ? 3 : 5) : 8) * scale;
         const innerX = panelX + padX;
         const innerY = panelY + padY;
         const innerW = panelW - padX * 2;
         const innerH = panelH - padY * 2;
 
-        const centerW = (isCompact ? 42 : 72) * scale;
-        const gap = (isCompact ? 5 : 10) * scale;
-        const meterW = (innerW - centerW - gap * 2) / 2;
-        const meterH = innerH;
+        if (isMobilePod) {
+            // 手机移动端：自适应单表盘·同轴双指针 (Dual-Needle Studio VU)
+            this.drawSingleStereoPod(ctx, innerX, innerY, innerW, innerH, levelL, levelR, scale, theme, isLight);
+        } else {
+            // PC 紧凑端与详情页：双表头与中桥
+            const centerW = (isCompact ? 26 : 72) * scale;
+            const gap = (isCompact ? 3 : 10) * scale;
+            const meterW = (innerW - centerW - gap * 2) / 2;
+            const meterH = innerH;
 
-        const leftX = innerX;
-        const centerX = leftX + meterW + gap;
-        const rightX = centerX + centerW + gap;
+            const leftX = innerX;
+            const centerX = leftX + meterW + gap;
+            const rightX = centerX + centerW + gap;
 
-        // 4. 渲染现代双表头与一体化中桥
-        this.drawMeterPod(ctx, leftX, innerY, meterW, meterH, levelL, scale, 'L', isCompact, theme, isLight);
-        this.drawCenterConsole(ctx, centerX, innerY, centerW, meterH, scale, isCompact, theme, isLight, levelL, levelR);
-        this.drawMeterPod(ctx, rightX, innerY, meterW, meterH, levelR, scale, 'R', isCompact, theme, isLight);
+            this.drawMeterPod(ctx, leftX, innerY, meterW, meterH, levelL, scale, 'L', isCompact, theme, isLight);
+            this.drawCenterConsole(ctx, centerX, innerY, centerW, meterH, scale, isCompact, theme, isLight, levelL, levelR);
+            this.drawMeterPod(ctx, rightX, innerY, meterW, meterH, levelR, scale, 'R', isCompact, theme, isLight);
+        }
 
         ctx.restore();
     }
 
     drawMeterPod(ctx, x, y, w, h, level, scale, channelTitle, isCompact, theme, isLight) {
         ctx.save();
-        const podR = (isCompact ? 5 : 8) * scale;
+        const podR = (isCompact ? 8 : 8) * scale;
 
         // 1. 视窗边界裁剪与防溢出
         ctx.save();
@@ -640,7 +659,13 @@ class LXStudioVUMeterAnimation {
         ctx.restore(); // 解除裁剪
 
         // 11. 现代细致拉丝视窗内嵌倒角框
-        if (isLight) {
+        if (isCompact) {
+            // 紧凑模式：单条柔和描边，降低视觉重量
+            ctx.strokeStyle = isLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.08)';
+            ctx.lineWidth = 1;
+            this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
+            ctx.stroke();
+        } else if (isLight) {
             ctx.strokeStyle = 'rgba(148, 163, 184, 0.55)';
             ctx.lineWidth = 1.0 * scale;
             this.roundRect(ctx, x - 0.5, y - 0.5, w + 1, h + 1, podR);
@@ -667,6 +692,10 @@ class LXStudioVUMeterAnimation {
     }
 
     drawCenterConsole(ctx, x, y, w, h, scale, isCompact, theme, isLight, levelL, levelR) {
+        if (isCompact) {
+            this.drawCompactBridge(ctx, x, y, w, h, scale, isLight, levelL, levelR);
+            return;
+        }
         ctx.save();
         const cornerR = (isCompact ? 5 : 8) * scale;
 
@@ -764,6 +793,431 @@ class LXStudioVUMeterAnimation {
             ctx.fillText('STUDIO REF', cx, cy + 20 * scale);
         }
         ctx.restore();
+
+        ctx.restore();
+    }
+
+    // 紧凑模式中桥：无底座，仅竖排 L/R 信号灯 + VU 小标，保持与播放栏一致的轻盈感
+    drawCompactBridge(ctx, x, y, w, h, scale, isLight, levelL, levelR) {
+        ctx.save();
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        const accent = '#10b981';
+        const muted = isLight ? 'rgba(100, 116, 139, 0.75)' : 'rgba(148, 163, 184, 0.7)';
+        const ledR = Math.max(1.8, 2.2 * scale);
+        const fs = Math.max(7, Math.round(7.5 * scale));
+
+        const drawRow = (label, val, ry) => {
+            const v = Math.max(0, Math.min(1, val || 0));
+            const active = v > 0.08;
+            const hot = v > 0.86;
+            ctx.font = `700 ${fs}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = muted;
+            ctx.fillText(label, cx - 1 * scale, ry);
+
+            ctx.save();
+            if (active) {
+                ctx.shadowColor = hot ? '#f43f5e' : accent;
+                ctx.shadowBlur = 5 * scale * v;
+            }
+            const a = active ? Math.min(1, 0.45 + v * 0.55) : 0.25;
+            ctx.fillStyle = hot ? `rgba(244, 63, 94, ${a})` : (active ? `rgba(16, 185, 129, ${a})` : (isLight ? '#cbd5e1' : '#334155'));
+            ctx.beginPath();
+            ctx.arc(cx + 2 * scale + ledR, ry, ledR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        };
+
+        const rowGap = Math.min(h * 0.22, 13 * scale);
+        drawRow('L', levelL, cy - rowGap);
+        drawRow('R', levelR, cy + rowGap * 0.15);
+
+        ctx.font = `800 ${Math.max(6.5, Math.round(7 * scale))}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = accent;
+        ctx.fillText('VU', cx, cy + rowGap * 1.35);
+        ctx.restore();
+    }
+
+    // 手机移动端自适应：单表盘·同轴双指针 (Dual-Needle Studio Mastering Pod)
+    drawSingleStereoPod(ctx, x, y, w, h, levelL, levelR, scale, theme, isLight) {
+        ctx.save();
+        const podR = 8 * scale;
+
+        // 1. 视窗边界裁剪与防溢出
+        ctx.save();
+        this.roundRect(ctx, x, y, w, h, podR);
+        ctx.clip();
+
+        // 2. 专业母带表盘底色表面 (依主题定制)
+        if (theme === 'vintage-amber') {
+            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.45, 12 * scale, x + w / 2, y + h * 0.45, Math.max(w * 0.6, h * 1.2));
+            if (isLight) {
+                bgGrad.addColorStop(0, '#fffdfa');
+                bgGrad.addColorStop(0.40, '#fef8ea');
+                bgGrad.addColorStop(0.80, '#fdecc4');
+                bgGrad.addColorStop(1, '#fbd38d');
+            } else {
+                bgGrad.addColorStop(0, '#ffe8a3');
+                bgGrad.addColorStop(0.35, '#f6c343');
+                bgGrad.addColorStop(0.75, '#d99b1a');
+                bgGrad.addColorStop(1, '#9c6600');
+            }
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(x, y, w, h);
+
+            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
+            vigGrad.addColorStop(0, isLight ? 'rgba(180, 120, 20, 0.08)' : 'rgba(80, 40, 10, 0.25)');
+            vigGrad.addColorStop(0.3, 'rgba(80, 40, 10, 0)');
+            vigGrad.addColorStop(0.7, 'rgba(80, 40, 10, 0)');
+            vigGrad.addColorStop(1, isLight ? 'rgba(160, 100, 10, 0.16)' : 'rgba(60, 30, 5, 0.38)');
+            ctx.fillStyle = vigGrad;
+            ctx.fillRect(x, y, w, h);
+        } else if (theme === 'ocean-blue') {
+            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.40, 12 * scale, x + w / 2, y + h * 0.40, Math.max(w * 0.6, h * 1.2));
+            if (isLight) {
+                bgGrad.addColorStop(0, '#f8fafc');
+                bgGrad.addColorStop(0.45, '#e0f2fe');
+                bgGrad.addColorStop(0.85, '#bae6fd');
+                bgGrad.addColorStop(1, '#7dd3fc');
+            } else {
+                bgGrad.addColorStop(0, '#42d2ff');
+                bgGrad.addColorStop(0.35, '#12a4df');
+                bgGrad.addColorStop(0.75, '#0369a1');
+                bgGrad.addColorStop(1, '#073b64');
+            }
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(x, y, w, h);
+
+            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
+            vigGrad.addColorStop(0, isLight ? 'rgba(3, 105, 161, 0.08)' : 'rgba(0, 30, 65, 0.30)');
+            vigGrad.addColorStop(0.3, 'rgba(0, 30, 65, 0)');
+            vigGrad.addColorStop(0.7, 'rgba(0, 30, 65, 0)');
+            vigGrad.addColorStop(1, isLight ? 'rgba(2, 132, 199, 0.15)' : 'rgba(0, 20, 50, 0.45)');
+            ctx.fillStyle = vigGrad;
+            ctx.fillRect(x, y, w, h);
+        } else if (theme === 'cyber-cyan') {
+            if (isLight) {
+                const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
+                bgGrad.addColorStop(0, '#ffffff');
+                bgGrad.addColorStop(0.60, '#f0fdfa');
+                bgGrad.addColorStop(1, '#ccfbf1');
+                ctx.fillStyle = bgGrad;
+                ctx.fillRect(x, y, w, h);
+            } else {
+                const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
+                bgGrad.addColorStop(0, '#0c1015');
+                bgGrad.addColorStop(0.5, '#070a0e');
+                bgGrad.addColorStop(1, '#030508');
+                ctx.fillStyle = bgGrad;
+                ctx.fillRect(x, y, w, h);
+
+                const glow = ctx.createRadialGradient(x + w / 2, y + h * 0.5, 10 * scale, x + w / 2, y + h * 0.5, w * 0.5);
+                glow.addColorStop(0, 'rgba(6, 182, 212, 0.14)');
+                glow.addColorStop(0.6, 'rgba(6, 182, 212, 0.03)');
+                glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                ctx.fillStyle = glow;
+                ctx.fillRect(x, y, w, h);
+            }
+        } else if (theme === 'champagne-gold') {
+            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.45, 12 * scale, x + w / 2, y + h * 0.45, Math.max(w * 0.6, h * 1.2));
+            if (isLight) {
+                bgGrad.addColorStop(0, '#ffffff');
+                bgGrad.addColorStop(0.40, '#fefce8');
+                bgGrad.addColorStop(0.80, '#fef08a');
+                bgGrad.addColorStop(1, '#fde047');
+            } else {
+                bgGrad.addColorStop(0, '#fff4cc');
+                bgGrad.addColorStop(0.35, '#fae39b');
+                bgGrad.addColorStop(0.70, '#dfba63');
+                bgGrad.addColorStop(1, '#9b7625');
+            }
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(x, y, w, h);
+
+            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
+            vigGrad.addColorStop(0, isLight ? 'rgba(113, 63, 18, 0.06)' : 'rgba(60, 45, 20, 0.25)');
+            vigGrad.addColorStop(0.3, 'rgba(60, 45, 20, 0)');
+            vigGrad.addColorStop(0.7, 'rgba(60, 45, 20, 0)');
+            vigGrad.addColorStop(1, isLight ? 'rgba(113, 63, 18, 0.14)' : 'rgba(50, 35, 10, 0.38)');
+            ctx.fillStyle = vigGrad;
+            ctx.fillRect(x, y, w, h);
+        } else {
+            // studio-monochrome
+            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.38, 12 * scale, x + w / 2, y + h * 0.38, Math.max(w * 0.6, h * 1.2));
+            if (isLight) {
+                bgGrad.addColorStop(0, '#ffffff');
+                bgGrad.addColorStop(0.65, '#f8fafc');
+                bgGrad.addColorStop(1, '#edf2f7');
+            } else {
+                bgGrad.addColorStop(0, '#191b22');
+                bgGrad.addColorStop(0.60, '#101217');
+                bgGrad.addColorStop(1, '#08090d');
+            }
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(x, y, w, h);
+
+            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
+            vigGrad.addColorStop(0, isLight ? 'rgba(0, 0, 0, 0.03)' : 'rgba(0, 0, 0, 0.35)');
+            vigGrad.addColorStop(0.3, 'rgba(0, 0, 0, 0)');
+            vigGrad.addColorStop(0.7, 'rgba(0, 0, 0, 0)');
+            vigGrad.addColorStop(1, isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(0, 0, 0, 0.50)');
+            ctx.fillStyle = vigGrad;
+            ctx.fillRect(x, y, w, h);
+        }
+
+        // 3. 几何浅弧线参数 (宽幅单表盘，平缓舒展大气)
+        const spanMarginX = w * 0.08;
+        const scaleStartX = x + spanMarginX;
+        const scaleEndX = x + w - spanMarginX;
+        const scaleW = scaleEndX - scaleStartX;
+
+        const baseCenterY = y + h * 0.66;
+        const arcSag = h * 0.07;
+
+        const pivotX = x + w / 2;
+        const pivotDepth = h * 2.1;
+        const pivotY = y + pivotDepth;
+
+        const getScalePoint = (norm) => {
+            const bx = scaleStartX + norm * scaleW;
+            const u = (norm - 0.5) * 2;
+            const by = baseCenterY + (u * u) * arcSag;
+
+            const dx = bx - pivotX;
+            const dy = by - pivotY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const ux = dx / dist;
+            const uy = dy / dist;
+
+            return { bx, by, ux, uy };
+        };
+
+        // 配色定义
+        const isDarkText = theme === 'vintage-amber' || theme === 'champagne-gold' || (isLight && (theme === 'ocean-blue' || theme === 'cyber-cyan' || theme === 'studio-monochrome'));
+        const textMain = isDarkText ? '#1e293b' : (theme === 'studio-monochrome' ? '#f8fafc' : (theme === 'cyber-cyan' ? '#22d3ee' : '#f1f5f9'));
+        const textMuted = isDarkText ? 'rgba(51, 65, 85, 0.65)' : (theme === 'studio-monochrome' ? 'rgba(226, 232, 240, 0.65)' : 'rgba(34, 211, 238, 0.65)');
+        const redColor = '#f43f5e'; // 活力珊瑚红（R通道与过载红区）
+        const greenColor = '#10b981'; // 经典翠绿（L通道）
+        const arcColor = isDarkText ? '#334155' : (theme === 'studio-monochrome' ? 'rgba(241, 245, 249, 0.85)' : (theme === 'cyber-cyan' ? 'rgba(34, 211, 238, 0.85)' : '#94a3b8'));
+
+        // 4. 顶部立体声声道指示与指示图例
+        // 左边：● L (绿点)；中间：DUAL VU · STEREO；右边：● R (红点)
+        ctx.save();
+        const topY = y + 4.5 * scale;
+        const tagFontSize = Math.max(7.5, Math.round(8.5 * scale));
+        ctx.font = `700 ${tagFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.textBaseline = 'top';
+
+        // 中间徽标
+        ctx.fillStyle = textMuted;
+        ctx.textAlign = 'center';
+        ctx.letterSpacing = '1px';
+        ctx.fillText('DUAL VU · STEREO', x + w / 2, topY);
+
+        // 左通道指示 (绿点 + L)
+        ctx.textAlign = 'left';
+        ctx.fillStyle = greenColor;
+        ctx.beginPath();
+        ctx.arc(scaleStartX, topY + 4 * scale, 2 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = textMuted;
+        ctx.fillText('L', scaleStartX + 5 * scale, topY);
+
+        // 右通道指示 (红点 + R)
+        ctx.textAlign = 'right';
+        ctx.fillText('R', scaleEndX - 5 * scale, topY);
+        ctx.fillStyle = redColor;
+        ctx.beginPath();
+        ctx.arc(scaleEndX, topY + 4 * scale, 2 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // 5. 现代双段能量弧带
+        const normZero = 0.86;
+        const majorTickLen = 5.5 * scale;
+        const medTickLen = 3.8 * scale;
+        const minorTickLen = 2.2 * scale;
+
+        ctx.beginPath();
+        for (let i = 0; i <= 50; i++) {
+            const n = (i / 50) * normZero;
+            const p = getScalePoint(n);
+            if (i === 0) ctx.moveTo(p.bx, p.by);
+            else ctx.lineTo(p.bx, p.by);
+        }
+        ctx.strokeStyle = arcColor;
+        ctx.lineWidth = 1.0 * scale;
+        ctx.stroke();
+
+        ctx.beginPath();
+        for (let i = 0; i <= 20; i++) {
+            const n = normZero + (i / 20) * (1.0 - normZero);
+            const p = getScalePoint(n);
+            if (i === 0) ctx.moveTo(p.bx, p.by);
+            else ctx.lineTo(p.bx, p.by);
+        }
+        ctx.strokeStyle = redColor;
+        ctx.lineWidth = 1.5 * scale;
+        ctx.stroke();
+
+        // 6. 宽幅工整刻度
+        const ticks = [
+            { label: '-20', norm: 0.08, major: true },
+            { norm: 0.20, type: 'min' },
+            { label: '-10', norm: 0.32, major: true },
+            { norm: 0.46, type: 'med' },
+            { label: '-5',  norm: 0.60, major: true },
+            { norm: 0.73, type: 'med' },
+            { label: '0',   norm: 0.86, major: true, isRed: true },
+            { norm: 0.93, type: 'min', isRed: true },
+            { label: '+3',  norm: 1.00, major: true, isRed: true }
+        ];
+
+        ticks.forEach(t => {
+            const p = getScalePoint(t.norm);
+            const len = t.major ? majorTickLen : (t.type === 'med' ? medTickLen : minorTickLen);
+            ctx.strokeStyle = t.isRed ? redColor : arcColor;
+            ctx.lineWidth = (t.major ? (t.isRed ? 1.5 : 1.1) : 0.8) * scale;
+            ctx.beginPath();
+            ctx.moveTo(p.bx, p.by);
+            ctx.lineTo(p.bx + p.ux * len, p.by + p.uy * len);
+            ctx.stroke();
+        });
+
+        // 刻度文字
+        const fontSize = Math.max(8.0, Math.round(9.2 * scale));
+        ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const labelGap = 4.5 * scale;
+
+        ticks.forEach(t => {
+            if (!t.label) return;
+            const p = getScalePoint(t.norm);
+            const lx = p.bx + p.ux * (majorTickLen + labelGap);
+            const ly = p.by + p.uy * (majorTickLen + labelGap);
+            ctx.fillStyle = t.isRed ? redColor : textMain;
+            ctx.fillText(t.label, lx, ly);
+        });
+
+        // 7. 优雅中心 VU 徽标
+        ctx.save();
+        const vuY = baseCenterY + 10.0 * scale;
+        const vuFontSize = Math.max(7.5, Math.round(8.5 * scale));
+        ctx.font = `800 ${vuFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.fillStyle = textMuted;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.letterSpacing = '2px';
+        ctx.fillText('VU', x + w / 2, vuY);
+        ctx.restore();
+
+        // 8. 同轴双指针 (Coaxial Dual-Needle)
+        const needleBaseY = y + h + 2 * scale;
+        const baseW = 0.85 * scale;
+        const tipW = 0.25 * scale;
+
+        const drawNeedle = (levelVal, tipColor, isLeftChannel) => {
+            const norm = Math.max(0, Math.min(1.0, levelVal));
+            const targetPoint = getScalePoint(norm);
+
+            const ndx = targetPoint.bx - pivotX;
+            const ndy = targetPoint.by - pivotY;
+            const nDist = Math.sqrt(ndx * ndx + ndy * ndy);
+            const nux = ndx / nDist;
+            const nuy = ndy / nDist;
+
+            const needleTipX = targetPoint.bx + nux * (majorTickLen + 1.0 * scale);
+            const needleTipY = targetPoint.by + nuy * (majorTickLen + 1.0 * scale);
+
+            const tBase = (needleBaseY - pivotY) / nuy;
+            const needleBaseX = pivotX + tBase * nux;
+
+            const npX = -nuy;
+            const npY = nux;
+
+            // 柔和投影
+            ctx.save();
+            ctx.shadowColor = isLight ? 'rgba(0, 0, 0, 0.20)' : 'rgba(0, 0, 0, 0.45)';
+            ctx.shadowBlur = 2.5 * scale;
+            ctx.shadowOffsetX = (isLeftChannel ? -0.8 : 0.8) * scale;
+            ctx.shadowOffsetY = 1.2 * scale;
+
+            // 碳素深色针体 (底部 65%)
+            const midRatio = 0.65;
+            const needleMidX = needleBaseX + (needleTipX - needleBaseX) * midRatio;
+            const needleMidY = needleBaseY + (needleTipY - needleBaseY) * midRatio;
+            const midW = baseW + (tipW - baseW) * midRatio;
+
+            ctx.beginPath();
+            ctx.moveTo(needleBaseX - npX * baseW, needleBaseY - npY * baseW);
+            ctx.lineTo(needleBaseX + npX * baseW, needleBaseY + npY * baseW);
+            ctx.lineTo(needleMidX + npX * midW, needleMidY + npY * midW);
+            ctx.lineTo(needleMidX - npX * midW, needleMidY - npY * midW);
+            ctx.closePath();
+            ctx.fillStyle = isLight ? '#0f172a' : (theme === 'studio-monochrome' ? '#cbd5e1' : '#111318');
+            ctx.fill();
+
+            // 荧光双色针尖 (顶部 35%)
+            ctx.beginPath();
+            ctx.moveTo(needleMidX - npX * midW, needleMidY - npY * midW);
+            ctx.lineTo(needleMidX + npX * midW, needleMidY + npY * midW);
+            ctx.lineTo(needleTipX + npX * tipW, needleTipY + npY * tipW);
+            ctx.lineTo(needleTipX - npX * tipW, needleTipY - npY * tipW);
+            ctx.closePath();
+            ctx.fillStyle = tipColor;
+            ctx.fill();
+            ctx.restore();
+        };
+
+        // 绘制 L 通道指针（翠绿/主题色针尖）
+        const tipLColor = theme === 'cyber-cyan' && !isLight ? '#00f5ff' : greenColor;
+        drawNeedle(levelL, tipLColor, true);
+
+        // 绘制 R 通道指针（珊瑚红针尖）
+        drawNeedle(levelR, redColor, false);
+
+        // 9. 精工同轴金属旋钮轴帽 (Machined Dual-Coaxial Pivot Cap)
+        ctx.save();
+        const capR = 3.6 * scale;
+        const capGrad = ctx.createRadialGradient(pivotX - 0.5, needleBaseY - 0.5, 0.5, pivotX, needleBaseY, capR);
+        if (isLight) {
+            capGrad.addColorStop(0, '#ffffff');
+            capGrad.addColorStop(0.5, '#cbd5e1');
+            capGrad.addColorStop(1, '#64748b');
+        } else {
+            capGrad.addColorStop(0, '#64748b');
+            capGrad.addColorStop(0.6, '#334155');
+            capGrad.addColorStop(1, '#0f172a');
+        }
+        ctx.fillStyle = capGrad;
+        ctx.beginPath();
+        if (typeof ctx.arc === 'function') {
+            ctx.arc(pivotX, needleBaseY, capR, 0, Math.PI * 2);
+        } else {
+            this.roundRect(ctx, pivotX - capR, needleBaseY - capR, capR * 2, capR * 2, capR);
+        }
+        ctx.fill();
+        ctx.restore();
+
+        // 10. 防眩光蓝宝石双曲面玻璃反光
+        const glassGrad = ctx.createLinearGradient(x, y, x, y + h * 0.45);
+        glassGrad.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.08)');
+        glassGrad.addColorStop(0.5, isLight ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.02)');
+        glassGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = glassGrad;
+        ctx.fillRect(x, y, w, h * 0.45);
+
+        ctx.restore(); // 解除裁剪
+
+        // 11. 视窗内嵌倒角框
+        ctx.strokeStyle = isLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1;
+        this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
+        ctx.stroke();
 
         ctx.restore();
     }
@@ -1118,22 +1572,25 @@ const musicVisualizer = (function () {
         const globalStyle = s.visualizerGlobalStyle || 'blocks';
         const globalGap = globalStyle === 'blocks' ? 2 : 0;
         const visualizerContainer = document.getElementById('visualizer-container');
+        const progressRow = document.getElementById('player-progress-row');
 
         if (!isInitialized) {
             triggerStandaloneLoop();
             if (s.showFooterVisualizer && footerCanvas && visualizerContainer) {
                 if (s.footerVisualizerStyle === 'vumeter') {
+                    if (progressRow) progressRow.style.marginTop = isMobile ? '24px' : '';
                     footerCanvas.style.opacity = opacity;
                     visualizerContainer.style.width = '100%';
                     visualizerContainer.style.maxWidth = isMobile ? 'calc(100% - 16px)' : '460px';
                     visualizerContainer.style.left = '50%';
                     visualizerContainer.style.transform = 'translateX(-50%)';
-                    visualizerContainer.style.bottom = isMobile ? '14px' : '';
+                    visualizerContainer.style.bottom = isMobile ? '16px' : '';
                     visualizerContainer.style.marginBottom = '';
-                    visualizerContainer.style.height = isMobile ? '50px' : (window.innerHeight <= 845 ? '58px' : '72px');
+                    visualizerContainer.style.height = isMobile ? '40px' : (window.innerHeight <= 845 ? '58px' : '72px');
                     visualizerContainer.style.display = 'flex';
-                    visualizerContainer.style.zIndex = '5';
+                    visualizerContainer.style.zIndex = isMobile ? '1' : '5';
                 } else {
+                    if (progressRow) progressRow.style.marginTop = '';
                     visualizerContainer.style.width = '100%';
                     visualizerContainer.style.maxWidth = '';
                     visualizerContainer.style.left = '0';
@@ -1146,6 +1603,8 @@ const musicVisualizer = (function () {
                 }
                 footerCanvas.style.opacity = opacity;
                 syncSize();
+            } else if (progressRow) {
+                progressRow.style.marginTop = '';
             }
             if (s.showDetailVisualizer && detailCanvas) {
                 if (s.detailVisualizerStyle === 'vumeter') {
@@ -1166,20 +1625,22 @@ const musicVisualizer = (function () {
             let count, gap, lineWidth, cubeHeight;
 
             if (style === 'vumeter') {
+                if (progressRow) progressRow.style.marginTop = isMobile ? '24px' : '';
                 visualizerContainer.style.width = '100%';
                 visualizerContainer.style.maxWidth = isMobile ? 'calc(100% - 16px)' : '460px';
                 visualizerContainer.style.left = '50%';
                 visualizerContainer.style.transform = 'translateX(-50%)';
-                visualizerContainer.style.bottom = isMobile ? '14px' : '';
+                visualizerContainer.style.bottom = isMobile ? '16px' : '';
                 visualizerContainer.style.marginBottom = '';
-                visualizerContainer.style.height = isMobile ? '50px' : (window.innerHeight <= 845 ? '58px' : '72px');
-                visualizerContainer.style.zIndex = '5';
+                visualizerContainer.style.height = isMobile ? '40px' : (window.innerHeight <= 845 ? '58px' : '72px');
+                visualizerContainer.style.zIndex = isMobile ? '1' : '5';
                 footerCanvas.style.width = '100%';
                 footerCanvas.style.height = '100%';
                 syncSize();
                 waveFooter.addAnimation(new LXStudioVUMeterAnimation({ isCompact: true, analyserL, analyserR }));
                 footerCanvas.style.opacity = opacity;
             } else {
+                if (progressRow) progressRow.style.marginTop = '';
                 visualizerContainer.style.width = '100%';
                 visualizerContainer.style.maxWidth = '';
                 visualizerContainer.style.left = '0';
@@ -1235,7 +1696,7 @@ const musicVisualizer = (function () {
 
             const footerIsHidden = playerFooter && playerFooter.classList.contains('translate-y-[110%]');
             const isShortWindow = window.innerHeight <= 845;
-            visualizerContainer.style.zIndex = style === 'vumeter' ? '5' : '1';
+            visualizerContainer.style.zIndex = isMobile ? '1' : (style === 'vumeter' ? '5' : '1');
             visualizerContainer.style.display = 'flex';
             if (playerFooter) {
                 playerFooter.style.transition = 'height 0.3s ease';
@@ -1281,6 +1742,7 @@ const musicVisualizer = (function () {
                 sidebar.style.paddingBottom = targetPb;
             }
         } else if (footerCanvas && visualizerContainer) {
+            if (progressRow) progressRow.style.marginTop = '';
             footerCanvas.style.opacity = '0';
             visualizerContainer.style.height = '';
             footerCanvas.style.width = '100%';

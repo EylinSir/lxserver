@@ -8742,6 +8742,12 @@ document.addEventListener('keydown', (e) => {
         case 'Digit6':
             if (e.altKey) switchTab('about');
             break;
+        case 'KeyB':
+            if (e.altKey) {
+                e.preventDefault();
+                if (typeof toggleDesktopSidebar === 'function') toggleDesktopSidebar();
+            }
+            break;
         case 'KeyF':
             updateSetting('showFooterVisualizer', !settings.showFooterVisualizer);
             break;
@@ -8911,7 +8917,24 @@ const SETTINGS_UI_MAP = {
         type: 'checkbox',
         action: () => window.LocalMusicManager?.syncRemasterVisibility()
     },
-    enableKeyboardShortcuts: { id: 'setting-enable-shortcuts', type: 'checkbox' },
+    enableKeyboardShortcuts: {
+        id: 'setting-enable-shortcuts',
+        type: 'checkbox',
+        action: (v) => {
+            const list = document.getElementById('shortcuts-cheatsheet-container');
+            if (list) {
+                if (v) {
+                    list.classList.remove('opacity-40', 'pointer-events-none');
+                } else {
+                    list.classList.add('opacity-40', 'pointer-events-none');
+                }
+            }
+            const collapseBtn = document.getElementById('sidebar-collapse-btn');
+            const expandBtn = document.getElementById('sidebar-expand-btn');
+            if (collapseBtn) collapseBtn.title = v ? '折叠侧边栏 (Alt+B)' : '折叠侧边栏';
+            if (expandBtn) expandBtn.title = v ? '展开侧边栏 (Alt+B)' : '展开侧边栏';
+        }
+    },
     enableCrossfade: { id: 'setting-enable-crossfade', type: 'checkbox', normalize: () => false, readOnly: true },
     keepScreenAwake: {
         id: 'setting-keep-screen-awake',
@@ -16971,18 +16994,102 @@ function toggleSidebar() {
 window.addEventListener('resize', () => {
     const sidebar = document.getElementById('main-sidebar');
     const backdrop = document.getElementById('mobile-sidebar-backdrop');
+    const expandBtn = document.getElementById('sidebar-expand-btn');
 
     if (sidebar && window.innerWidth >= 1025) {
         // Reset styles for desktop
         sidebar.classList.remove('-translate-x-full', 'translate-x-0');
         if (backdrop) backdrop.classList.add('hidden');
+        if (expandBtn) {
+            if (sidebar.classList.contains('desktop-collapsed')) {
+                expandBtn.classList.remove('hidden');
+                expandBtn.style.opacity = '1';
+                expandBtn.style.pointerEvents = 'auto';
+            } else {
+                expandBtn.classList.add('hidden');
+            }
+        }
     } else if (sidebar) {
         // Ensure default closed state for mobile if not explicitly open
         if (!sidebar.classList.contains('translate-x-0')) {
             sidebar.classList.add('-translate-x-full');
         }
+        if (expandBtn) {
+            expandBtn.classList.add('hidden');
+        }
     }
 });
+
+// ========================================
+// Desktop Sidebar Collapse / Expand Logic
+// ========================================
+
+// Desktop Sidebar Collapse Toggle
+function toggleDesktopSidebar(expand) {
+    const sidebar = document.getElementById('main-sidebar');
+    const expandBtn = document.getElementById('sidebar-expand-btn');
+    if (!sidebar) return;
+
+    const shouldCollapse = expand !== undefined ? !expand : !sidebar.classList.contains('desktop-collapsed');
+
+    if (shouldCollapse) {
+        sidebar.classList.add('desktop-collapsed');
+        if (expandBtn) {
+            expandBtn.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                expandBtn.style.opacity = '1';
+                expandBtn.style.pointerEvents = 'auto';
+            });
+        }
+        try {
+            localStorage.setItem('desktop_sidebar_collapsed', 'true');
+        } catch (e) {}
+    } else {
+        sidebar.classList.remove('desktop-collapsed');
+        if (expandBtn) {
+            expandBtn.style.opacity = '0';
+            expandBtn.style.pointerEvents = 'none';
+            setTimeout(() => {
+                if (!sidebar.classList.contains('desktop-collapsed')) {
+                    expandBtn.classList.add('hidden');
+                }
+            }, 250);
+        }
+        try {
+            localStorage.setItem('desktop_sidebar_collapsed', 'false');
+        } catch (e) {}
+    }
+    if (window.CustomDirManager && typeof window.CustomDirManager.syncSidePanel === 'function') {
+        window.CustomDirManager.syncSidePanel();
+    }
+}
+
+// Initialize desktop sidebar collapse state & shortcut
+function initDesktopSidebar() {
+    try {
+        const isCollapsed = localStorage.getItem('desktop_sidebar_collapsed') === 'true';
+        if (isCollapsed && window.innerWidth >= 768) {
+            const sidebar = document.getElementById('main-sidebar');
+            const expandBtn = document.getElementById('sidebar-expand-btn');
+            if (sidebar) sidebar.classList.add('desktop-collapsed');
+            if (expandBtn) {
+                expandBtn.classList.remove('hidden');
+                expandBtn.style.opacity = '1';
+                expandBtn.style.pointerEvents = 'auto';
+            }
+            if (window.CustomDirManager && typeof window.CustomDirManager.syncSidePanel === 'function') {
+                window.CustomDirManager.syncSidePanel();
+            }
+        }
+    } catch (e) {}
+}
+
+// Auto init desktop sidebar
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDesktopSidebar);
+} else {
+    initDesktopSidebar();
+}
 
 // 切换详情页封面显示（移动端优化）
 function toggleDetailCover() {

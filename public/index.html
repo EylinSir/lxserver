@@ -22,6 +22,21 @@
         if (window.CONFIG && window.CONFIG.serverName) {
             document.title = window.CONFIG.serverName + ' - 管理控制台';
         }
+        (function () {
+            function syncLinks() {
+                var p = (window.CONFIG && window.CONFIG['player.path']) ?? '/';
+                var target = String(p).trim() === '' ? '/' : String(p).trim();
+                var loginLink = document.getElementById('login-player-link');
+                if (loginLink) loginLink.href = target;
+                var navLink = document.getElementById('nav-player-link');
+                if (navLink) navLink.href = target;
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', syncLinks);
+            } else {
+                syncLinks();
+            }
+        })();
     </script>
     <!-- PostHog Analytics -->
     <script>
@@ -117,7 +132,7 @@
                     <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                     <span>服务状态正常</span>
                 </span>
-                <a href="/music/" class="text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 no-underline font-medium">
+                <a href="/music/" id="login-player-link" class="text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 no-underline font-medium">
                     <span>进入音乐播放器</span>
                     <i class="fas fa-arrow-right text-[10px]"></i>
                 </a>

@@ -16,7 +16,6 @@ if (typeof (global as any).navigator === 'undefined') {
 
 import { initLogger } from '@/utils/log4js'
 import defaultConfig from './defaultConfig'
-import { migrateLegacyConfig } from './configMigration'
 import { ENV_PARAMS, File } from './constants'
 import { checkAndCreateDirSync } from './utils'
 
@@ -267,7 +266,6 @@ const margeConfig = (p: string) => {
     console.warn('Read config error: ' + (err.message as string))
     return false
   }
-  config = migrateLegacyConfig(config)
   const newConfig = { ...global.lx.config }
   for (const key of Object.keys(defaultConfig) as Array<keyof LX.Config>) {
     // @ts-expect-error
