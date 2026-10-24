@@ -6998,6 +6998,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if (pathname === '/api/custom-source/upload' && req.method === 'POST') {
         return customSourceHandlers.handleUpload(req, res)
       }
+      if (pathname === '/api/custom-source/update' && req.method === 'POST') {
+        return customSourceHandlers.handleUpdate(req, res)
+      }
       if (pathname === '/api/custom-source/list' && req.method === 'GET') {
         const username = urlObj.searchParams.get('username') || 'default'
 

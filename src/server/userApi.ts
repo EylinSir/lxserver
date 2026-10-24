@@ -102,6 +102,10 @@ export function getApiStatus(owner: string, id: string): ApiStatusInfo | undefin
     return apiStatus.get(`${owner}_${id}`)
 }
 
+export function clearApiStatus(owner: string, id: string): void {
+    apiStatus.delete(`${owner}_${id}`)
+}
+
 
 // 从脚本注释中提取元数据
 export function extractMetadata(script: string): Partial<UserApiInfo> {

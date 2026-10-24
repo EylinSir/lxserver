@@ -14141,6 +14141,76 @@ async function handleUrlImport() {
     }
 }
 
+// 自动更新自定义源脚本并校验替换
+async function updateCustomSource(sourceId, url, allowUnsafeVM = false) {
+    if (!url) {
+        showError('自动更新失败，失败原因: 未找到更新地址');
+        return;
+    }
+
+    try {
+        showInfo('正在获取并验证新版脚本...');
+
+        const username = currentListData?.username || 'default';
+        const headers = { 'Content-Type': 'application/json', ...getUserAuthHeaders() };
+        const adminPass = localStorage.getItem('lx_admin_password');
+        if (adminPass) headers['x-frontend-auth'] = adminPass;
+
+        const response = await fetch('/api/custom-source/update', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+                sourceId,
+                url,
+                username,
+                allowUnsafeVM
+            })
+        });
+
+        if (response.status === 403) {
+            const data = await response.json();
+            showError(data.error || '权限限制：请先登录管理员。');
+            const authorized = await handleAdminAuth('更新自定义源需要管理员权限');
+            if (authorized) return await updateCustomSource(sourceId, url, allowUnsafeVM);
+            return;
+        }
+
+        const result = await response.json();
+
+        if (result.disabledVM) {
+            showError(`自动更新失败，失败原因: ${result.error || result.message || '已禁用VM'}`);
+            return;
+        }
+
+        // 处理需要原生 VM 模式确认
+        if (result.requireUnsafe) {
+            const confirmed = await showSelect('安全风险确认', result.message || '该脚本新版本需要原生 VM 模式运行，可能存在安全风险，是否继续？', { danger: true, confirmText: '允许并更新' });
+            if (confirmed) {
+                return await updateCustomSource(sourceId, url, true);
+            } else {
+                showInfo('已取消更新');
+                return;
+            }
+        }
+
+        if (!response.ok || !result.success) {
+            const errMsg = result.error || `HTTP ${response.status}`;
+            showError(`自动更新失败，失败原因: ${errMsg}`);
+            return;
+        }
+
+        const newVersion = result.metadata?.version ? (/^v/i.test(result.metadata.version) ? result.metadata.version : 'v' + result.metadata.version) : '';
+        const sourceName = result.metadata?.name || sourceId;
+        showSuccess(`脚本更新成功: ${sourceName} ${newVersion}`.trim());
+
+        // 刷新列表以展示最新脚本状态
+        await renderCustomSources();
+    } catch (error) {
+        console.error('[CustomSource] 更新失败:', error);
+        showError(`自动更新失败，失败原因: ${error.message || '网络请求异常'}`);
+    }
+}
+
 // 上传自定义源到服务器
 async function uploadCustomSource(filename, content, type, allowUnsafeVM = false) {
     const headers = { 'Content-Type': 'application/json', ...getUserAuthHeaders() };
@@ -14366,19 +14436,40 @@ async function renderCustomSources() {
             let errorMsg = '';
             let updateAlertBanner = '';
 
+            const isBatchContainer = window._sourceBatchMode === containerId;
+
             if (source.updateAlert && (source.updateAlert.log || source.updateAlert.updateUrl)) {
                 const alertLog = source.updateAlert.log || '发现新版本，建议及时更新';
                 const alertUrl = source.updateAlert.updateUrl || '';
-                const clickAttr = alertUrl ? `onclick="window.open('${alertUrl}', '_blank')" role="button" tabindex="0"` : '';
-                const cursorStyle = alertUrl ? 'cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/40 hover:border-amber-300 transition-all active:scale-[0.99]' : '';
-                const linkIcon = alertUrl ? `<i class="fas fa-external-link-alt ml-1 text-[8px] opacity-70 shrink-0"></i>` : '';
+
+                let actionButtons = '';
+                if (alertUrl) {
+                    const encodedUrl = encodeURIComponent(alertUrl);
+                    const encodedId = encodeURIComponent(source.id);
+                    actionButtons = `
+                    <div class="flex items-center gap-1 shrink-0 ml-1">
+                        <button type="button"
+                                ${isBatchContainer ? 'disabled' : `onclick="event.stopPropagation(); updateCustomSource(decodeURIComponent('${encodedId}'), decodeURIComponent('${encodedUrl}'))"`}
+                                class="inline-flex items-center gap-1 text-[9px] md:text-[10px] bg-amber-500 hover:bg-amber-600 active:scale-95 text-white px-2 py-0.5 rounded font-bold shrink-0 whitespace-nowrap shadow-sm transition-all ${isBatchContainer ? 'opacity-50 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}"
+                                title="自动下载验证并更新脚本">
+                            <i class="fas fa-sync-alt text-[8px]"></i>更新
+                        </button>
+                        <button type="button"
+                                ${isBatchContainer ? 'disabled' : `onclick="event.stopPropagation(); window.open(decodeURIComponent('${encodedUrl}'), '_blank')"`}
+                                class="inline-flex items-center gap-1 text-[9px] md:text-[10px] bg-amber-100 hover:bg-amber-200 dark:bg-amber-800/40 dark:hover:bg-amber-800/60 text-amber-800 dark:text-amber-200 active:scale-95 px-2 py-0.5 rounded font-bold shrink-0 whitespace-nowrap border border-amber-300 dark:border-amber-700/60 transition-all ${isBatchContainer ? 'opacity-50 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}"
+                                title="前往外部页面/下载地址">
+                            前往<i class="fas fa-external-link-alt text-[8px] opacity-70"></i>
+                        </button>
+                    </div>`;
+                }
+
                 updateAlertBanner = `
-                <div ${clickAttr} class="mt-1.5 p-1.5 md:p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 text-amber-700 dark:text-amber-300 text-[10px] md:text-[11px] flex items-center justify-between gap-1.5 ${cursorStyle}" title="${alertUrl ? '点击前往下载更新: ' + alertUrl : ''}">
+                <div class="mt-1.5 p-1.5 md:p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 text-amber-700 dark:text-amber-300 text-[10px] md:text-[11px] flex items-center justify-between gap-1.5">
                     <div class="flex items-center gap-1.5 min-w-0 flex-1">
                         <i class="fas fa-bell text-amber-500 shrink-0"></i>
                         ${createMarqueeHtml(alertLog, "font-medium text-[10px] md:text-[11px]")}
                     </div>
-                    ${alertUrl ? `<span class="inline-flex items-center text-[9px] md:text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-bold shrink-0 whitespace-nowrap ml-1">更新${linkIcon}</span>` : ''}
+                    ${actionButtons}
                 </div>`;
             }
 
@@ -14406,7 +14497,6 @@ async function renderCustomSources() {
             const isPublic = source.owner === 'open';
             const canManageSource = isAdmin || (!isPublic && isUser);
 
-            const isBatchContainer = window._sourceBatchMode === containerId;
             div.innerHTML = `
             ${isBatchContainer ? `
             <div class="flex items-center self-stretch pr-2 md:pr-4 -ml-1 md:-ml-2 touch-none" onclick="toggleSourceBatchSelect('${source.id}', '${containerId}')">
@@ -15860,6 +15950,7 @@ window.toggleSongInList = toggleSongInList;
 window.toggleSource = toggleSource;
 window.deleteSource = deleteSource;
 window.reloadSource = reloadSource;
+window.updateCustomSource = updateCustomSource;
 
 // Source Batch Mode
 window.enterSourceBatchMode = enterSourceBatchMode;

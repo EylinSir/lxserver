@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { extractMetadata, loadUserApi, initUserApis, getApiStatus } from './userApi'
+import { extractMetadata, loadUserApi, initUserApis, getApiStatus, clearApiStatus } from './userApi'
 import type { IncomingMessage, ServerResponse } from 'http'
 import needle from 'needle'
 import { verifyUserAuth } from './server'
@@ -278,6 +278,67 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
     }
 }
 
+// 辅助函数：支持重定向的下载
+async function downloadScript(targetUrl: string, depth = 0): Promise<string> {
+    if (depth > 5) throw new Error('重定向次数过多 (Too many redirects)')
+
+    // 远程导入音源脚本属于应用类出站请求：开启 app 代理时走 needle
+    // （原生 https.get 无法直接使用 tunnel agent）
+    const agent = await getProxyAgent(targetUrl, 'app')
+    if (agent) {
+        const resp: any = await needle('get', targetUrl, null, {
+            agent,
+            follow_max: 5,
+            response_timeout: 30000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        })
+        if (resp.statusCode !== 200) throw new Error(`状态码异常: HTTP ${resp.statusCode}`)
+        return Buffer.isBuffer(resp.body) ? resp.body.toString('utf-8') : String(resp.body || '')
+    }
+
+    const protocol = targetUrl.startsWith('https') ? require('https') : require('http')
+
+    return new Promise((resolve, reject) => {
+        const req = protocol.get(targetUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            timeout: 30000
+        }, (response: any) => {
+            const { statusCode } = response
+
+            // 处理重定向
+            if (statusCode >= 300 && statusCode < 400 && response.headers.location) {
+                let redirectUrl = response.headers.location
+                if (!redirectUrl.startsWith('http')) {
+                    const parsedUrl = new URL(targetUrl)
+                    redirectUrl = `${parsedUrl.protocol}//${parsedUrl.host}${redirectUrl}`
+                }
+                return resolve(downloadScript(redirectUrl, depth + 1))
+            }
+
+            if (statusCode !== 200) {
+                return reject(new Error(`状态码异常: HTTP ${statusCode}`))
+            }
+
+            const chunks: any[] = []
+            response.on('data', (chunk: any) => chunks.push(chunk))
+            response.on('end', () => {
+                const buffer = Buffer.concat(chunks)
+                resolve(buffer.toString('utf-8'))
+            })
+            response.on('error', reject)
+        })
+        req.on('timeout', () => {
+            req.destroy()
+            reject(new Error('请求超时 (Timeout)'))
+        })
+        req.on('error', reject)
+    })
+}
+
 // 从远程URL导入脚本
 export async function handleImport(req: IncomingMessage, res: ServerResponse) {
     try {
@@ -289,55 +350,7 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
             throw new Error('Missing URL')
         }
 
-        // 辅助函数：支持重定向的下载
-        const download = async (targetUrl: string, depth = 0): Promise<string> => {
-            if (depth > 5) throw new Error('Too many redirects')
-
-            // 远程导入音源脚本属于应用类出站请求：开启 app 代理时走 needle
-            // （原生 https.get 无法直接使用 tunnel agent）
-            const agent = await getProxyAgent(targetUrl, 'app')
-            if (agent) {
-                const resp: any = await needle('get', targetUrl, null, {
-                    agent,
-                    follow_max: 5,
-                    response_timeout: 30000,
-                })
-                if (resp.statusCode !== 200) throw new Error(`Failed to download: status code ${resp.statusCode}`)
-                return Buffer.isBuffer(resp.body) ? resp.body.toString('utf-8') : String(resp.body || '')
-            }
-
-            const protocol = targetUrl.startsWith('https') ? require('https') : require('http')
-
-            return new Promise((resolve, reject) => {
-                protocol.get(targetUrl, (response: any) => {
-                    const { statusCode } = response
-
-                    // 处理重定向
-                    if (statusCode >= 300 && statusCode < 400 && response.headers.location) {
-                        let redirectUrl = response.headers.location
-                        if (!redirectUrl.startsWith('http')) {
-                            const parsedUrl = new URL(targetUrl)
-                            redirectUrl = `${parsedUrl.protocol}//${parsedUrl.host}${redirectUrl}`
-                        }
-                        return resolve(download(redirectUrl, depth + 1))
-                    }
-
-                    if (statusCode !== 200) {
-                        return reject(new Error(`Failed to download: status code ${statusCode}`))
-                    }
-
-                    const chunks: any[] = []
-                    response.on('data', (chunk: any) => chunks.push(chunk))
-                    response.on('end', () => {
-                        const buffer = Buffer.concat(chunks)
-                        resolve(buffer.toString('utf-8'))
-                    })
-                    response.on('error', reject)
-                }).on('error', reject)
-            })
-        }
-
-        const content = await download(url)
+        const content = await downloadScript(url)
 
         // 获取脚本信息
         const { metadata, supportedSources, requireUnsafe } = await getScriptInfo(content, allowUnsafeVM)
@@ -435,6 +448,218 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
         res.end(JSON.stringify({ success: true, filename: displayName, id, metadata, supportedSources, owner: targetOwner, allowUnsafeVM: !!requireUnsafe || !!allowUnsafeVM }))
     } catch (err: any) {
         console.error('[自定义源] 导入失败:', err)
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: err.message }))
+    }
+}
+
+// 自动更新已有脚本并校验 (下载失败、初始化失败等严格拦截，验证通过才替换旧脚本)
+export async function handleUpdate(req: IncomingMessage, res: ServerResponse) {
+    try {
+        const body = await readBody(req)
+        const { sourceId, id, url, username, allowUnsafeVM } = JSON.parse(body)
+        const targetId = id || sourceId
+
+        if (!targetId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: '未指定要更新的自定义源 ID' }))
+            return
+        }
+
+        if (!url || typeof url !== 'string' || !url.trim()) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, reason: 'download_failed', error: '下载失败: 未提供有效的更新地址' }))
+            return
+        }
+
+        if (!authorizeOwner(req, res, username, !!allowUnsafeVM)) return
+
+        // 尝试定位源归属 (用户源 或 公共源)
+        let targetOwner = normalizeSourceOwner(username)
+        let sourcesDir = getSourceDir(targetOwner)
+        let metaPath = path.join(sourcesDir, 'sources.json')
+        let sources: any[] = []
+        let foundSource: any = null
+
+        if (fs.existsSync(metaPath)) {
+            try {
+                sources = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
+                foundSource = sources.find((s: any) => s.id === targetId)
+            } catch (e) { }
+        }
+
+        if (!foundSource && targetOwner !== 'open') {
+            const openSourcesDir = getSourceDir('open')
+            const openMetaPath = path.join(openSourcesDir, 'sources.json')
+            if (fs.existsSync(openMetaPath)) {
+                try {
+                    const openSources = JSON.parse(fs.readFileSync(openMetaPath, 'utf-8'))
+                    foundSource = openSources.find((s: any) => s.id === targetId)
+                    if (foundSource) {
+                        targetOwner = 'open'
+                        sourcesDir = openSourcesDir
+                        metaPath = openMetaPath
+                        sources = openSources
+                    }
+                } catch (e) { }
+            }
+        }
+
+        if (!foundSource) {
+            res.writeHead(404, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, reason: 'not_found', error: '未找到指定的自定义源' }))
+            return
+        }
+
+        // 检查权限限制 (针对公开源)
+        if (targetOwner === 'open') {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['admin.password']) {
+                res.writeHead(403, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, error: '公共源更新已受限，仅管理员可操作。' }))
+                return
+            }
+        }
+
+        // 第一步：下载远程新脚本
+        let content: string
+        try {
+            content = await downloadScript(url.trim())
+            if (!content || typeof content !== 'string' || content.trim().length === 0) {
+                throw new Error('下载的文件内容为空')
+            }
+        } catch (downloadErr: any) {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({
+                success: false,
+                reason: 'download_failed',
+                error: `下载失败: ${downloadErr.message || '网络请求错误'}`
+            }))
+            return
+        }
+
+        // 第二步：解析元数据与初始化校验 (与导入一致)
+        let metadata: any
+        try {
+            metadata = extractMetadata(content)
+        } catch (metaErr: any) {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({
+                success: false,
+                reason: 'init_failed',
+                error: `初始化失败: 无法解析脚本元数据 (${metaErr.message})`
+            }))
+            return
+        }
+
+        let validationResult: any
+        try {
+            validationResult = await loadUserApi({
+                id: 'temp_update_' + Date.now(),
+                script: content,
+                enabled: false,
+                allowUnsafeVM: !!allowUnsafeVM,
+                ...metadata,
+                owner: 'temp'
+            } as any)
+        } catch (valErr: any) {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({
+                success: false,
+                reason: 'init_failed',
+                error: `初始化失败: ${valErr.message || '脚本加载异常'}`
+            }))
+            return
+        }
+
+        // 核心安全校验：若脚本需要或者指定了 unsafe VM 模式
+        if (validationResult.requireUnsafe) {
+            if (!global.lx.config['system.allowUnsafeVM']) {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({
+                    success: false,
+                    reason: 'vm_disabled',
+                    disabledVM: true,
+                    error: '已禁用VM。该脚本需要原生 VM 模式运行，但服务器后台已禁用 VM 模式。'
+                }))
+                return
+            }
+
+            if (!allowUnsafeVM) {
+                const auth = req.headers['x-frontend-auth']
+                if (auth !== global.lx.config['admin.password']) {
+                    res.writeHead(403, { 'Content-Type': 'application/json' })
+                    res.end(JSON.stringify({ success: false, error: '允许以 VM 模式运行脚本需要验证管理员身份。' }))
+                    return
+                }
+
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({
+                    success: false,
+                    requireUnsafe: true,
+                    message: '该脚本新版本需要原生 VM 模式运行，可能存在安全风险，是否继续？'
+                }))
+                return
+            }
+        }
+
+        if (!validationResult.success) {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({
+                success: false,
+                reason: 'init_failed',
+                error: `初始化失败: ${validationResult.error || '脚本执行异常'}`
+            }))
+            return
+        }
+
+        const apiSources = validationResult.apiInstance?.info?.sources || {}
+        const supportedSources = Object.keys(apiSources)
+        if (supportedSources.length === 0) {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({
+                success: false,
+                reason: 'init_failed',
+                error: '初始化失败: 脚本未注册任何音源。请确保脚本正确调用了 lx.send("inited", { sources: {...} })'
+            }))
+            return
+        }
+
+        // 第三步：验证全部通过，安全替换旧脚本文件与元数据
+        const scriptPath = path.join(sourcesDir, foundSource.id)
+        fs.writeFileSync(scriptPath, content, 'utf-8')
+
+        foundSource.name = metadata.name || foundSource.name
+        foundSource.version = metadata.version || foundSource.version
+        foundSource.author = metadata.author || foundSource.author
+        foundSource.description = metadata.description || foundSource.description
+        foundSource.homepage = metadata.homepage || foundSource.homepage
+        foundSource.size = Buffer.byteLength(content, 'utf-8')
+        foundSource.supportedSources = supportedSources
+        foundSource.uploadTime = new Date().toISOString()
+        foundSource.sourceUrl = url
+        foundSource.allowUnsafeVM = !!validationResult.requireUnsafe || !!allowUnsafeVM
+        foundSource.requireUnsafe = !!validationResult.requireUnsafe
+
+        fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
+
+        // 清除旧的运行时状态缓存，以便重新加载时更新状态与清除旧 alert
+        clearApiStatus(targetOwner, foundSource.id)
+
+        // 重新初始化该用户的API
+        await initUserApis(targetOwner)
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+            success: true,
+            message: '更新成功',
+            id: foundSource.id,
+            metadata,
+            supportedSources,
+            owner: targetOwner
+        }))
+    } catch (err: any) {
+        console.error('[自定义源] 自动更新失败:', err)
         res.writeHead(500, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: false, error: err.message }))
     }
