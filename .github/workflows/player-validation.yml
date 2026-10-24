@@ -1,0 +1,31 @@
+name: Player validation
+
+on:
+  pull_request:
+    branches: [dev]
+  push:
+    branches: [codex/ui-mobile-validation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Regression tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Compiled authorization smoke check
+        run: node test/candidate-smoke.cjs
+        env:
+          LX_BUILT_SERVER_DIR: ${{ github.workspace }}/server/server

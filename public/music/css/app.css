@@ -1,3 +1,67 @@
+/* Keep the whole agreement reachable in short Safari landscape viewports. */
+#project-agreement-modal .project-agreement-panel {
+    max-height: calc(100dvh - max(1rem, env(safe-area-inset-top, 0px)) - max(1rem, env(safe-area-inset-bottom, 0px)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+/* iOS zooms focused controls whose computed font size is below 16px. */
+@media (max-width: 1024px) {
+    /* Leave a usable song list below artist and album headers on short screens. */
+    #artist-detail-header:not(.artist-hero-collapsed),
+    #album-detail-header:not(.album-hero-collapsed) {
+        max-height: min(180px, 25dvh) !important;
+        overflow-y: auto !important;
+        overscroll-behavior: contain;
+    }
+
+    #play-mode-menu {
+        left: 0;
+        transform: none;
+    }
+
+    #playback-rate-menu {
+        left: auto;
+        right: 0;
+        transform: none;
+    }
+
+    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+    textarea,
+    select {
+        font-size: 16px !important;
+    }
+}
+
+/* Touch browsers must not consume the first tap to reveal hover-only controls. */
+@media (hover: none) {
+    #search-results [data-singer-id] > .pointer-events-none {
+        display: none !important;
+    }
+
+    #search-results button[id^="singer-fav-"],
+    #search-results button[id^="singer-dislike-"],
+    #search-results button[id^="album-fav-"],
+    #search-results button[id^="album-dislike-"] {
+        opacity: 1 !important;
+    }
+
+    #player-song-info .group > .group-hover\:flex {
+        display: none !important;
+    }
+
+    .playlist-sidebar-item .sidebar-item-actions {
+        max-width: none !important;
+        opacity: 1 !important;
+        pointer-events: auto;
+    }
+
+    .playlist-sidebar-item .sidebar-item-actions .action-btn {
+        width: 30px !important;
+        height: 40px !important;
+    }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
     width: 8px;
@@ -821,6 +885,41 @@ aside {
 #player-footer {
     transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1) !important;
     will-change: transform;
+}
+
+/* Reserve the meter's own row on phones instead of painting over song actions. */
+#player-transport { position: relative; }
+.mobile-player-menu > summary { display: none; }
+.mobile-player-menu-content { display: flex; align-items: center; gap: .375rem; }
+.queue-actions { position: relative; }
+.queue-actions > summary { cursor: pointer; list-style: none; padding: .5rem; }
+.queue-actions > summary::-webkit-details-marker,
+.mobile-player-menu > summary::-webkit-details-marker { display: none; }
+.queue-actions-menu { position: absolute; z-index: 40; right: 0; top: 100%; min-width: 10rem; border-radius: .75rem; box-shadow: 0 8px 24px #0002; }
+.queue-actions-menu[popover] { position: fixed; inset: auto; margin: 0; width: 11rem; color: var(--text-main); }
+.queue-actions-menu button { display: block; width: 100%; min-height: 44px; text-align: left; padding: .5rem 1rem; }
+.song-row-actions:focus-within { opacity: 1; }
+button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--c-500); outline-offset: 3px; }
+@media (max-width: 1024px) {
+    #player-footer { height: auto !important; flex-shrink: 0; }
+    #player-transport { flex: none; }
+    #visualizer-container { position: static !important; width: 100% !important; margin: 0; flex: none; }
+    #player-song-info { align-items: center; min-height: 48px; margin-bottom: 0; }
+    #player-song-info > .overflow-hidden > .flex:first-child { flex-wrap: wrap; gap: 2px; }
+    #player-title { width: 100%; max-width: 100%; }
+    #player-mobile-actions { max-width: none; flex-wrap: nowrap; }
+    .mobile-player-menu { position: relative; }
+    .mobile-player-menu > summary { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; list-style: none; cursor: pointer; }
+    .mobile-player-menu-content { display: none; position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 80; grid-template-columns: repeat(3, 44px); gap: 8px; padding: 12px; border: 1px solid var(--c-200); border-radius: 12px; box-shadow: 0 8px 24px #0003; }
+    .mobile-player-menu[open] .mobile-player-menu-content { display: grid; }
+    .mobile-player-menu-content button { min-width: 44px; min-height: 44px; margin: 0; font-size: 14px; }
+    #player-controls button { min-height: 44px; }
+    .song-row-actions button, .queue-actions > summary { min-width: 28px; min-height: 32px; }
+    #player-progress-row { margin: 0; padding: 0; }
+}
+@media (min-width: 1025px) {
+    .mobile-player-menu-content { background: transparent; }
+    #visualizer-container { left: 3rem; width: calc(100% - 6rem); bottom: calc(100% - 1rem); }
 }
 
 /* Buffering status dots animation */

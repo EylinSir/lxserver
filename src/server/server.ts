@@ -69,6 +69,7 @@ import crypto from 'node:crypto'
 import { parseCookies, resolveContainedPath, resolvePublicUrl, fetchPublicBuffer } from './security'
 import { createCastHandler } from './castAccess'
 import { getBuildInfo } from './buildInfo'
+import { coverThumbnail } from './coverThumbnail'
 import needle from 'needle'
 import { getProxyAgent } from '../modules/utils/proxy.js'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
@@ -4606,7 +4607,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.end('Missing filename')
           return
         }
-        const cover = await fileCache.getCacheCover(filename, username) as any
+        const originalCover = await fileCache.getCacheCover(filename, username) as any
+        const cover = originalCover?.data && urlObj.searchParams.has('size') ? await coverThumbnail(originalCover, urlObj.searchParams.get('size')) : originalCover
         if (cover && cover.data) {
           res.writeHead(200, {
             'Content-Type': cover.mime || 'image/jpeg',
@@ -4798,7 +4800,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.end('Missing filename')
           return
         }
-        const cover = await customMusicManager.getCustomCover(filename, verified)
+        const originalCover = await customMusicManager.getCustomCover(filename, verified)
+        const cover = originalCover?.data && urlObj.searchParams.has('size') ? await coverThumbnail(originalCover, urlObj.searchParams.get('size')) : originalCover
         if (cover && cover.data) {
           res.writeHead(200, {
             'Content-Type': cover.mime || 'image/jpeg',

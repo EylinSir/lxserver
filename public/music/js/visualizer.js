@@ -1462,8 +1462,9 @@ const musicVisualizer = (function () {
             return;
         }
 
-        // Only avoid Web Audio when wireless target like AirPlay is actively routing stream
-        if (audio.webkitCurrentPlaybackTargetIsWireless) {
+        // Keep native playback until a local effect edit explicitly enables DSP.
+        if (audio.webkitCurrentPlaybackTargetIsWireless ||
+            (!hasEffectsAnalyser && (isMobileDevice() || typeof audio.webkitShowPlaybackTargetPicker === 'function'))) {
             triggerStandaloneLoop();
             return;
         }
@@ -1554,9 +1555,25 @@ const musicVisualizer = (function () {
             const rect = canvas.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) return;
             const dpr = window.devicePixelRatio || 1;
-            canvas.width = Math.round(rect.width * dpr);
-            canvas.height = Math.round(rect.height * dpr);
+            const width = Math.round(rect.width * dpr), height = Math.round(rect.height * dpr);
+            if (canvas.width !== width) canvas.width = width;
+            if (canvas.height !== height) canvas.height = height;
         });
+    }
+
+    // Keep the meter in normal flow on phones; the player and theme use 1025px.
+    function updateFooterLayout(s) {
+        const container = document.getElementById('visualizer-container');
+        const progress = document.getElementById('player-progress-row');
+        if (!container || !playerFooter) return;
+        if (progress && container.parentElement !== progress.parentElement) progress.before(container);
+        playerFooter.classList.toggle('has-footer-visualizer', !!s.showFooterVisualizer);
+        container.style.display = s.showFooterVisualizer ? 'flex' : 'none';
+        if (window.innerWidth < 1025) {
+            playerFooter.style.height = '';
+            playerFooter.style.justifyContent = '';
+            container.style.height = s.showFooterVisualizer ? (window.innerWidth < 380 ? '42px' : '54px') : '';
+        }
     }
 
     /**
@@ -1566,7 +1583,8 @@ const musicVisualizer = (function () {
         syncSize();
 
         const s = window.settings || {};
-        const isMobile = window.innerWidth < 768;
+        const isMobile = window.innerWidth < 1025;
+        updateFooterLayout(s);
         const themeColor = getComputedStyle(document.documentElement).getPropertyValue('--c-500').trim() || '#10b981';
         const opacity = s.visualizerOpacity !== undefined ? s.visualizerOpacity : 0.85;
         const globalStyle = s.visualizerGlobalStyle || 'blocks';
@@ -1578,15 +1596,15 @@ const musicVisualizer = (function () {
             triggerStandaloneLoop();
             if (s.showFooterVisualizer && footerCanvas && visualizerContainer) {
                 if (s.footerVisualizerStyle === 'vumeter') {
-                    if (progressRow) progressRow.style.marginTop = isMobile ? '24px' : '';
+                    if (progressRow) progressRow.style.marginTop = '';
                     footerCanvas.style.opacity = opacity;
                     visualizerContainer.style.width = '100%';
-                    visualizerContainer.style.maxWidth = isMobile ? 'calc(100% - 16px)' : '460px';
-                    visualizerContainer.style.left = '50%';
-                    visualizerContainer.style.transform = 'translateX(-50%)';
-                    visualizerContainer.style.bottom = isMobile ? '16px' : '';
+                    visualizerContainer.style.maxWidth = isMobile ? '' : '460px';
+                    visualizerContainer.style.left = isMobile ? '0' : '50%';
+                    visualizerContainer.style.transform = isMobile ? '' : 'translateX(-50%)';
+                    visualizerContainer.style.bottom = '';
                     visualizerContainer.style.marginBottom = '';
-                    visualizerContainer.style.height = isMobile ? '40px' : (window.innerHeight <= 845 ? '58px' : '72px');
+                    visualizerContainer.style.height = isMobile ? (window.innerWidth < 380 ? '42px' : '54px') : (window.innerHeight <= 845 ? '58px' : '72px');
                     visualizerContainer.style.display = 'flex';
                     visualizerContainer.style.zIndex = isMobile ? '1' : '5';
                 } else {
@@ -1597,7 +1615,7 @@ const musicVisualizer = (function () {
                     visualizerContainer.style.transform = '';
                     visualizerContainer.style.bottom = '';
                     visualizerContainer.style.marginBottom = '';
-                    visualizerContainer.style.height = isMobile ? '62px' : (window.innerHeight <= 845 ? '50px' : '80px');
+                    visualizerContainer.style.height = isMobile ? (window.innerWidth < 380 ? '42px' : '54px') : (window.innerHeight <= 845 ? '50px' : '80px');
                     visualizerContainer.style.display = 'flex';
                     visualizerContainer.style.zIndex = '1';
                 }
@@ -1625,14 +1643,14 @@ const musicVisualizer = (function () {
             let count, gap, lineWidth, cubeHeight;
 
             if (style === 'vumeter') {
-                if (progressRow) progressRow.style.marginTop = isMobile ? '24px' : '';
+                if (progressRow) progressRow.style.marginTop = '';
                 visualizerContainer.style.width = '100%';
-                visualizerContainer.style.maxWidth = isMobile ? 'calc(100% - 16px)' : '460px';
-                visualizerContainer.style.left = '50%';
-                visualizerContainer.style.transform = 'translateX(-50%)';
-                visualizerContainer.style.bottom = isMobile ? '16px' : '';
+                visualizerContainer.style.maxWidth = isMobile ? '' : '460px';
+                visualizerContainer.style.left = isMobile ? '0' : '50%';
+                visualizerContainer.style.transform = isMobile ? '' : 'translateX(-50%)';
+                visualizerContainer.style.bottom = '';
                 visualizerContainer.style.marginBottom = '';
-                visualizerContainer.style.height = isMobile ? '40px' : (window.innerHeight <= 845 ? '58px' : '72px');
+                visualizerContainer.style.height = isMobile ? (window.innerWidth < 380 ? '42px' : '54px') : (window.innerHeight <= 845 ? '58px' : '72px');
                 visualizerContainer.style.zIndex = isMobile ? '1' : '5';
                 footerCanvas.style.width = '100%';
                 footerCanvas.style.height = '100%';
@@ -1647,7 +1665,7 @@ const musicVisualizer = (function () {
                 visualizerContainer.style.transform = '';
                 visualizerContainer.style.bottom = '';
                 visualizerContainer.style.marginBottom = '';
-                visualizerContainer.style.height = isMobile ? '62px' : (window.innerHeight <= 845 ? '50px' : '80px');
+                visualizerContainer.style.height = isMobile ? (window.innerWidth < 380 ? '42px' : '54px') : (window.innerHeight <= 845 ? '50px' : '80px');
                 visualizerContainer.style.zIndex = '1';
                 if (globalStyle === 'blocks') {
                     gap = 1;
@@ -1700,7 +1718,7 @@ const musicVisualizer = (function () {
             visualizerContainer.style.display = 'flex';
             if (playerFooter) {
                 playerFooter.style.transition = 'height 0.3s ease';
-                if (window.innerWidth >= 768) {
+                if (window.innerWidth >= 1025) {
                     playerFooter.style.height = isShortWindow ? '90px' : (style === 'vumeter' ? '125px' : '150px');
                     playerFooter.style.justifyContent = 'center';
                 } else {
@@ -1723,7 +1741,7 @@ const musicVisualizer = (function () {
                 if (view.id === 'view-player-detail') {
                     const container = view.querySelector('#player-detail-container');
                     if (container) {
-                        const needsTopPadding = !footerIsHidden && window.innerWidth >= 768;
+                        const needsTopPadding = !footerIsHidden && window.innerWidth >= 1025;
                         container.style.marginTop = needsTopPadding ? '60px' : '';
                         const extraPb = pb === '' ? '' : Math.max(0, parseInt(pb) - 96) + 'px';
                         container.style.marginBottom = extraPb;

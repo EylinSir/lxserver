@@ -1834,6 +1834,8 @@ function switchTab(tabId) {
 
     const activeView = document.getElementById(`view-${tabId}`);
     if (!activeView) return;
+    window.PlayerNavigation?.record({ tab: tabId });
+    if (tabId !== 'search') window.SearchRequests?.cancel();
 
     activeView.classList.remove('hidden');
     // small delay to allow display block to apply before opacity transition
@@ -2091,8 +2093,8 @@ function toggleQueueDrawer() {
 
     const isHidden = drawer.classList.contains('translate-x-full');
     if (isHidden) {
-        renderQueue();
         drawer.classList.remove('translate-x-full');
+        renderQueue();
         // 自动定位当前歌曲
         setTimeout(() => {
             scrollToCurrentSongInQueue(false);
@@ -2107,6 +2109,7 @@ function toggleQueueDrawer() {
         }
     } else {
         drawer.classList.add('translate-x-full');
+        document.getElementById('queue-list')?.replaceChildren();
     }
 }
 window.toggleQueueDrawer = toggleQueueDrawer;
@@ -2142,6 +2145,11 @@ function renderQueue() {
     const listContainer = document.getElementById('queue-list');
     const countEl = document.getElementById('queue-count');
     if (!listContainer) return;
+    if (countEl) countEl.innerText = `${currentPlaylist.length} SONGS`;
+    if (document.getElementById('queue-drawer')?.classList.contains('translate-x-full')) {
+        listContainer.replaceChildren();
+        return;
+    }
 
     if (!currentPlaylist || currentPlaylist.length === 0) {
         listContainer.innerHTML = `
@@ -2163,7 +2171,7 @@ function renderQueue() {
                  onclick="playSongFromQueue(${index})">
                 
                 <div class="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 relative">
-                    <img src="${getImgUrl(song)}" 
+                    <img src="${getThumbnailUrl(song)}"
                          onerror="this.src='/music/assets/logo.svg'" 
                          loading="lazy" fetchpriority="low"
                          class="w-full h-full object-cover">
@@ -2183,7 +2191,7 @@ function renderQueue() {
                     <button onclick="event.stopPropagation(); openPlaylistAddModalForSongObject(currentPlaylist[${index}])" class="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="添加到歌单">
                         <i class="fas fa-plus text-xs"></i>
                     </button>
-                    <button onclick="event.stopPropagation(); removeFromQueue(${index})" class="p-2 text-gray-400 hover:text-red-500 transition-colors">
+                    <button aria-label="从队列移除" title="从队列移除" onclick="event.stopPropagation(); removeFromQueue(${index})" class="p-2 text-gray-400 hover:text-red-500 transition-colors">
                         <i class="fas fa-trash-alt text-xs"></i>
                     </button>
                     <div class="p-2 text-gray-400 cursor-grab active:cursor-grabbing queue-drag-handle">
@@ -2380,6 +2388,8 @@ const SOURCES = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
 //搜索歌曲
 async function doSearch(page = 1, append = false) {
+    const request = window.SearchRequests.begin();
+    window.setSearchStatus();
     const typeEl = document.getElementById('search-type');
     const type = typeEl ? typeEl.value : 'song';
 
@@ -2473,6 +2483,8 @@ async function doSearch(page = 1, append = false) {
         window.currentNetworkPage = page;
     }
 
+    window.setSearchStatus('正在搜索…', true);
+    const failures = [];
     try {
         const headers = {};
         if (typeof authToken !== 'undefined' && authToken) headers['x-user-token'] = authToken;
@@ -2484,19 +2496,31 @@ async function doSearch(page = 1, append = false) {
             // Aggregate Search (Only supported for songs)
             if (pageInfoEl) pageInfoEl.innerText = '聚合搜索 (各源并发取全量)...';
 
-            const promises = SOURCES.map(s =>
-                fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${s}&page=1&type=${type}`, { headers })
-                    .then(res => res.json())
-                    .then(data => {
-                        const arr = Array.isArray(data) ? data : (data && Array.isArray(data.list) ? data.list : []);
-                        return arr.map(item => ({ ...item, source: s }));
-                    })
-                    .catch(e => {
-                        console.warn(`[聚合搜索] ${s} 源失败:`, e);
-                        return [];
-                    })
-            );
+            const partial = [];
+            let completed = 0;
+            const promises = SOURCES.map(async provider => {
+                try {
+                    const data = await request.json(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${provider}&page=1&type=${type}`, headers);
+                    const arr = Array.isArray(data) ? data : (Array.isArray(data?.list) ? data.list : null);
+                    if (!arr || data?.error) throw new Error('音源返回错误');
+                    const songs = arr.map(item => ({ ...item, source: provider }));
+                    partial.push(...songs);
+                    if (request.current() && partial.length) {
+                        const visible = window.sortSearchResults ? window.sortSearchResults(partial, input, type === 'song') : partial;
+                        renderResults(visible);
+                    }
+                    return songs;
+                } catch (error) {
+                    failures.push(provider);
+                    return [];
+                } finally {
+                    completed++;
+                    if (request.current()) window.setSearchStatus(`已完成 ${completed}/${SOURCES.length} 个音源，找到 ${partial.length} 条结果`, true);
+                }
+            });
             const results = await Promise.all(promises);
+            if (!request.current()) return;
+            if (failures.length === SOURCES.length) throw new Error('所有音源请求失败或超时，请重试或切换音源');
             const flatList = results.flat();
             if (typeof window.sortSearchResults === 'function') {
                 list = window.sortSearchResults(flatList, input, type === 'song');
@@ -2505,13 +2529,8 @@ async function doSearch(page = 1, append = false) {
             }
         } else {
             if (pageInfoEl && type === 'song') pageInfoEl.innerText = '正在取该平台全部结果...';
-            const res = await fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${source}&type=${type}&page=${page}`, { headers });
-
-            if (!res.ok) {
-                throw new Error(`搜索请求失败: ${res.status} ${res.statusText}`);
-            }
-
-            const data = await res.json();
+            const data = await request.json(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${source}&type=${type}&page=${page}`, headers);
+            if (!request.current()) return;
 
             const songList = Array.isArray(data) ? data : (data && Array.isArray(data.list) ? data.list : null);
 
@@ -2531,6 +2550,8 @@ async function doSearch(page = 1, append = false) {
             }
         }
 
+        if (!request.current()) return;
+        window.setSearchStatus(failures.length ? `部分音源失败或超时 (${failures.join('、')})，已显示可用结果；可重新搜索重试` : '');
         // 歌手/专辑/歌单仍支持 append 追加翻页
         if (append && appendableServerSearch && (type === 'singer' || type === 'album')) {
             if (list && list.length > 0) {
@@ -2579,6 +2600,8 @@ async function doSearch(page = 1, append = false) {
             };
         }
     } catch (e) {
+        if (!request.current()) return;
+        window.setSearchStatus('搜索失败，请重试或切换音源');
         console.error('[Search] 搜索失败:', e);
         if (append) {
             try {
@@ -2587,7 +2610,7 @@ async function doSearch(page = 1, append = false) {
                 showError(`搜索追加出错: ${e.message}`);
             }
         } else {
-            resultsContainer.innerHTML = `<div class="text-center text-red-500 p-8">搜索出错: ${e.message}</div>`;
+            resultsContainer.innerHTML = `<div class="text-center text-red-500 p-8">搜索出错: ${escapeHtmlText(e.message)}</div>`;
         }
     }
 }
@@ -2757,6 +2780,8 @@ function renderHotSearch(data) {
 }
 
 function switchHotSearchTab(source) {
+    const request = window.SearchRequests?.begin();
+    window.setSearchStatus?.();
     const container = document.getElementById('search-results');
     if (container) {
         container.innerHTML = `
@@ -2767,7 +2792,11 @@ function switchHotSearchTab(source) {
         `;
     }
     fetchHotSearch(source).then(data => {
+        if (request && !request.current()) return;
         renderHotSearch(data);
+    }).catch(() => {
+        if (request && !request.current()) return;
+        if (container) container.textContent = '热门搜索加载失败，请重试';
     });
 }
 window.switchHotSearchTab = switchHotSearchTab;
@@ -2781,6 +2810,9 @@ function handleHotSearchClick(keyword) {
 }
 
 function showInitialSearchState() {
+    const initialRequest = window.SearchRequests?.begin();
+    window.setSearchStatus?.();
+    document.getElementById('search-pagination-bar')?.classList.add('hidden');
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
 
@@ -2802,8 +2834,10 @@ function showInitialSearchState() {
     const source = sourceSelect ? sourceSelect.value : 'all';
 
     fetchHotSearch(source).then(data => {
+        if (initialRequest && !initialRequest.current()) return;
         renderHotSearch(data);
     }).catch(err => {
+        if (initialRequest && !initialRequest.current()) return;
         console.error('[HotSearch] 显示热搜失败:', err);
         // 失败时显示默认状态
         container.innerHTML = `
@@ -3065,7 +3099,7 @@ async function enterArtist(id, source = 'wy', order = 'hot', tab = 'songs', isBa
         lastSearchType = typeEl ? typeEl.value : 'singer';
         lastSearchResultList = [...(window.viewingPlaylist || [])];
         currentArtistInfo = null; // 重置缓存
-        window.history.pushState({ page: 'search-detail' }, '');
+        window.history.pushState({ ...window.history.state, page: 'search-detail' }, '');
     }
 
     const previousArtistOrder = window.currentArtistOrder || 'hot';
@@ -3298,7 +3332,7 @@ window.updateArtistFavButtons = updateArtistFavButtons;
 function updateArtistDislikeButtons(disd) {
     const mainBtn = document.getElementById('artist-header-dislike-btn');
     if (mainBtn) {
-        const base = 'absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90';
+        const base = 'absolute top-2 right-24 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90';
         mainBtn.className = base + ' ' + (disd ? 'bg-gray-800 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main');
         mainBtn.title = disd ? '取消不喜欢' : '不喜欢';
     }
@@ -3443,7 +3477,7 @@ function renderArtistHeader(info, activeTab, order) {
     let headerHtml = `
         <div class="relative p-6 md:p-8 t-bg-panel/50 border-b t-border-main overflow-hidden group/header">
             <!-- Small Absolute Back Button -->
-            <button onclick="goBackToSearch()" class="absolute top-2 left-2 md:top-4 md:left-4 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full bg-emerald-500/80 hover:bg-emerald-500 text-white transition-all z-30 shadow-md active:scale-90" title="返回搜索">
+            <button onclick="goBackToSearch()" class="absolute top-2 left-2 md:top-4 md:left-4 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full bg-emerald-500 hover:bg-emerald-600 text-white transition-all z-30 shadow-md active:scale-90" title="返回搜索">
                 <i class="fas fa-arrow-left"></i>
             </button>
             <!-- Favorite Button (Artist) -->
@@ -3463,7 +3497,7 @@ function renderArtistHeader(info, activeTab, order) {
                     const disd = await toggleArtistDislike('${info.id}', '${info.source}', '${info.name.replace(/'/g, "\\'")}', '${(info.avatar || '').replace(/'/g, "\\'")}'); 
                     updateArtistDislikeButtons(disd);
                 })()"
-                class="absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full ${isArtistDisliked(info.id, info.source) ? 'bg-gray-800 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main'} transition-all z-30 shadow-sm active:scale-90"
+                class="absolute top-2 right-24 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full ${isArtistDisliked(info.id, info.source) ? 'bg-gray-800 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main'} transition-all z-30 shadow-sm active:scale-90"
                 title="${isArtistDisliked(info.id, info.source) ? '取消不喜欢' : '不喜欢'}">
                 <i class="fas fa-ban"></i>
             </button>
@@ -4502,7 +4536,7 @@ async function enterAlbum(id, source = 'wy', initialInfo = null) {
         lastSearchType = typeEl ? typeEl.value : 'album';
         lastSearchResultList = [...(window.viewingPlaylist || [])];
     }
-    window.history.pushState({ page: 'search-detail' }, '');
+    window.history.pushState({ ...window.history.state, page: 'search-detail' }, '');
 
     const resultsContainer = document.getElementById('search-results');
     resultsContainer.innerHTML = '<div class="flex items-center justify-center h-full"><i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i></div>';
@@ -4715,6 +4749,20 @@ function getImgUrl(item) {
     return authorizeMediaUrl(rawUrl) || '/music/assets/logo.svg';
 }
 window.getImgUrl = getImgUrl;
+function getThumbnailUrl(song, size = 96) {
+    const url = getImgUrl(song);
+    try {
+        const parsed = new URL(url, window.location.href);
+        if (parsed.origin === window.location.origin && ['/api/music/cache/cover', '/api/music/custom/cover'].includes(parsed.pathname)) {
+            parsed.searchParams.set('size', String(size));
+            return parsed.pathname + parsed.search;
+        }
+        if (/\.music\.126\.net$/.test(parsed.hostname)) parsed.searchParams.set('param', `${size}y${size}`);
+        if (parsed.hostname === 'y.gtimg.cn') parsed.pathname = parsed.pathname.replace(/(T\d{3}R)\d+x\d+(M)/, `$1${size}x${size}$2`);
+        return parsed.href;
+    } catch { return url; }
+}
+window.getThumbnailUrl = getThumbnailUrl;
 
 // Removed duplicate toggleDislikeSong
 
@@ -4953,7 +5001,7 @@ function renderResults(list) {
         };
 
         // Image
-        const imgUrl = getImgUrl(item);
+        const imgUrl = getThumbnailUrl(item);
 
         row.innerHTML = `
             <!-- Index / Drag Handle -->
@@ -5024,7 +5072,7 @@ function renderResults(list) {
             </div>
 
             <!-- Actions -->
-            <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                 <button class="p-1 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors" 
                         title="播放" 
                         onclick="event.stopPropagation(); playFromView(${actualIndexInOriginal})">
@@ -5053,6 +5101,38 @@ function renderResults(list) {
             </div>
         `;
 
+        const actions = row.querySelector('.song-row-actions');
+        if (actions) {
+            const menu = document.createElement('details');
+            menu.className = 'queue-actions';
+            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>';
+            menu.addEventListener('click', event => event.stopPropagation());
+            menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
+            menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
+            const popup = menu.querySelector('.queue-actions-menu');
+            if (typeof popup.showPopover === 'function') {
+                popup.setAttribute('popover', 'auto');
+                menu.addEventListener('toggle', () => {
+                    if (!menu.open) { if (popup.matches(':popover-open')) popup.hidePopover(); return; }
+                    popup.showPopover();
+                    const anchor = menu.querySelector('summary').getBoundingClientRect();
+                    const bounds = popup.getBoundingClientRect();
+                    const footerTop = document.getElementById('player-footer').getBoundingClientRect().top;
+                    const bottom = Math.min(window.innerHeight - 8, footerTop - 8);
+                    popup.style.left = Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8)) + 'px';
+                    popup.style.top = Math.max(8, Math.min(anchor.bottom + 4, bottom - bounds.height)) + 'px';
+                });
+                popup.addEventListener('toggle', () => { if (!popup.matches(':popover-open')) menu.open = false; });
+            }
+            for (const button of [...actions.querySelectorAll('button')]) {
+                if (!['下载', '不喜欢', '取消不喜欢', '删除'].includes(button.title)) continue;
+                const label = document.createElement('span');
+                label.textContent = ' ' + button.title;
+                button.appendChild(label);
+                popup.appendChild(button);
+            }
+            actions.appendChild(menu);
+        }
         const addToPlaylistBtn = row.querySelector('.add-to-playlist-btn');
         if (addToPlaylistBtn) {
             addToPlaylistBtn.onclick = (event) => {
@@ -6654,6 +6734,18 @@ window.showServerDirectories = showServerDirectories;
  * playFromView handles user click on a song in the search/list view.
  * It ensures the playback queue is updated to match the viewed list.
  */
+function enqueueSong(song, next = false) {
+    if (!song) return;
+    if (currentPlaylist.length >= 1000) { showInfo('播放队列最多 1000 首歌曲'); return; }
+    const position = next ? Math.max(0, currentIndex + 1) : currentPlaylist.length;
+    currentPlaylist.splice(position, 0, song);
+    preSelectedNextIndex = null;
+    renderQueue();
+    savePlaybackState();
+    showSuccess(next ? '已加入下一首播放' : '已加入播放队列');
+}
+window.enqueueSong = enqueueSong;
+
 function playFromView(index) {
     if (!viewingPlaylist || !viewingPlaylist[index]) return;
     // Update playlist and scope when user explicitly clicks a song to play
@@ -7718,6 +7810,10 @@ async function togglePlay() {
         return;
     }
 
+    if (!currentPlayingSong && currentPlaylist.length) {
+        playSongFromQueue(0);
+        return;
+    }
     if (audio.paused) {
         try {
             // [Crossfade] 如果开启了淡入淡出，先将进度置为 0，播放后再淡入
@@ -7756,6 +7852,7 @@ async function togglePlay() {
 
 function updatePlayButton(isPlaying) {
     const btn = document.getElementById('btn-play');
+    btn.setAttribute('aria-label', isPlaying ? '暂停' : '播放');
     btn.innerHTML = isPlaying ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play ml-1"></i>';
 }
 
@@ -7964,7 +8061,7 @@ audio.addEventListener('pause', () => {
 // ========================================
 
 function savePlaybackState() {
-    if (!currentPlayingSong) return;
+    if (!currentPlayingSong && !currentPlaylist?.length) return;
     try {
         const state = {
             song: currentPlayingSong,
@@ -7987,7 +8084,9 @@ function savePlaybackState() {
 
 async function restorePlaybackState() {
     if (audio.isRemote) return;
-    if (!settings.autoResume) {
+    const nativeAudioRestore = sessionStorage.getItem('lx_native_audio_restore') === '1';
+    sessionStorage.removeItem('lx_native_audio_restore');
+    if (!settings.autoResume && !nativeAudioRestore) {
         return;
     }
 
@@ -7998,7 +8097,13 @@ async function restorePlaybackState() {
         }
 
         const state = JSON.parse(saved);
-        if (!state || !state.song) {
+        if (!state) return;
+        if (!state.song) {
+            if (Array.isArray(state.playlist) && state.playlist.length) {
+                currentPlaylist = state.playlist.slice(0, 1000);
+                currentIndex = -1;
+                renderQueue();
+            }
             return;
         }
 
@@ -8686,7 +8791,7 @@ function changeVolume(delta) {
 
 // 注册全局键盘监听
 document.addEventListener('keydown', (e) => {
-    if (!settings.enableKeyboardShortcuts) return;
+    if (!settings.enableKeyboardShortcuts || e.target.closest?.('[role="dialog"]')) return;
 
     // 如果焦点在输入框中，忽略快捷键
     const target = e.target;
@@ -8764,7 +8869,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('keyup', (e) => {
-    if (!settings.enableKeyboardShortcuts) return;
+    if (!settings.enableKeyboardShortcuts || e.target.closest?.('[role="dialog"]')) return;
     if (e.code === 'ArrowLeft') handleSeekKey('backward', 'up');
     if (e.code === 'ArrowRight') handleSeekKey('forward', 'up');
 });
@@ -9890,7 +9995,7 @@ function toggleLyrics(fromPopState = false) {
         }
     }
     if (!fromPopState && !isLyricViewOpen) {
-        window.history.pushState({ page: 'player-detail' }, '');
+        window.history.pushState({ ...window.history.state, page: 'player-detail' }, '');
     }
 
     isLyricViewOpen = !isLyricViewOpen;
@@ -12995,6 +13100,8 @@ function renderMyLists(data) {
 }
 
 function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
+    if (!skipAutoUpdate) window.PlayerNavigation?.record({ tab: 'search', listId });
+    window.SearchRequests?.cancel();
     exitListSecondaryModes();
 
     if (!currentListData) return;
@@ -15229,6 +15336,8 @@ function renderPlaylistAddGrid() {
     const activeListData = isUserLoggedIn() ? (window.myPersonalListData || currentListData) : currentListData;
 
     // 1. My Love
+    const defaultList = activeListData.defaultList || [];
+    listContainer.appendChild(createGridItem('default', '默认列表', defaultList.length, !isBatch && targetId && defaultList.some(s => s.id === targetId)));
     const loveList = activeListData.loveList || [];
     const isLoved = !isBatch && targetId && loveList.some(s => s.id === targetId);
     listContainer.appendChild(createGridItem('love', '我的喜爱', loveList.length, isLoved));
@@ -15495,7 +15604,8 @@ async function handleTogglePlaylist(listId, btnElement) {
 
         // 1. Find target list in memory (Optimistic Update)
         let targetListArray = null;
-        if (listId === 'love') targetListArray = activeListData.loveList;
+        if (listId === 'default') targetListArray = activeListData.defaultList;
+        else if (listId === 'love') targetListArray = activeListData.loveList;
         else targetListArray = activeListData.userList.find(l => l.id === listId)?.list;
 
         if (!targetListArray) {
@@ -15574,7 +15684,9 @@ async function handleTogglePlaylist(listId, btnElement) {
     // --- Single Song Mode Logic (Existing) ---
     const song = songs[0];
     let targetListArray;
-    if (listId === 'love') {
+    if (listId === 'default') {
+        targetListArray = activeListData.defaultList;
+    } else if (listId === 'love') {
         targetListArray = activeListData.loveList;
     } else {
         const uList = activeListData.userList.find(l => l.id === listId);
@@ -16056,6 +16168,7 @@ function showInput(title, message, options = {}) {
 
     return new Promise((resolve) => {
         const modal = document.createElement('div');
+        modal.dataset.playerDialog = '';
         modal.className = "fixed inset-0 z-[10010] flex items-center justify-center p-4 animate-fade-in";
         modal.innerHTML = `
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
@@ -16137,7 +16250,8 @@ function showSelect(title, message, options = {}) {
 
     return new Promise((resolve) => {
         const modal = document.createElement('div');
-        modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in";
+        modal.dataset.playerDialog = '';
+        modal.className = "fixed inset-0 z-[10010] flex items-center justify-center p-4 animate-fade-in";
         modal.innerHTML = `
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
@@ -16198,7 +16312,8 @@ function showSelect(title, message, options = {}) {
 function showOptions(title, message, options = []) {
     return new Promise((resolve) => {
         const modal = document.createElement('div');
-        modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in";
+        modal.dataset.playerDialog = '';
+        modal.className = "fixed inset-0 z-[10010] flex items-center justify-center p-4 animate-fade-in";
 
         const optionsHtml = options.map((opt, idx) => {
             const entry = typeof opt === 'string' ? { label: opt } : (opt || { label: '' });

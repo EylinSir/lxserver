@@ -14,8 +14,7 @@
     </script>
     <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
-    <script src="assets/tailwindcss.js"></script>
-    <script src="js/tailwind_setup.js"></script>
+    <link rel="stylesheet" href="css/utilities.css">
     <style>
         :root {
             --primary: #10b981;
@@ -411,7 +410,7 @@
             width: 100%;
             border-radius: 14px;
             padding: 13px 44px 13px 46px;
-            font-size: 14.5px;
+            font-size: 16px;
             outline: none;
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
@@ -503,6 +502,9 @@
                 opacity: 1;
                 transform: translateY(0);
             }
+        }
+        input, select {
+            font-size: 16px;
         }
 
         /* 抖动动画 */
@@ -610,7 +612,7 @@
                 <!-- 账号输入框（无预填、无多余提示） -->
                 <div class="input-wrapper">
                     <input type="text" id="auth-username-input" placeholder="输入账号 / 用户名"
-                        class="modern-input" autocomplete="off" spellcheck="false">
+                        class="modern-input" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
                     <i class="fas fa-user input-icon"></i>
                 </div>
 

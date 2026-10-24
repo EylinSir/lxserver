@@ -35,8 +35,7 @@
     <link rel="apple-touch-icon" href="assets/logo.png">
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="css/theme_variables.css">
-    <script src="assets/tailwindcss.js"></script>
-    <script src="js/tailwind_setup.js"></script>
+    <link rel="stylesheet" href="css/utilities.css">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
     <script src="js/crypto-js.min.js"></script>
     <script src="js/marked.min.js"></script>
@@ -355,6 +354,7 @@
                 <!-- Search View -->
                 <div id="view-search"
                     class="absolute inset-0 flex flex-col px-2 pt-2 md:px-6 md:pt-6 pb-44 md:pb-32 overflow-hidden transition-all duration-300">
+                    <div id="search-status" class="hidden text-sm t-text-muted flex items-center justify-between gap-2 mb-2" role="status" aria-live="polite"><span id="search-status-text"></span><button id="search-cancel" type="button" onclick="cancelMusicSearch()" hidden>取消搜索</button></div>
                     <!-- Search Input Area -->
                     <div class="flex flex-col md:flex-row gap-2 md:gap-4 mb-4 md:mb-6">
                         <!-- Search Input -->
@@ -4071,10 +4071,11 @@
                 </div>
             </div>
             <!-- Action Buttons (Mobile Compact) -->
-            <div
+            <div id="player-mobile-actions"
                 class="flex flex-wrap items-center justify-end max-[440px]:justify-center gap-1.5 ml-auto flex-shrink-0 max-[440px]:max-w-[80px] max-w-[200px] md:max-w-none">
+                <details class="mobile-player-menu"><summary aria-label="歌曲操作" title="歌曲操作"><i class="fas fa-ellipsis-h" aria-hidden="true"></i></summary><div class="mobile-player-menu-content t-bg-panel">
                 <!-- Like button -->
-                <button id="player-like-btn" class="text-gray-300 hover:text-red-500 transition-colors">
+                <button aria-label="添加到歌单" id="player-like-btn" class="text-gray-300 hover:text-red-500 transition-colors">
                     <i class="fas fa-heart text-base md:text-lg"></i>
                 </button>
                 <!-- Download Button (Mobile) -->
@@ -4105,11 +4106,12 @@
                     onclick="toggleQueueDrawer()" title="播放队列">
                     <i class="fas fa-list text-[10px]"></i>
                 </button>
+                </div></details>
             </div>
         </div>
 
         <!-- Controls & Progress -->
-        <div
+        <div id="player-transport"
             class="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full px-0 md:px-4 order-last md:order-none">
 
             <!-- Progress Bar (Moved up for better mobile layout) -->
@@ -4180,14 +4182,14 @@
                 <!-- Keep the main transport centered regardless of wireless availability. -->
                 <div class="flex items-center justify-center gap-2 md:gap-6">
                 <button class="t-text-muted hover:text-emerald-600 text-lg transition-colors p-2"
-                    onclick="playPrev()"><i class="fas fa-step-backward"></i></button>
-                <button id="btn-play"
+                    aria-label="上一首" onclick="playPrev()"><i class="fas fa-step-backward"></i></button>
+                <button aria-label="播放" id="btn-play"
                     class="w-10 h-10 md:w-12 md:h-12 rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-200 hover:bg-emerald-600 hover:scale-105 transition-all flex items-center justify-center"
                     onclick="togglePlay()">
                     <i class="fas fa-play ml-1 text-lg"></i>
                 </button>
                 <button class="t-text-muted hover:text-emerald-600 text-lg transition-colors p-2"
-                    onclick="playNext()"><i class="fas fa-step-forward"></i></button>
+                    aria-label="下一首" onclick="playNext()"><i class="fas fa-step-forward"></i></button>
                 </div>
 
                 <!-- Secondary controls align to the right without shifting the transport. -->
@@ -4287,7 +4289,7 @@
         </div>
 
         <!-- Collapse Panel Button -->
-        <button id="btn-collapse-panel"
+        <button aria-label="收起播放器" id="btn-collapse-panel"
             class="absolute right-2 md:right-6 top-2 md:top-1/2 md:-translate-y-1/2 t-text-muted p-2 hover:t-text-muted transition-all z-10"
             onclick="togglePlayerPanel()">
             <i class="fas fa-chevron-down text-lg"></i>
@@ -4295,7 +4297,7 @@
     </footer>
 
     <!-- Expand Panel Button (Hidden by default, shown when panel is collapsed) -->
-    <button id="btn-expand-panel" onclick="togglePlayerPanel()"
+    <button aria-label="展开播放器" id="btn-expand-panel" onclick="togglePlayerPanel()"
         class="fixed bottom-24 right-6 z-40 w-12 h-12 flex items-center justify-center t-bg-panel/80 backdrop-blur-md rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] text-gray-500 hover:text-emerald-500 transform transition-all duration-300 translate-y-20 opacity-0 border border-white/50">
         <i class="fas fa-chevron-up text-lg"></i>
     </button>
@@ -5216,7 +5218,7 @@
     </div>
 
     <!-- Queue Drawer (播放队列) -->
-    <div id="queue-drawer"
+    <div id="queue-drawer" inert aria-hidden="true"
         class="fixed inset-y-0 right-0 w-full md:w-96 t-bg-panel/95 backdrop-blur-xl z-[60] shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transform translate-x-full transition-transform duration-300 ease-out border-l t-border-main flex flex-col">
         <!-- Header -->
         <div class="p-6 border-b t-border-main flex items-center justify-between">
@@ -5259,7 +5261,7 @@
     </div>
 
     <!-- Cache Management Drawer (服务器缓存管理) -->
-    <div id="cache-drawer"
+    <div id="cache-drawer" inert aria-hidden="true"
         class="fixed inset-y-0 right-0 w-full md:w-96 t-bg-panel/95 backdrop-blur-xl z-[60] shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transform translate-x-full transition-transform duration-300 ease-out border-l t-border-main flex flex-col">
         <!-- Header -->
         <div class="p-6 border-b t-border-main flex items-center justify-between">
@@ -5346,7 +5348,7 @@
     </div>
 
     <!-- Download Management Drawer (下载管理) -->
-    <div id="download-drawer"
+    <div id="download-drawer" inert aria-hidden="true"
         class="fixed inset-y-0 right-0 w-full md:w-[450px] t-bg-panel/95 backdrop-blur-xl z-[60] shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transform translate-x-full transition-transform duration-300 ease-out border-l t-border-main flex flex-col">
         <!-- Header -->
         <div class="p-6 border-b t-border-main flex items-center justify-between">
@@ -5440,6 +5442,12 @@
 
             <!-- Body -->
             <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
+                <div class="mb-6 space-y-2 text-xs t-text-muted">
+                    <p id="sound-effects-status" role="status"></p>
+                    <button id="sound-effects-native" hidden type="button"
+                        class="px-3 py-2 rounded-lg t-bg-track t-text-main"
+                        onclick="window.soundEffects.restoreNativePlayback()">刷新并恢复原生播放 / AirPlay</button>
+                </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 md:divide-x t-border-main">
 
                     <!-- Left Column -->
@@ -6096,7 +6104,7 @@
         class="fixed inset-0 z-[100] flex items-center justify-center hidden transition-opacity duration-300">
         <div class="absolute inset-0 bg-black/60 backdrop-blur-md"></div>
         <div
-            class="relative w-full max-w-lg mx-4 t-bg-panel rounded-3xl shadow-2xl border t-border-main p-8 overflow-hidden animate-slide-up">
+            class="project-agreement-panel relative w-full max-w-lg mx-4 t-bg-panel rounded-3xl shadow-2xl border t-border-main p-8 animate-slide-up">
             <div class="flex justify-center mb-6">
                 <div
                     class="w-16 h-16 bg-emerald-500 text-white rounded-2xl flex items-center justify-center text-3xl shadow-lg shadow-emerald-200">
@@ -6105,7 +6113,7 @@
             </div>
             <h2 class="text-2xl font-black t-text-main text-center mb-4">项目使用声明</h2>
             <div
-                class="t-text-muted text-sm space-y-4 mb-8 leading-relaxed max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+                class="t-text-muted text-sm space-y-4 mb-8 leading-relaxed pr-2 custom-scrollbar">
                 <p>欢迎使用 LX Music Web 播放器。本项目是一个 <a href="https://github.com/XCQ0607/lxserver" target="_blank"
                         class="t-text-main hover:text-emerald-500 underline decoration-dotted transition-colors">开源</a>
                     的音乐同步管理辅助工具，在您开始使用之前，请知晓以下声明：</p>
@@ -6149,7 +6157,6 @@
     <script src="js/wave.js"></script>
     <script src="js/visualizer.js"></script>
     <script src="js/pwa.js"></script>
-    <script src="js/lyric-card.js"></script>
     <script src="js/ios-background-audio.js"></script>
     <script src="js/sound-effects.js"></script>
     <script src="js/airplay.js"></script>
@@ -6160,6 +6167,8 @@
     <script src="js/common_ui.js"></script>
     <script src="js/sync_download.js"></script>
     <script src="js/playback.js"></script>
+    <script src="js/search_requests.js"></script>
+    <script src="js/ui_accessibility.js"></script>
     <script src="app.js"></script>
     <script src="js/chromecast.js"></script>
 </body>
