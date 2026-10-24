@@ -9,6 +9,7 @@ import { formatPlayTime } from '@/utils/common'
 import { buildLyrics } from '@/utils/lrcTool'
 import { getLyricFetcher, embedLyricsIntoFile, getAudioMetadataUnsupportedStatus } from './fileCache'
 import * as fileCache from './fileCache'
+import { remasterStaging } from './remasterStaging'
 
 export interface CustomCacheItem {
     id: string
@@ -877,10 +878,7 @@ export const replaceCustomMusicItem = async (
     }
     const oldAudioSize = fs.statSync(oldAudioPath).size
 
-    const stageId = crypto.randomBytes(12).toString('hex')
-    const stageUsername = `.remaster-staging/${stageId}`
-    const stageRoot = fileCache.getCacheDir(stageUsername, true)
-    const stageCoverRoot = fileCache.getCoverCacheDir(stageUsername)
+    const stageUsername = remasterStaging.create(username, fileCache.getUserNamingPattern(username))
     const backupSuffix = `.remaster-${crypto.randomBytes(6).toString('hex')}.bak`
     const oldAudioBackup = oldAudioPath + backupSuffix
 
@@ -898,6 +896,7 @@ export const replaceCustomMusicItem = async (
     let replacementItem: CustomCacheItem | null = null
 
     try {
+        const stageRoot = fileCache.getCacheDir(stageUsername, true)
         await fileCache.downloadAndCache(songInfo, url, quality, stageUsername, signal, true, true, true)
         if (signal?.aborted) throw new Error('Aborted')
 
@@ -1060,12 +1059,10 @@ export const replaceCustomMusicItem = async (
         throw err
     } finally {
         fileCache.indexManager.discard(stageUsername, 'music')
+        fileCache.indexManager.discard(stageUsername, 'cache')
         try {
-            if (fs.existsSync(stageRoot)) fs.rmSync(stageRoot, { recursive: true, force: true })
-        } catch (e) { }
-        try {
-            if (fs.existsSync(stageCoverRoot)) fs.rmSync(stageCoverRoot, { recursive: true, force: true })
-        } catch (e) { }
+            remasterStaging.release(stageUsername)
+        } catch (e) { console.warn('[自定义音乐] 清理洗版暂存目录失败:', e) }
     }
 }
 

@@ -28,6 +28,8 @@ const musicSdk = musicSdkRaw as any
 import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './userApi'
 import * as customSourceHandlers from './customSourceHandlers'
 import * as fileCache from './fileCache'
+import { withCacheBrowseLocation } from './cacheBrowseLocation'
+import { remasterStaging } from './remasterStaging'
 import * as customMusicManager from './customMusicManager'
 import * as serverDownloadQueue from './serverDownloadQueue'
 import * as remasterQueue from './remasterQueue'
@@ -1141,6 +1143,7 @@ const handleCastRequest = createCastHandler(req => {
 })
 
 const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promise((resolve, reject) => {
+  remasterStaging.initialize()
   const httpServer = http.createServer(async (req, res) => {
     try {
     // CORS 跨域处理
@@ -1157,6 +1160,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
     const ip = getIP(req)
     if (await handleCastRequest(req, res)) return
+    // Cast requests may resolve to a local media URL; scope the final resource.
+    return await withCacheBrowseLocation(req.url || '/', async () => {
     const urlObj = new URL(req.url ?? '', `http://${req.headers.host}`)
     accessLog.info(`${req.method} ${urlObj.pathname} from ${ip}`)
     const pathname = urlObj.pathname
@@ -8639,6 +8644,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
     if (!code) return
     res.writeHead(code)
     res.end(msg)
+    })
     } catch (error) {
       if (!res.headersSent) { res.writeHead(400); res.end('Bad Request') }
       else res.destroy()

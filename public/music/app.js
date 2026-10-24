@@ -10001,6 +10001,9 @@ async function fetchEmbedLyricForLocalSong(song, silent = false) {
         } else {
             const folder = song._localFolder || song.folder || 'cache';
             apiUrl = `/api/music/cache/embedLyric?filename=${encodeURIComponent(filename)}&folder=${encodeURIComponent(folder)}`;
+            if (song._localLocation === 'root' || song._localLocation === 'data') {
+                apiUrl += `&browseLocation=${encodeURIComponent(song._localLocation)}`;
+            }
         }
 
         const res = await fetch(apiUrl, { headers });

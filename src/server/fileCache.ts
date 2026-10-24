@@ -1,5 +1,7 @@
 import { resolveContainedPath } from './security'
 import { serveFile } from './serveFile'
+import { getCacheBrowseLocation } from './cacheBrowseLocation'
+import { isRemasterStage, remasterStaging } from './remasterStaging'
 
 
 import fs from 'fs'
@@ -43,6 +45,7 @@ export const setNamingPattern = (pattern: unknown) => {
 export const getNamingPattern = () => currentNamingPattern
 
 export const getUserNamingPattern = (username?: string): string => {
+    if (isRemasterStage(username)) return remasterStaging.get(username!).namingPattern
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
     if (userNamingPatternMap.has(normalizedUsername)) {
         return userNamingPatternMap.get(normalizedUsername)!
@@ -87,6 +90,9 @@ const CACHE_LIST_SYNC_TTL = 30 * 1000
 const cacheListSyncState: Map<string, { lastSync: number, pending?: Promise<void> }> = new Map()
 
 export const getUserCacheLocation = (username?: string): string => {
+    if (isRemasterStage(username)) return CACHE_ROOTS.ROOT
+    const browseLocation = getCacheBrowseLocation()
+    if (browseLocation) return browseLocation
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
     if (userCacheLocationMap.has(normalizedUsername)) {
         return userCacheLocationMap.get(normalizedUsername)!
@@ -149,6 +155,7 @@ let _lyricFetcher: LyricFetcher | null = null
 export const setLyricFetcher = (fn: LyricFetcher) => { _lyricFetcher = fn }
 
 export const getCacheDir = (username?: string, isOnlyDownload?: boolean, location?: string) => {
+    if (isRemasterStage(username)) return remasterStaging.directory(username!, isOnlyDownload ? 'music' : 'cache')
     const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
 
     const folderName = isOnlyDownload ? 'music' : 'cache'
@@ -168,7 +175,8 @@ export const getCacheDir = (username?: string, isOnlyDownload?: boolean, locatio
 }
 
 export const getCoverCacheDir = (username: string) => {
-    const baseDir = path.join(process.cwd(), 'cover_cache')
+    if (isRemasterStage(username)) return remasterStaging.directory(username, 'covers')
+    const baseDir = path.join(global.lx.dataPath, 'runtime', 'cover_cache')
     const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
     const fullPath = path.join(baseDir, userDirName)
     if (!fs.existsSync(fullPath)) {
@@ -241,13 +249,18 @@ class CacheIndexManager {
     }
 
     private getKey(username: string, folder: 'cache' | 'music', location?: string) {
-        const loc = location || getUserCacheLocation(username)
+        const loc = isRemasterStage(username) ? CACHE_ROOTS.ROOT : location || getUserCacheLocation(username)
         return `${loc}:${username}:${folder}`
     }
 
     load(username: string, folder: 'cache' | 'music', location?: string) {
         const loc = location || getUserCacheLocation(username)
         const key = this.getKey(username, folder, loc)
+        if (isRemasterStage(username)) {
+            const index = new Map(Object.entries(remasterStaging.readIndex(username, folder)))
+            this.indexes.set(key, index)
+            return index
+        }
         const file = this.getIndexFile(username, folder, loc)
         if (fs.existsSync(file)) {
             try {
@@ -267,6 +280,11 @@ class CacheIndexManager {
         const key = this.getKey(username, folder, loc)
         const index = this.indexes.get(key)
         if (!index) return
+
+        if (isRemasterStage(username)) {
+            remasterStaging.writeIndex(username, folder, Object.fromEntries(index))
+            return
+        }
 
         const file = this.getIndexFile(username, folder, loc)
         try {
@@ -352,16 +370,6 @@ const getCoverCachePaths = (filename: string, username: string, stats?: Stats) =
     }
 }
 
-const getLegacyCoverCachePaths = (filename: string, username: string, stats?: Stats) => {
-    const hash = getCoverCacheHash(filename, stats)
-    const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
-    const coverCacheDir = path.join(global.lx.dataPath, 'cover_cache', userDirName)
-    return {
-        binPath: path.join(coverCacheDir, `${hash}.bin`),
-        mimePath: path.join(coverCacheDir, `${hash}.mime`),
-    }
-}
-
 const detectImageMime = (data: Buffer | Uint8Array) => {
     const buffer = Buffer.from(data)
     if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg'
@@ -373,22 +381,13 @@ const detectImageMime = (data: Buffer | Uint8Array) => {
 }
 
 const readCoverCache = (filename: string, username: string, stats?: Stats) => {
-    const candidates = [getCoverCachePaths(filename, username, stats), getLegacyCoverCachePaths(filename, username, stats)]
-    for (const candidate of candidates) {
-        try {
-            if (!fs.existsSync(candidate.binPath) || !fs.existsSync(candidate.mimePath)) continue
-            const data = fs.readFileSync(candidate.binPath)
-            const detectedMime = detectImageMime(data)
-            if (!detectedMime) continue
-            const storedMime = fs.readFileSync(candidate.mimePath, 'utf8').trim()
-            const persistent = getCoverCachePaths(filename, username, stats)
-            if (candidate.binPath !== persistent.binPath) {
-                fs.copyFileSync(candidate.binPath, persistent.binPath)
-                fs.writeFileSync(persistent.mimePath, detectedMime || storedMime || 'image/jpeg')
-            }
-            return { data, mime: detectedMime || storedMime || 'image/jpeg' }
-        } catch (e) { }
-    }
+    try {
+        const { binPath, mimePath } = getCoverCachePaths(filename, username, stats)
+        if (!fs.existsSync(binPath) || !fs.existsSync(mimePath)) return null
+        const data = fs.readFileSync(binPath)
+        const mime = detectImageMime(data)
+        if (mime) return { data, mime }
+    } catch (e) { }
     return null
 }
 
@@ -2688,10 +2687,7 @@ export const replaceDownloadedMusicItem = async (
     if (!fs.existsSync(oldAudioPath)) throw new Error('原文件已不存在')
     const oldAudioSize = fs.statSync(oldAudioPath).size
 
-    const stageId = crypto.randomBytes(12).toString('hex')
-    const stageUsername = `.remaster-staging/${stageId}`
-    const stageRoot = getCacheDir(stageUsername, true)
-    const stageCoverRoot = getCoverCacheDir(stageUsername)
+    const stageUsername = remasterStaging.create(normalizedUsername, getUserNamingPattern(normalizedUsername))
     const backupSuffix = `.remaster-${crypto.randomBytes(6).toString('hex')}.bak`
     const oldAudioBackup = oldAudioPath + backupSuffix
     let oldLyricPath = ''
@@ -2707,6 +2703,7 @@ export const replaceDownloadedMusicItem = async (
     let removedOldIndex = false
 
     try {
+        const stageRoot = getCacheDir(stageUsername, true)
         await downloadAndCache(songInfo, url, quality, stageUsername, signal, true, true, true)
         if (signal?.aborted) throw new Error('Aborted')
 
@@ -2859,15 +2856,11 @@ export const replaceDownloadedMusicItem = async (
         throw err
     } finally {
         indexManager.discard(stageUsername, 'music')
+        indexManager.discard(stageUsername, 'cache')
         try {
-            if (fs.existsSync(stageRoot)) fs.rmSync(stageRoot, { recursive: true, force: true })
+            remasterStaging.release(stageUsername)
         } catch (cleanupError) {
             console.warn('[文件缓存] 清理重制暂存目录失败:', cleanupError)
-        }
-        try {
-            if (fs.existsSync(stageCoverRoot)) fs.rmSync(stageCoverRoot, { recursive: true, force: true })
-        } catch (cleanupError) {
-            console.warn('[文件缓存] 清理重制封面暂存目录失败:', cleanupError)
         }
     }
 }
@@ -3117,6 +3110,7 @@ export const cleanupStaleTempFiles = async (username?: string, maxAgeMs: number 
 }
 
 export const checkAndCleanupCache = async (username?: string) => {
+    if (isRemasterStage(username)) return // The replacement transaction owns all staging cleanup.
     void cleanupStaleTempFiles(username)
     const config = (global as any).lx.config
     if (!config || !config['user.enableCacheSizeLimit']) return
