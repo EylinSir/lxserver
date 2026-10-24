@@ -2581,61 +2581,7 @@ window.LocalMusicManager = {
     },
 
     async autoLinkAll() {
-        const unindexed = this.originalData.filter(item =>
-            item.source === 'unknown' || item.source === 'local' || (item.songmid && String(item.songmid).includes(' - ')) || !item.name || item.name === '未知歌曲'
-        );
-
-        if (unindexed.length === 0) {
-            if (typeof showInfo === 'function') showInfo('所有歌曲已关联，无需自动处理');
-            return;
-        }
-
-        if (typeof showSelect === 'function') {
-            if (!(await showSelect('自动关联', `共发现 ${unindexed.length} 首未关联歌曲，系统将尝试通过多源搜索并匹配时长（误差±2s内）进行自动识别，确定开始吗？`))) return;
-        }
-
-        let successCount = 0;
-        let failCount = 0;
-        const total = unindexed.length;
-
-        for (let i = 0; i < total; i++) {
-            const item = unindexed[i];
-            if (typeof showInfo === 'function') showInfo(`正在自动识别 (${i + 1}/${total}): ${item.name || item.filename}`);
-
-            const match = await this.findBestMatch(item);
-            if (match) {
-                try {
-                    const res = await fetchLocalMusic('/api/music/cache/link', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            ...(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {})
-                        },
-                        body: JSON.stringify({
-                            filename: item.filename,
-                            songInfo: match
-                        })
-                    });
-                    const result = await res.json();
-                    if (result.success) {
-                        successCount++;
-                    } else {
-                        failCount++;
-                    }
-                } catch (e) {
-                    failCount++;
-                }
-            } else {
-                failCount++;
-            }
-        }
-
-        if (typeof showSelect === 'function') {
-            await showSelect('自动关联完成', `成功关联: ${successCount} 首\n未能识别: ${failCount} 首\n未识别歌曲建议手动关联。`, { okOnly: true });
-        } else {
-            alert(`自动关联完成！\n成功: ${successCount}\n失败: ${failCount}`);
-        }
-        this.refresh();
+        await window.AutoLinkPanel.open();
     },
 
     async findBestMatch(localItem) {

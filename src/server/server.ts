@@ -33,6 +33,34 @@ import { remasterStaging } from './remasterStaging'
 import * as customMusicManager from './customMusicManager'
 import * as serverDownloadQueue from './serverDownloadQueue'
 import * as remasterQueue from './remasterQueue'
+import { AutoLinkQueue } from './autoLinkQueue'
+import { identifyLocalSong } from './utils/identify'
+
+const autoLinkQueue = new AutoLinkQueue(() => path.join(global.lx.dataPath, 'runtime'), {
+  list: async (username, custom) => custom
+    ? (await customMusicManager.getCustomMusicList(username)).map(item => ({ ...item, folder: 'custom' }))
+    : await fileCache.getCacheList(username),
+  identify: async (username, item) => {
+    const dir = item.folder === 'custom' ? customMusicManager.getCustomMusicDir(username) : fileCache.getCacheDir(username, item.folder === 'music')
+    if (!dir) return []
+    const root = fs.realpathSync(dir)
+    const file = fs.realpathSync(path.resolve(root, item.filename))
+    const relative = path.relative(root, file)
+    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Invalid music file path')
+    return await identifyLocalSong(file)
+  },
+  search: async (keyword, source) => {
+    const result = await musicSdk[source].musicSearch.search(keyword, 1, 10)
+    return Array.isArray(result) ? result : result?.list || []
+  },
+  link: async (username, item, match) => {
+    if (item.folder === 'custom') {
+      if (!getUserConfig(username)?.allowWriteCustomMusicDir) throw new Error('管理员未允许写入自定义目录')
+      return await customMusicManager.linkCustomSong(item.filename, match, username)
+    }
+    return await fileCache.linkLocalFile(item.filename, match, username, item.folder)
+  },
+})
 import * as scheduler from './scheduler'
 import { getUpdatedListIds, removeUpdatedListId } from './task/networkListTask'
 import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSyncProgress, triggerUserSync, cancelUserSync, getUserSyncStorageLocation, isUserSyncRunning, migrateSyncStorage } from './task/syncDownloadTask'
@@ -3556,6 +3584,41 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.end('Invalid JSON data')
           }
         })
+        return
+      }
+
+      // Background matching uses the same authentication as manual linking.
+      if (pathname.startsWith('/api/music/auto-link/')) {
+        const username = verifyUserAuth(req)
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        try {
+          let data: any
+          if (pathname === '/api/music/auto-link/status' && req.method === 'GET') {
+            data = autoLinkQueue.status(username, Number(urlObj.searchParams.get('offset') || 0), Number(urlObj.searchParams.get('limit') || 200))
+          } else if (pathname === '/api/music/auto-link/cancel' && req.method === 'POST') {
+            data = autoLinkQueue.cancel(username)
+          } else if (pathname === '/api/music/auto-link/candidates' && req.method === 'GET') {
+            data = await autoLinkQueue.candidates(username, urlObj.searchParams.get('custom') === 'true')
+          } else if (pathname === '/api/music/auto-link/start' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req))
+            const custom = body.custom === true
+            if (custom && !getUserConfig(username)?.allowWriteCustomMusicDir) throw new Error('管理员未允许写入自定义目录')
+            data = await autoLinkQueue.start(username, body.keys, body.sources, custom, urlObj.searchParams.get('browseLocation') || fileCache.getUserCacheLocation(username), body.concurrency)
+          } else {
+            res.writeHead(404, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Not Found' }))
+            return
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, data }))
+        } catch (e: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message || '智能检测请求失败' }))
+        }
         return
       }
 

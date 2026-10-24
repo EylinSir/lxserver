@@ -1350,7 +1350,7 @@ export const batchUpdateMetadata = async (filenames: string[], username: string 
 /**
  * Link an unindexed local file to a specific online song identity
  */
-export const linkLocalFile = async (oldFilename: string, songInfo: any, username: string | undefined) => {
+export const linkLocalFile = async (oldFilename: string, songInfo: any, username: string | undefined, targetFolder?: string) => {
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
 
     // Find the item in all possible folders
@@ -1358,7 +1358,7 @@ export const linkLocalFile = async (oldFilename: string, songInfo: any, username
         ...indexManager.getAll(normalizedUsername, 'cache'),
         ...indexManager.getAll(normalizedUsername, 'music')
     ]
-    const item = allItems.find(i => i.filename === oldFilename)
+    const item = allItems.find(i => i.filename === oldFilename && (!targetFolder || i.folder === targetFolder))
     if (!item) throw new Error('File not found in index')
 
     const folder = item.folder as 'cache' | 'music'
