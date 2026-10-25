@@ -58,7 +58,11 @@ export const resolvePublicUrl = async (input: string) => {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Invalid upstream URL')
   const hostname = url.hostname.replace(/^\[|\]$/g, '')
   const addresses = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await lookup(hostname, { all: true })
-  if (!addresses.length || addresses.some(item => !isPublicAddress(item.address))) throw new Error('Private upstream addresses are not allowed')
+  if (!addresses.length || addresses.some(item => !isPublicAddress(item.address))) {
+    throw Object.assign(new Error('Private upstream addresses are not allowed'), {
+      code: 'ERR_PRIVATE_UPSTREAM', hostname, addresses: addresses.map(item => item.address),
+    })
+  }
   return { url, address: addresses[0].address, family: addresses[0].family }
 }
 

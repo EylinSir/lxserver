@@ -5561,6 +5561,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const urlStr = urlObj.searchParams.get('url')
         const filename = urlObj.searchParams.get('filename') || 'download.mp3'
         const isInline = urlObj.searchParams.get('inline') === '1'
+        const proxyLabel = filename === 'cover.jpg' ? '封面代理' : '下载代理'
 
         if (!urlStr) {
           res.writeHead(400)
@@ -5572,7 +5573,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           const isTaggingMode = urlObj.searchParams.get('tag') === '1'
           const rawTaskId = urlObj.searchParams.get('taskId')
           const taskId = rawTaskId ? fileCache.getProgressKey(rawTaskId, proxyUser || '_open') : null
-          console.log(`[下载代理] 正在获取音频流 (写入标签: ${isTaggingMode}, 任务ID: ${taskId})`)
+          console.log(`[${proxyLabel}] 正在获取${filename === 'cover.jpg' ? '封面图片' : '媒体流'} (写入标签: ${isTaggingMode}, 任务ID: ${taskId})`)
 
           // 使用原生 http/https 模块以获得最高的流媒体转发性能
           const http = require('http')
@@ -5581,7 +5582,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           // Manual redirect handling for maximum control and stability
           const doFetch = async (targetUrl: string, attempt: number) => {
             if (attempt > 5) {
-              console.error('[下载代理] 触发过多重定向，已终止')
+              console.error(`[${proxyLabel}] 触发过多重定向，已终止`)
               if (!res.headersSent) {
                 res.writeHead(502)
                 res.end('Too Many Redirects')
@@ -5801,7 +5802,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               })
 
               proxyReq.on('error', (err: any) => {
-                console.error('[下载代理] 请求异常:', err)
+                console.error(`[${proxyLabel}] 请求异常:`, err)
                 failProxy(err)
               })
 
@@ -5816,7 +5817,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               proxyReq.end()
 
             } catch (err: any) {
-              console.error('[下载代理] 代理请求捕获异常:', err)
+              if (err.code === 'ERR_PRIVATE_UPSTREAM') {
+                console.warn(`[${proxyLabel}] 已拒绝受限地址: ${err.hostname} -> ${err.addresses.join(', ')}`)
+              } else console.error(`[${proxyLabel}] 代理请求捕获异常:`, err)
               if (!res.headersSent) {
                 res.writeHead(500)
                 res.end('Invalid or unavailable upstream URL')
@@ -5828,7 +5831,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           doFetch(urlStr, 0)
 
         } catch (err: any) {
-          console.error('[下载代理] 发生错误:', err)
+          console.error(`[${proxyLabel}] 发生错误:`, err)
           res.writeHead(500)
           res.end('Server Error')
         }

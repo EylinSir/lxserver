@@ -82,6 +82,43 @@ test('Default List supports both single toggles and batch collection persistence
     }
 });
 
+test('QQ thumbnails use a supported CDN size without changing saved artwork', () => {
+    const source = read('public/music/app.js');
+    const context = { URL, window: { location: { href: 'http://localhost/music/', origin: 'http://localhost' } }, getImgUrl: song => song.img };
+    vm.runInNewContext(source.slice(source.indexOf('function getThumbnailUrl('), source.indexOf('window.getThumbnailUrl =')), context);
+    const song = { img: 'https://y.gtimg.cn/music/photo_new/T002R500x500M000album.jpg' };
+    assert.match(context.getThumbnailUrl(song), /T002R150x150M000/);
+    assert.match(song.img, /T002R500x500M000/);
+    assert.equal(context.getThumbnailUrl(song, 384), song.img);
+    assert.match(context.getThumbnailUrl({ img: '/api/music/cache/cover?filename=a&user=u' }), /size=96/);
+});
+
+test('failed list thumbnails retry original artwork once before showing a placeholder', () => {
+    const source = read('public/music/app.js');
+    for (const succeeds of [true, false]) {
+        const attrs = new Map([['data-src', '/thumb'], ['data-original-src', '/original']]);
+        const classes = new Set(['is-placeholder']);
+        const img = { src: '/music/assets/logo.svg', getAttribute: key => attrs.get(key), removeAttribute: key => attrs.delete(key),
+            classList: { add: value => classes.add(value), remove: (...values) => values.forEach(value => classes.delete(value)) } };
+        const context = { window: {}, document: { querySelectorAll: () => [img] } };
+        vm.runInNewContext(source.slice(source.indexOf('function lazyLoadImages('), source.indexOf('window.lazyLoadImages =')), context);
+        context.lazyLoadImages();
+        assert.equal(img.src, '/thumb');
+        img.onerror();
+        assert.equal(img.src, '/original');
+        if (succeeds) {
+            img.onload();
+            assert.equal(classes.has('is-placeholder'), false);
+        } else {
+            img.onerror();
+            assert.equal(img.src, '/music/assets/logo.svg');
+            assert.equal(img.onerror, null);
+            assert.equal(classes.has('is-placeholder'), true);
+        }
+        assert.equal(attrs.has('data-src'), false);
+    }
+});
+
 test('embedded covers are bounded thumbnails while no-size callers retain the original', async () => {
     const { coverThumbnail } = loadTs('src/server/coverThumbnail.ts');
     const data = await sharp({ create: { width: 1500, height: 1200, channels: 3, background: '#b4a26d' } }).jpeg().toBuffer();

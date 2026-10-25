@@ -4787,7 +4787,10 @@ function getThumbnailUrl(song, size = 96) {
             return parsed.pathname + parsed.search;
         }
         if (/\.music\.126\.net$/.test(parsed.hostname)) parsed.searchParams.set('param', `${size}y${size}`);
-        if (parsed.hostname === 'y.gtimg.cn') parsed.pathname = parsed.pathname.replace(/(T\d{3}R)\d+x\d+(M)/, `$1${size}x${size}$2`);
+        // QQ CDN does not serve arbitrary dimensions (96x96 returns 404).
+        if (parsed.hostname === 'y.gtimg.cn' && size <= 150) {
+            parsed.pathname = parsed.pathname.replace(/(T\d{3}R)\d+x\d+(M)/, (_, prefix, suffix) => `${prefix}150x150${suffix}`);
+        }
         return parsed.href;
     } catch { return url; }
 }
@@ -5059,7 +5062,7 @@ function renderResults(list) {
             <!-- Title (Image + Text) -->
             <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center overflow-hidden pr-2 min-w-0">
                 <div class="relative w-10 h-10 md:w-12 md:h-12 mr-3 md:mr-4 flex-shrink-0 group cursor-pointer">
-                     <img data-src="${imgUrl}" src="/music/assets/logo.svg" 
+                     <img data-src="${escapeHtmlText(imgUrl)}" data-original-src="${escapeHtmlText(getImgUrl(item))}" src="/music/assets/logo.svg"
                           loading="lazy" fetchpriority="low"
                           class="lazy-image w-full h-full rounded-lg object-cover shadow-sm group-hover:shadow-md transition-all group-hover:scale-105 duration-300 dynamic-logo is-placeholder" 
                           alt="${item.name}"
@@ -5339,16 +5342,24 @@ function lazyLoadImages(root = document) {
         if (img.src && img.src.includes('logo.svg')) {
             img.classList.add('is-placeholder');
         }
-        img.src = src;
         img.onload = () => {
             img.classList.remove('is-placeholder', 'opacity-0');
             img.removeAttribute('data-src');
         };
         img.onerror = () => {
+            const original = img.getAttribute('data-original-src');
+            img.removeAttribute('data-original-src');
+            if (original && original !== src) {
+                img.src = original;
+                return;
+            }
+            img.onerror = null;
+            img.onload = null;
             img.src = '/music/assets/logo.svg';
             img.classList.add('is-placeholder');
             img.removeAttribute('data-src');
         };
+        img.src = src;
     };
 
     if ('IntersectionObserver' in window) {
@@ -7227,7 +7238,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
         // [Sync] 确定了最终播放音质后，若当前已就绪的歌词确实属于本歌曲，才以正确音质重写服务器端歌词缓存文件名
         // 关键防护：必须校验 lastLyricSongId 匹配当前歌曲，防止切歌时旧歌词异步残留写入新歌缓存文件
-        const playbackSongKey = `${playbackSong.source || playbackSong.meta?.source || ''}_${playbackSong.songmid || playbackSong.songId || playbackSong.id || playbackSong.meta?.songmid || playbackSong.meta?.songId || ''}`;
+        const playbackSongKey = getLyricSongKey(playbackSong);
         if (settings.enableServerLyricCache !== false && currentRawLrc && lastLyricSongId === playbackSongKey) {
             try {
                 const _lyricHeaders = { 'Content-Type': 'application/json' };
@@ -8380,12 +8391,14 @@ let mediaSessionArtworkRequest = 0;
 function resolveMediaSessionArtwork(imgUrl) {
     const fallback = { src: new URL('/music/assets/logo.png', window.location.href).href, sizes: '512x512', type: 'image/png' };
     let sourceUrl;
+    let proxyUrl;
     try {
         const url = new URL(imgUrl, window.location.href);
         if (url.protocol === 'http:' || url.protocol === 'https:') {
-            // 使用已有下载代理，避免跨域图片令 canvas 污染，亦避免系统媒体进程直接访问 CDN。
-            sourceUrl = url.origin === window.location.origin ? url.href :
-                `/api/music/download?url=${encodeURIComponent(url.href)}&filename=cover.jpg&inline=1`;
+            sourceUrl = url.href;
+            if (url.origin !== window.location.origin) {
+                proxyUrl = `/api/music/download?url=${encodeURIComponent(url.href)}&filename=cover.jpg&inline=1`;
+            }
         } else if (url.protocol === 'data:' && /^data:image\/(png|jpeg|webp|gif);/i.test(imgUrl)) {
             sourceUrl = imgUrl;
         } else {
@@ -8393,51 +8406,65 @@ function resolveMediaSessionArtwork(imgUrl) {
         }
     } catch (_) { return Promise.resolve(fallback); }
 
-    if (mediaSessionArtworkCache.has(sourceUrl)) return mediaSessionArtworkCache.get(sourceUrl);
-    const result = new Promise(resolve => {
-        const image = new Image();
+    const cached = mediaSessionArtworkCache.get(sourceUrl);
+    if (cached && Date.now() < cached.retryAfter) return cached.promise;
+    const entry = { promise: null, retryAfter: Infinity };
+    entry.promise = new Promise(resolve => {
+        let image;
+        let timer;
+        let usingProxy = false;
         let settled = false;
         const finish = artwork => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
             image.onload = image.onerror = null;
+            // 失败后保留一分钟，避免每次系统媒体信息刷新都再次请求。
+            entry.retryAfter = artwork === fallback ? Date.now() + 60000 : Infinity;
             resolve(artwork);
         };
-        const timer = setTimeout(() => {
-            finish(fallback);
+        const failed = () => {
+            clearTimeout(timer);
+            image.onload = image.onerror = null;
             if (typeof image.removeAttribute === 'function') image.removeAttribute('src');
-        }, 10000);
-        image.onload = () => {
-            try {
-                const width = image.naturalWidth;
-                const height = image.naturalHeight;
-                if (!(width > 0 && height > 0)) throw new Error('Empty artwork');
-                const canvas = document.createElement('canvas');
-                canvas.width = canvas.height = 512;
-                const context = canvas.getContext('2d');
-                if (!context) throw new Error('Canvas unavailable');
-                context.fillStyle = '#ffffff';
-                context.fillRect(0, 0, 512, 512);
-                const scale = Math.min(512 / width, 512 / height);
-                const w = width * scale;
-                const h = height * scale;
-                context.drawImage(image, (512 - w) / 2, (512 - h) / 2, w, h);
-                const src = canvas.toDataURL('image/jpeg', 0.85);
-                if (!src.startsWith('data:image/jpeg;')) throw new Error('JPEG conversion unavailable');
-                finish({ src, sizes: '512x512', type: 'image/jpeg' });
-            } catch (_) { finish(fallback); }
+            if (proxyUrl && !usingProxy) {
+                usingProxy = true;
+                load(proxyUrl);
+            } else finish(fallback);
         };
-        image.onerror = () => finish(fallback);
-        image.src = sourceUrl;
+        const load = src => {
+            image = new Image();
+            // 外部图片必须通过 CORS 加载，才能安全导出 canvas。
+            if (proxyUrl && !usingProxy) image.crossOrigin = 'anonymous';
+            timer = setTimeout(failed, 10000);
+            image.onload = () => {
+                try {
+                    const width = image.naturalWidth;
+                    const height = image.naturalHeight;
+                    if (!(width > 0 && height > 0)) throw new Error('Empty artwork');
+                    const canvas = document.createElement('canvas');
+                    canvas.width = canvas.height = 512;
+                    const context = canvas.getContext('2d');
+                    if (!context) throw new Error('Canvas unavailable');
+                    context.fillStyle = '#ffffff';
+                    context.fillRect(0, 0, 512, 512);
+                    const scale = Math.min(512 / width, 512 / height);
+                    const w = width * scale;
+                    const h = height * scale;
+                    context.drawImage(image, (512 - w) / 2, (512 - h) / 2, w, h);
+                    const src = canvas.toDataURL('image/jpeg', 0.85);
+                    if (!src.startsWith('data:image/jpeg;')) throw new Error('JPEG conversion unavailable');
+                    finish({ src, sizes: '512x512', type: 'image/jpeg' });
+                } catch (_) { failed(); }
+            };
+            image.onerror = failed;
+            image.src = src;
+        };
+        load(sourceUrl);
     });
-    mediaSessionArtworkCache.set(sourceUrl, result);
+    mediaSessionArtworkCache.set(sourceUrl, entry);
     if (mediaSessionArtworkCache.size > 32) mediaSessionArtworkCache.delete(mediaSessionArtworkCache.keys().next().value);
-    // 临时失败不能永久缓存；下一次元数据刷新应允许重试。
-    result.then(artwork => {
-        if (artwork === fallback && mediaSessionArtworkCache.get(sourceUrl) === result) mediaSessionArtworkCache.delete(sourceUrl);
-    });
-    return result;
+    return entry.promise;
 }
 
 function updateMediaSessionMetadata(song) {
@@ -10117,7 +10144,13 @@ function updateDetailInfo(song) {
  * @param {boolean} [silent=false] 是否静默模式（为 true 时若无内嵌歌词不覆盖 UI 为暂无歌词）
  * @returns {Promise<boolean>} 是否成功获取并应用了内嵌歌词
  */
-async function fetchEmbedLyricForLocalSong(song, silent = false) {
+let lyricRequestVersion = 0;
+
+function getLyricSongKey(song) {
+    return `${song?.source || song?.meta?.source || ''}_${song?.songmid || song?.songId || song?.meta?.songmid || song?.meta?.songId || ''}`;
+}
+
+async function fetchEmbedLyricForLocalSong(song, silent = false, isCurrent = () => currentPlayingSong === song) {
     const filename = song._localFilename;
     const username = song._localUsername || '';
     const isCustomDir = !!song._isCustomDir;
@@ -10148,6 +10181,8 @@ async function fetchEmbedLyricForLocalSong(song, silent = false) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
+        if (!isCurrent()) return false;
+
         const lrc = data.lrc || '';
         if (!data.success || !lrc || lrc.trim().length < 5) {
             console.log('[Lyric] 内嵌歌词为空，无歌词展示');
@@ -10170,6 +10205,7 @@ async function fetchEmbedLyricForLocalSong(song, silent = false) {
         applyLyricUpdate();
         return true;
     } catch (e) {
+        if (!isCurrent()) return false;
         console.warn('[Lyric] 读取内嵌歌词失败:', e);
         if (!silent) {
             renderLyric([], '暂无歌词');
@@ -10182,6 +10218,9 @@ async function fetchLyric(song, quality = null) {
     if (!song) {
         return;
     }
+    const requestVersion = ++lyricRequestVersion;
+    const isCurrent = () => requestVersion === lyricRequestVersion &&
+        getLyricSongKey(currentPlayingSong) === getLyricSongKey(song);
 
     // 支持两种数据结构:
     // 1. 搜索结果: song.songmid, song.source 在顶层
@@ -10203,7 +10242,7 @@ async function fetchLyric(song, quality = null) {
         // [新增] 本地未关联歌曲：优先尝试读取音频文件内嵌歌词
         if (song.isLocal && song._localFilename) {
             console.log('[Lyric] 本地未关联歌曲，尝试读取内嵌歌词:', song._localFilename);
-            await fetchEmbedLyricForLocalSong(song);
+            await fetchEmbedLyricForLocalSong(song, false, isCurrent);
         } else {
             console.warn('[Lyric] 歌曲缺少必要的字段 songmid/songId 或 source:', song);
         }
@@ -10211,7 +10250,7 @@ async function fetchLyric(song, quality = null) {
     }
 
     // [Optimize] 如果歌曲未变化且已有歌词，跳过完整加载流程逻辑
-    const currentLyricKey = `${source}_${songmid}`;
+    const currentLyricKey = getLyricSongKey(song);
     if (lastLyricSongId === currentLyricKey && currentLyricLines.length > 0) {
         console.log(`[Lyric] 歌词已就绪(${currentLyricKey})，同步播放状态`);
         if (lyricPlayer) {
@@ -10261,8 +10300,10 @@ async function fetchLyric(song, quality = null) {
         try {
             const serverCacheUrl = `${API_BASE}/cache/lyric?source=${source}&songmid=${songmid}&songId=${encodeURIComponent(song.id || '')}&name=${encodeURIComponent(song.name || '')}&singer=${encodeURIComponent(song.singer || '')}`;
             const scRes = await fetch(serverCacheUrl, { headers });
+            if (!isCurrent()) return;
             if (scRes.ok) {
                 const scData = await scRes.json();
+                if (!isCurrent()) return;
                 if (scData.success && scData.data) {
                     currentRawLrc = scData.data.lyric || scData.data.lrc || '';
                     currentRawTlrc = scData.data.tlyric || '';
@@ -10285,6 +10326,7 @@ async function fetchLyric(song, quality = null) {
                 }
             }
         } catch (e) {
+            if (!isCurrent()) return;
             console.warn('[Lyric] 读取服务器端缓存失败:', e);
         }
     }
@@ -10365,9 +10407,7 @@ async function fetchLyric(song, quality = null) {
         }
 
         // 校验当前活跃歌曲是否仍匹配，避免切歌过快导致前一首的异步返回污染当前歌曲播放器
-        const currentActiveSongmid = currentPlayingSong?.songmid || currentPlayingSong?.songId || currentPlayingSong?.id || currentPlayingSong?.meta?.songmid || currentPlayingSong?.meta?.songId;
-        const currentActiveSource = currentPlayingSong?.source || currentPlayingSong?.meta?.source;
-        if (currentActiveSongmid && currentActiveSource && (String(currentActiveSongmid) !== String(songmid) || String(currentActiveSource) !== String(source))) {
+        if (!isCurrent()) {
             console.log(`[Lyric] 忽略过期的网络歌词渲染: ${source}_${songmid}`);
             return;
         }
@@ -10382,7 +10422,8 @@ async function fetchLyric(song, quality = null) {
             // [兜底] 若获取到的歌词为空，且该歌曲是本地文件，尝试读取其内嵌歌词兜底
             if (song.isLocal && song._localFilename) {
                 console.log('[Lyric] 网络/缓存歌词为空，尝试使用本地内嵌歌词兜底:', song._localFilename);
-                const embedSuccess = await fetchEmbedLyricForLocalSong(song, true);
+                const embedSuccess = await fetchEmbedLyricForLocalSong(song, true, isCurrent);
+                if (!isCurrent()) return;
                 if (embedSuccess) return;
             }
             renderLyric([]);
@@ -10394,12 +10435,14 @@ async function fetchLyric(song, quality = null) {
         applyLyricUpdate();
 
     } catch (e) {
+        if (!isCurrent()) return;
         console.error(`[Lyric] Failed (${source}_${songmid}):`, e);
 
         // [兜底] 若网络获取歌词抛错，且该歌曲是本地文件，尝试读取其内嵌歌词兜底
         if (song.isLocal && song._localFilename) {
             console.log('[Lyric] 网络获取歌词异常，尝试使用本地内嵌歌词兜底:', song._localFilename);
-            const embedSuccess = await fetchEmbedLyricForLocalSong(song, true);
+            const embedSuccess = await fetchEmbedLyricForLocalSong(song, true, isCurrent);
+            if (!isCurrent()) return;
             if (embedSuccess) return;
         }
 

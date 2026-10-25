@@ -1231,15 +1231,24 @@ class LXStudioBarsAnimation {
     }
 
     draw(data, ctx) {
+        const audio = document.getElementById('audio-player');
+        if (audio && (audio.paused || audio.ended)) {
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            this.prevRatios = null;
+            return;
+        }
         if (!data || data.length === 0) return;
         const width = ctx.canvas.width;
         const height = ctx.canvas.height;
         if (width === 0 || height === 0) return;
 
         const isBlocks = this.globalStyle === 'blocks';
-        // 降低密度，拉开柱间距，增强透气感，避免密集拥挤
-        const stepPitch = isBlocks ? 9 : 8;
-        const numBars = Math.min(54, Math.max(20, Math.floor(width / stepPitch)));
+        // Size dots in CSS pixels so high-DPI screens keep the same visual weight.
+        const cssWidth = ctx.canvas.getBoundingClientRect().width || width;
+        const scale = width / cssWidth;
+        const numBars = isBlocks
+            ? Math.max(1, Math.floor(cssWidth / 12))
+            : Math.min(54, Math.max(20, Math.floor(width / 8)));
         const colWidth = width / numBars;
         const barWidth = Math.max(3, Math.floor(colWidth - (isBlocks ? 3.5 : 2.5)));
 
@@ -1248,8 +1257,8 @@ class LXStudioBarsAnimation {
         }
 
         ctx.fillStyle = this.themeColor;
-        const blockSize = 3;
-        const blockGap = 1.6;
+        const blockSize = 6 * scale;
+        const blockGap = 3 * scale;
         const blockPitch = blockSize + blockGap;
 
         for (let i = 0; i < numBars; i++) {
@@ -1263,7 +1272,7 @@ class LXStudioBarsAnimation {
             // 使用非线性感知对比度增强动态（弱音更低，强音直冲高处），形成跌宕起伏的错落律动
             const dynamicVal = Math.pow(rawVal, 1.32);
             const freqCurve = 0.90 + 0.15 * Math.sin(normX * Math.PI);
-            let targetRatio = Math.max(0.02, Math.min(1.0, dynamicVal * freqCurve * 1.05));
+            let targetRatio = Math.max(0, Math.min(1.0, dynamicVal * freqCurve * 1.05));
 
             // 平滑回落，避免视觉生硬闪烁
             const prev = this.prevRatios[i];
@@ -1276,11 +1285,14 @@ class LXStudioBarsAnimation {
             const x = i * colWidth + (colWidth - barWidth) / 2;
 
             if (isBlocks) {
-                const totalBlocks = Math.max(1, Math.floor(barH / blockPitch));
+                const totalBlocks = Math.floor(barH / blockPitch);
                 for (let b = 0; b < totalBlocks; b++) {
                     const y = height - (b + 1) * blockPitch;
                     if (y < 0) break;
-                    ctx.fillRect(x, y, barWidth, blockSize);
+                    const radius = Math.min(blockSize / 2, barWidth / 2);
+                    ctx.beginPath();
+                    ctx.arc(x + barWidth / 2, y + blockSize / 2, radius, 0, Math.PI * 2);
+                    ctx.fill();
                 }
             } else {
                 const y = height - barH;
@@ -1341,7 +1353,13 @@ const musicVisualizer = (function () {
      */
     function drawFallbackBars(ctx, width, height, themeColor, globalStyle, data) {
         const isPlaying = audio && !audio.paused;
-        const numBars = Math.min(64, Math.max(16, Math.floor(width / 6.5)));
+        if (!isPlaying || audio.ended) {
+            ctx.clearRect(0, 0, width, height);
+            return;
+        }
+        const cssWidth = ctx.canvas.getBoundingClientRect().width || width;
+        const scale = width / cssWidth;
+        const numBars = globalStyle === 'blocks' ? Math.max(1, Math.floor(cssWidth / 12)) : Math.min(64, Math.max(16, Math.floor(width / 6.5)));
         const barWidth = Math.max(2, (width / numBars) - 1.5);
 
         // Check for real frequency spectrum data
@@ -1355,24 +1373,27 @@ const musicVisualizer = (function () {
 
         ctx.fillStyle = themeColor;
         for (let i = 0; i < numBars; i++) {
-            let hRatio = 0.04;
+            let hRatio = 0;
             if (hasRealAudio) {
                 // Map logarithmic/non-linear frequency bands to spectrum bars
                 const binIdx = Math.min(data.length - 1, Math.floor(Math.pow(i / numBars, 1.35) * (data.length * 0.72)));
                 const val = (data[binIdx] || 0) / 255;
-                hRatio = Math.max(0.06, Math.min(0.96, val * 1.18));
+                hRatio = Math.max(0, Math.min(0.96, val * 1.18));
             }
             const barH = hRatio * height;
             const x = i * (width / numBars);
             const y = height - barH;
 
             if (globalStyle === 'blocks') {
-                const blockSize = 4;
-                const blockGap = 1;
+                const blockSize = 6 * scale;
+                const blockGap = 3 * scale;
                 const totalBlocks = Math.floor(barH / (blockSize + blockGap));
                 for (let b = 0; b < totalBlocks; b++) {
                     const by = height - (b + 1) * (blockSize + blockGap);
-                    ctx.fillRect(x, by, barWidth, blockSize);
+                    const radius = Math.min(blockSize / 2, barWidth / 2);
+                    ctx.beginPath();
+                    ctx.arc(x + barWidth / 2, by + blockSize / 2, radius, 0, Math.PI * 2);
+                    ctx.fill();
                 }
             } else {
                 ctx.beginPath();
@@ -1920,6 +1941,15 @@ const musicVisualizer = (function () {
     }
 
     if (audio) {
+        // Wave may stop scheduling frames on pause, so clear the last spectrum immediately.
+        const clearPausedSpectrum = () => {
+            const s = window.settings || {};
+            if (footerCanvas && (s.footerVisualizerStyle || 'bars') === 'bars') {
+                footerCanvas.getContext('2d').clearRect(0, 0, footerCanvas.width, footerCanvas.height);
+            }
+        };
+        audio.addEventListener('pause', clearPausedSpectrum);
+        audio.addEventListener('ended', clearPausedSpectrum);
         const resumeAudioContext = () => {
             if (audioContext && audioContext.state === 'suspended') {
                 audioContext.resume().catch(() => {});

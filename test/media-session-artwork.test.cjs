@@ -16,13 +16,14 @@ function player(options = {}) {
     const draws = [];
     const timers = new Map();
     let nextTimer = 0;
+    let now = 1000;
     class Image {
         constructor() { images.push(this); this.naturalWidth = 800; this.naturalHeight = 400; }
         set src(value) { this.source = value; }
         removeAttribute(name) { assert.equal(name, 'src'); this.cancelled = true; }
     }
     const sandbox = {
-        Image, URL, Map, Promise, console: { warn() {} },
+        Image, URL, Map, Promise, Date: { now: () => now }, console: { warn() {} },
         window: { location: { href: 'https://player.example/', origin: 'https://player.example', protocol: 'https:' } },
         navigator: { mediaSession: {}, ...options.device },
         settings: { enableSmtcLyric: false },
@@ -46,14 +47,15 @@ function player(options = {}) {
     if (options.isIOS !== undefined) sandbox.window.iOSBackgroundAudio = { isIOS: () => options.isIOS };
     vm.createContext(sandbox);
     vm.runInContext(app.slice(start, end), sandbox);
-    return { sandbox, images, draws, timers, update: song => sandbox.updateMediaSessionMetadata(song) };
+    return { sandbox, images, draws, timers, advance: ms => { now += ms; }, update: song => sandbox.updateMediaSessionMetadata(song) };
 }
 
-test('Media Session decodes CDN artwork through the existing same-origin proxy', async () => {
+test('Media Session decodes CDN artwork directly with CORS without a proxy request', async () => {
     const p = player();
     p.update({ name: 'First', singer: 'Artist', img: 'https://cdn.example/cover.webp' });
     assert.equal(p.images.length, 1);
-    assert.equal(p.images[0].source, '/api/music/download?url=https%3A%2F%2Fcdn.example%2Fcover.webp&filename=cover.jpg&inline=1');
+    assert.equal(p.images[0].source, 'https://cdn.example/cover.webp');
+    assert.equal(p.images[0].crossOrigin, 'anonymous');
     p.images[0].onload();
     await flush();
     const metadata = p.sandbox.navigator.mediaSession.metadata;
@@ -63,6 +65,45 @@ test('Media Session decodes CDN artwork through the existing same-origin proxy',
     assert.equal(metadata.artwork[0].sizes, '512x512');
     assert.deepEqual(p.draws[0], [0, 128, 512, 256]);
     assert.equal(p.timers.size, 0);
+});
+
+for (const failure of ['network', 'canvas', 'timeout']) {
+    test(`external artwork falls back to the proxy after a direct ${failure} failure`, async () => {
+        const options = { canvasFails: failure === 'canvas' };
+        const p = player(options);
+        const song = { name: 'Song', img: 'https://cdn.example/cover.webp' };
+        p.update(song);
+        p.update(song);
+        assert.equal(p.images.length, 1);
+        if (failure === 'network') p.images[0].onerror();
+        if (failure === 'canvas') p.images[0].onload();
+        if (failure === 'timeout') [...p.timers.values()][0]();
+        assert.equal(p.images.length, 2);
+        assert.equal(p.images[0].onload, null);
+        assert.equal(p.images[1].source, '/api/music/download?url=https%3A%2F%2Fcdn.example%2Fcover.webp&filename=cover.jpg&inline=1');
+        options.canvasFails = false;
+        p.images[1].onload();
+        await flush();
+        assert.equal(p.sandbox.navigator.mediaSession.metadata.artwork[0].type, 'image/jpeg');
+        assert.equal(p.timers.size, 0);
+    });
+}
+
+test('failed direct and proxy requests share a cooldown before retrying', async () => {
+    const p = player();
+    const song = { name: 'Song', img: 'https://cdn.example/cover.webp' };
+    p.update(song);
+    p.images[0].onerror();
+    p.images[1].onerror();
+    await flush();
+    for (let i = 0; i < 5; i++) p.update(song);
+    await flush();
+    assert.equal(p.images.length, 2);
+    assert.equal(p.sandbox.navigator.mediaSession.metadata.artwork[0].type, 'image/png');
+    p.advance(60000);
+    p.update(song);
+    assert.equal(p.images.length, 3);
+    assert.equal(p.images[2].source, song.img);
 });
 
 test('local authenticated cover URLs remain on their original origin', async () => {
@@ -198,6 +239,9 @@ for (const failure of ['network', 'canvas', 'timeout']) {
         assert.equal(art.type, 'image/png');
         assert.equal(p.timers.size, 0);
         if (failure === 'timeout') assert.equal(p.images[0].cancelled, true);
+        p.update(song);
+        assert.equal(p.images.length, 1);
+        p.advance(60000);
         p.update(song);
         assert.equal(p.images.length, 2);
     });
