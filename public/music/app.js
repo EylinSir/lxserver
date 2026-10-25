@@ -460,6 +460,7 @@ try {
 window.settings = settings; // 显式挂载到 window
 window.networkListUpdateMap = new Set();
 let networkListAutoCheckTimer = null;
+let networkListAutoCheckPeriod = null;
 
 function escapeHtmlText(value) {
     return String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -717,20 +718,24 @@ document.addEventListener('click', (e) => {
 });
 
 function setupNetworkListAutoCheck() {
+    const intervalMs = settings.autoUpdateNetworkList
+        ? parseNetworkListAutoCheckInterval(settings.networkListAutoCheckInterval) : null;
+    if (networkListAutoCheckTimer && intervalMs > 0 && networkListAutoCheckPeriod === intervalMs) return;
     if (networkListAutoCheckTimer) {
         clearInterval(networkListAutoCheckTimer);
         networkListAutoCheckTimer = null;
     }
+    networkListAutoCheckPeriod = null;
     if (!settings.autoUpdateNetworkList) {
         return;
     }
-    const intervalMs = parseNetworkListAutoCheckInterval(settings.networkListAutoCheckInterval);
     if (intervalMs === null || intervalMs <= 0) {
         return;
     }
     networkListAutoCheckTimer = setInterval(() => {
         checkNetworkListUpdates().catch(err => console.error('[AutoCheck] 网络歌单检测失败:', err));
     }, intervalMs);
+    networkListAutoCheckPeriod = intervalMs;
     console.log('[AutoCheck] 已设置网络歌单自动检测间隔：', settings.networkListAutoCheckInterval, '(', intervalMs, 'ms )');
 }
 
@@ -1467,7 +1472,7 @@ window.handleHeaderLogout = handleHeaderLogout;
         }
 
         // [新增] 公开受限用户自动尝试从服务器拉取配置 (_open)
-        if (config['user.enablePublicRestriction']) {
+        if (config['user.enablePublicRestriction'] && !localStorage.getItem('lx_sync_user')) {
             console.log('[Auth] 检测到公开限制已开启，尝试拉取公共配置...');
             if (typeof fetchSettingsFromServer === 'function') {
                 await fetchSettingsFromServer();
@@ -1539,6 +1544,7 @@ async function handleLogout() {
 
 // 音质选择器初始化
 document.addEventListener('DOMContentLoaded', () => {
+    loadSettings();
     // 音质选择器初始化
     const qualitySelect = document.getElementById('quality-select');
     if (qualitySelect && settings.preferredQuality) {
@@ -1619,8 +1625,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('mouseup', stopDragging);
     window.addEventListener('touchend', stopDragging);
 
-    // 同步所有设置 UI
-    syncSettingsUI();
+    // 设置已由 loadSettings 同步。
     updateUserUI();
 });
 
@@ -9071,7 +9076,7 @@ const SETTINGS_UI_MAP = {
         type: 'value',
         normalize: normalizeDownloadConcurrency,
         action: (v) => {
-            if (window.SystemDownloadManager) {
+            if (window.SystemDownloadManager && window.SystemDownloadManager.maxConcurrent !== v) {
                 window.SystemDownloadManager.updateMaxConcurrent(v);
             }
         }
@@ -9322,6 +9327,8 @@ function applyPlayerBackground(mode) {
     const bgCover = document.getElementById('detail-bg-cover');
     const bgOverlay = document.getElementById('player-detail-bg-overlay');
     if (!detailBg || !bgCover || !bgOverlay) return;
+    if (detailBg.dataset.appliedBackground === mode) return;
+    detailBg.dataset.appliedBackground = mode;
 
     console.log(`[PlayerBackground] Applying style: ${mode}`);
 
@@ -13850,8 +13857,7 @@ async function handleJumpToOriginalList(listId, event) {
 
 // Auto-restore on page load
 document.addEventListener('DOMContentLoaded', async () => {
-    // 0. Load settings first
-    loadSettings();
+    // 本地设置已在前面的 UI 初始化入口加载。
 
     // Checkbox State
     const pubToggle = document.getElementById('toggle-public-sources');
@@ -17124,7 +17130,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // 允许浏览器先完成主要的渲染和 load 事件，释放 PWA 安装按钮并显示刷新图标
     setTimeout(() => {
         console.log('[Init] 启动后台初始化任务...');
-        loadSettings();
         restorePlaybackState();
 
         // [新增] 延迟显示热搜，避免启动请求堆积
@@ -17144,44 +17149,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // [Fix] Auto-Login logic (Restore Session)
-        const savedMode = localStorage.getItem('lx_sync_mode');
-        if (savedMode === 'local') {
-            const u = localStorage.getItem('lx_sync_user');
-            const p = localStorage.getItem('lx_sync_pass');
-            const t = localStorage.getItem('lx_user_token');
-            if (u && (p || t)) {
-                // Fill UI
-                const uInput = document.getElementById('sync-local-user');
-                const pInput = document.getElementById('sync-local-pass');
-                if (uInput && !uInput.value) uInput.value = u;
-                if (pInput && p && !pInput.value) pInput.value = p;
-                // If not yet synced, trigger login
-                if (!currentListData) {
-                    console.log('[AutoLogin] 检测到本地账户或有效 Token，正在确保同步连接...');
-                    handleLocalLogin();
-                }
-            }
-        } else if (savedMode === 'remote') {
-            const url = localStorage.getItem('lx_sync_url');
-            const code = localStorage.getItem('lx_sync_code');
-            if (url && code) {
-                console.log('[AutoLogin] 检测到远程同步设置，正在自动连接...');
-                // Fill UI
-                const remoteUrlInput = document.getElementById('sync-remote-url');
-                const remoteStep1 = document.getElementById('sync-remote-step1');
-                const remoteStep2 = document.getElementById('sync-remote-step2');
-                const remoteCodeInput = document.getElementById('sync-remote-code');
-
-                if (remoteUrlInput) remoteUrlInput.value = url;
-                if (remoteStep1) remoteStep1.classList.add('hidden');
-                if (remoteStep2) remoteStep2.classList.remove('hidden');
-                if (remoteCodeInput) remoteCodeInput.value = code;
-
-                // Trigger connect
-                handleRemoteConnect();
-            }
-        }
+        // 自动连接由缓存恢复入口统一负责，避免并发登录和重复拉取账号设置。
     }, 100);
 
     // [New] 全局精简播放栏控制函数

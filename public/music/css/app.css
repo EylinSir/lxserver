@@ -1,3 +1,22 @@
+/* Fit theme cards to the settings panel's available width. */
+.settings-theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 6.5rem), 1fr));
+    gap: 0.75rem;
+}
+
+.settings-theme-grid > .theme-option {
+    min-width: 0;
+}
+
+.settings-theme-grid > .theme-option > div:first-child {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 3 / 2;
+    max-height: 6rem;
+    margin-bottom: 0.5rem;
+}
+
 /* Keep the whole agreement reachable in short Safari landscape viewports. */
 #project-agreement-modal .project-agreement-panel {
     max-height: calc(100dvh - max(1rem, env(safe-area-inset-top, 0px)) - max(1rem, env(safe-area-inset-bottom, 0px)));

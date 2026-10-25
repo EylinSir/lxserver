@@ -28,7 +28,7 @@ class DownloadManager {
         this.lastTime = Date.now();
         this.speedInterval = setInterval(() => this.updateGlobalSpeed(), 1000);
 
-        // [New] Poll for server-side caching progress
+        // Check for active work; idle queues do not issue network requests.
         this.serverPollInterval = setInterval(() => this.pollServerProgress(), 2000);
 
         if (this.listContainer) {
@@ -390,13 +390,18 @@ class DownloadManager {
         if (this.serverPollInFlight) return;
         this.serverPollInFlight = true;
         try {
-        await this.syncServerQueue(false);
         // [Move to top] 对已完成但还未检测过歌词的云端任务，执行检测
         // 这样即使当前没有正在下载的任务，刷新页面后也能触发一次歌词状态刷新
         this.tasks.filter(t => t.isServer && t.status === 'finished' && t.hasLyric === undefined).slice(0, 3).forEach(t => {
             t.hasLyric = 'checking';
             this.checkTaskLyric(t);
         });
+
+        // Finished, failed and paused tasks do not need progress polling.
+        const activeTasks = this.tasks.filter(t =>
+            ['waiting', 'starting', 'downloading', 'tagging'].includes(t.status));
+        if (!activeTasks.length) return;
+        if (activeTasks.some(t => t.serverManaged)) await this.syncServerQueue(false);
 
         // Poll for server tasks AND local proxy tasks
         const tasksToPoll = this.tasks.filter(t => !t.serverManaged && (t.isServer || (t.status === 'downloading' && !t.isServer)) && (t.status === 'waiting' || t.status === 'downloading' || t.status === 'tagging'));
@@ -619,6 +624,8 @@ class DownloadManager {
     toggleDrawer() {
         if (this.drawer.classList.contains('translate-x-full')) {
             this.drawer.classList.remove('translate-x-full');
+            // Discover tasks started elsewhere without polling an idle queue.
+            this.syncServerQueue(true);
         } else {
             this.drawer.classList.add('translate-x-full');
         }

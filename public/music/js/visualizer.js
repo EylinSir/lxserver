@@ -1228,16 +1228,18 @@ class LXStudioBarsAnimation {
         this.globalStyle = globalStyle;
         this.themeColor = themeColor;
         this.prevRatios = null;
+        this.lastFrameTime = null;
     }
 
     draw(data, ctx) {
         const audio = document.getElementById('audio-player');
-        if (audio && (audio.paused || audio.ended)) {
-            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-            this.prevRatios = null;
-            return;
-        }
+        const isPaused = audio && (audio.paused || audio.ended);
         if (!data || data.length === 0) return;
+        const now = performance.now();
+        const elapsed = this.lastFrameTime === null ? 1000 / 60 : now - this.lastFrameTime;
+        this.lastFrameTime = now;
+        // Keep the release consistent across display refresh rates.
+        const release = Math.exp(-elapsed / 160);
         const width = ctx.canvas.width;
         const height = ctx.canvas.height;
         if (width === 0 || height === 0) return;
@@ -1272,13 +1274,14 @@ class LXStudioBarsAnimation {
             // 使用非线性感知对比度增强动态（弱音更低，强音直冲高处），形成跌宕起伏的错落律动
             const dynamicVal = Math.pow(rawVal, 1.32);
             const freqCurve = 0.90 + 0.15 * Math.sin(normX * Math.PI);
-            let targetRatio = Math.max(0, Math.min(1.0, dynamicVal * freqCurve * 1.05));
+            const targetRatio = isPaused ? 0 : Math.max(0, Math.min(1.0, dynamicVal * freqCurve * 1.05));
 
             // 平滑回落，避免视觉生硬闪烁
             const prev = this.prevRatios[i];
-            const currentRatio = targetRatio >= prev
+            let currentRatio = targetRatio >= prev
                 ? targetRatio
-                : prev * 0.83 + targetRatio * 0.17;
+                : prev * release + targetRatio * (1 - release);
+            if (isPaused && currentRatio < 0.002) currentRatio = 0;
             this.prevRatios[i] = currentRatio;
 
             const barH = currentRatio * height;
@@ -1351,60 +1354,17 @@ const musicVisualizer = (function () {
     /**
      * Standalone animation loop: used when Wave is bypassed, during initialization, or when rendering real/calibrated data.
      */
+    const fallbackBars = new WeakMap();
+
     function drawFallbackBars(ctx, width, height, themeColor, globalStyle, data) {
-        const isPlaying = audio && !audio.paused;
-        if (!isPlaying || audio.ended) {
-            ctx.clearRect(0, 0, width, height);
-            return;
+        let animation = fallbackBars.get(ctx.canvas);
+        if (!animation) {
+            animation = new LXStudioBarsAnimation({ globalStyle, themeColor });
+            fallbackBars.set(ctx.canvas, animation);
         }
-        const cssWidth = ctx.canvas.getBoundingClientRect().width || width;
-        const scale = width / cssWidth;
-        const numBars = globalStyle === 'blocks' ? Math.max(1, Math.floor(cssWidth / 12)) : Math.min(64, Math.max(16, Math.floor(width / 6.5)));
-        const barWidth = Math.max(2, (width / numBars) - 1.5);
-
-        // Check for real frequency spectrum data
-        let hasRealAudio = false;
-        if (data && data.length > 0 && isPlaying) {
-            let sum = 0;
-            const checkLimit = Math.min(64, data.length);
-            for (let i = 0; i < checkLimit; i++) sum += data[i];
-            if (sum > 20) hasRealAudio = true;
-        }
-
-        ctx.fillStyle = themeColor;
-        for (let i = 0; i < numBars; i++) {
-            let hRatio = 0;
-            if (hasRealAudio) {
-                // Map logarithmic/non-linear frequency bands to spectrum bars
-                const binIdx = Math.min(data.length - 1, Math.floor(Math.pow(i / numBars, 1.35) * (data.length * 0.72)));
-                const val = (data[binIdx] || 0) / 255;
-                hRatio = Math.max(0, Math.min(0.96, val * 1.18));
-            }
-            const barH = hRatio * height;
-            const x = i * (width / numBars);
-            const y = height - barH;
-
-            if (globalStyle === 'blocks') {
-                const blockSize = 6 * scale;
-                const blockGap = 3 * scale;
-                const totalBlocks = Math.floor(barH / (blockSize + blockGap));
-                for (let b = 0; b < totalBlocks; b++) {
-                    const by = height - (b + 1) * (blockSize + blockGap);
-                    const radius = Math.min(blockSize / 2, barWidth / 2);
-                    ctx.beginPath();
-                    ctx.arc(x + barWidth / 2, by + blockSize / 2, radius, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            } else {
-                ctx.beginPath();
-                if (typeof ctx.roundRect === 'function') {
-                    ctx.roundRect(x, y, barWidth, barH, [2, 2, 0, 0]);
-                } else {
-                    ctx.fillRect(x, y, barWidth, barH);
-                }
-                ctx.fill();
-            }
-        }
+        animation.globalStyle = globalStyle;
+        animation.themeColor = themeColor;
+        animation.draw(data, ctx);
     }
 
     function drawFallbackWave(ctx, width, height, themeColor, data) {
@@ -1941,15 +1901,7 @@ const musicVisualizer = (function () {
     }
 
     if (audio) {
-        // Wave may stop scheduling frames on pause, so clear the last spectrum immediately.
-        const clearPausedSpectrum = () => {
-            const s = window.settings || {};
-            if (footerCanvas && (s.footerVisualizerStyle || 'bars') === 'bars') {
-                footerCanvas.getContext('2d').clearRect(0, 0, footerCanvas.width, footerCanvas.height);
-            }
-        };
-        audio.addEventListener('pause', clearPausedSpectrum);
-        audio.addEventListener('ended', clearPausedSpectrum);
+        // Wave keeps drawing on pause, allowing the spectrum to decay to zero.
         const resumeAudioContext = () => {
             if (audioContext && audioContext.state === 'suspended') {
                 audioContext.resume().catch(() => {});
