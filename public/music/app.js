@@ -2077,7 +2077,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 为歌词按钮添加悬停恢复逻辑
+    // 为歌词收起按钮添加交互恢复逻辑（支持桌面端悬停与移动端触屏操作唤醒）
     const toggleLyricsBtn = document.getElementById('btn-toggle-lyrics');
     if (toggleLyricsBtn) {
         toggleLyricsBtn.addEventListener('mouseenter', () => {
@@ -2089,6 +2089,25 @@ document.addEventListener('DOMContentLoaded', () => {
             if (view && !view.classList.contains('translate-y-[100%]')) {
                 startToggleLyricsBtnTimer();
             }
+        });
+    }
+
+    // 移动端/桌面端屏幕操作时唤醒收起按钮并重置自动隐藏倒计时
+    const viewPlayerDetail = document.getElementById('view-player-detail');
+    if (viewPlayerDetail) {
+        const wakeUpLyricsBtn = () => {
+            if (!isLyricViewOpen) return;
+            const toggleBtn = document.getElementById('btn-toggle-lyrics');
+            if (toggleBtn) {
+                if (toggleBtn.classList.contains('faint')) {
+                    toggleBtn.classList.remove('faint');
+                }
+                startToggleLyricsBtnTimer();
+            }
+        };
+
+        ['touchstart', 'touchmove', 'click', 'mousemove'].forEach(evt => {
+            viewPlayerDetail.addEventListener(evt, wakeUpLyricsBtn, { passive: true });
         });
     }
 });
@@ -9325,36 +9344,65 @@ function syncSettingsUI(key = null, value = null) {
  * 应用播放页背景样式
  * @param {string} mode - 'blur', 'solid', 'dark'
  */
+function playerLuminance(rgb) {
+    return rgb.map(v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; })
+        .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+}
+function playerContrastColor(color, backgrounds) {
+    const source = (/^#[0-9a-f]{6}$/i.test(color) ? color : '#10b981').slice(1).match(/.{2}/g).map(v => parseInt(v, 16));
+    const bg = backgrounds.map(playerLuminance);
+    const target = bg.reduce((a, b) => a + b, 0) / bg.length > 0.4 ? 0 : 255;
+    for (let step = 0; step <= 100; step++) {
+        const rgb = source.map(v => Math.round(v + (target - v) * step / 100));
+        const lum = playerLuminance(rgb);
+        if (bg.every(v => (Math.max(lum, v) + 0.05) / (Math.min(lum, v) + 0.05) >= 4.5)) {
+            return '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+        }
+    }
+    return target ? '#ffffff' : '#000000';
+}
 function applyPlayerBackground(mode) {
     const detailBg = document.getElementById('view-player-detail');
     const bgCover = document.getElementById('detail-bg-cover');
     const bgOverlay = document.getElementById('player-detail-bg-overlay');
     if (!detailBg || !bgCover || !bgOverlay) return;
-    if (detailBg.dataset.appliedBackground === mode) return;
+    if (!['blur', 'solid', 'dark', 'aurora', 'midnight', 'paper'].includes(mode)) mode = 'blur';
     detailBg.dataset.appliedBackground = mode;
-
-    console.log(`[PlayerBackground] Applying style: ${mode}`);
-
-    // 重置默认状态
-    bgCover.style.display = 'block';
-    bgOverlay.className = 'absolute inset-0 t-bg-panel/30 backdrop-blur-3xl';
-    bgOverlay.style.backgroundColor = '';
-    bgOverlay.style.backdropFilter = '';
-    detailBg.style.backgroundColor = '';
-
+    const rootStyle = getComputedStyle(document.documentElement);
+    const panel = rootStyle.getPropertyValue('--bg-panel').trim() || '#1f2937';
+    const parse = hex => hex.replace('#', '').match(/.{2}/g).map(v => parseInt(v, 16));
+    // Conservative bounds include the brightest cover plus the subdued visualizer.
+    const styles = {
+        solid: [panel, [parse(panel)]],
+        dark: ['#000000', [[0, 0, 0], [31, 31, 31]]],
+        aurora: ['linear-gradient(135deg, #123c42, #24264d, #101827)', [[16, 24, 39], [63, 84, 99]]],
+        midnight: ['linear-gradient(155deg, #253551, #121826 60%, #080c14)', [[8, 12, 20], [64, 78, 102]]],
+        paper: ['linear-gradient(135deg, #f5eee2, #e4e8ef)', [[200, 204, 199], [255, 255, 255]]],
+        blur: ['rgba(12, 18, 28, 0.72)', [[9, 13, 20], [66, 70, 76]]]
+    };
+    const [background, samples] = styles[mode];
     if (mode === 'solid') {
-        bgCover.style.display = 'none';
-        bgOverlay.className = 'absolute inset-0 t-bg-panel';
-        bgOverlay.style.backdropFilter = 'none';
-    } else if (mode === 'dark') {
-        bgCover.style.display = 'none';
-        bgOverlay.className = 'absolute inset-0';
-        bgOverlay.style.backgroundColor = '#000000';
-        bgOverlay.style.backdropFilter = 'none';
+        const base = samples[0];
+        samples.push(base.map(v => Math.round(v * 0.88)), base.map(v => Math.round(v * 0.88 + 31)));
     }
-    // 'blur' 模式由上面的重置逻辑处理
+    bgCover.style.display = mode === 'blur' ? 'block' : 'none';
+    bgOverlay.className = 'absolute inset-0';
+    bgOverlay.style.background = background;
+    bgOverlay.style.backdropFilter = mode === 'blur' ? 'blur(60px)' : 'none';
+    detailBg.style.backgroundColor = '#0c121c';
+    const light = playerLuminance(samples[0]) > 0.4;
+    const normal = playerContrastColor(light ? '#475569' : '#b8c4d4', samples);
+    const active = playerContrastColor(rootStyle.getPropertyValue('--c-500').trim(), samples);
+    detailBg.style.setProperty('--player-lyric', normal);
+    detailBg.style.setProperty('--player-active', active);
+    detailBg.style.setProperty('--text-main', light ? '#172033' : '#f8fafc');
+    detailBg.style.setProperty('--text-muted', normal);
+    detailBg.style.setProperty('--text-dim', normal);
+    if (!detailBg._backgroundObserver) {
+        detailBg._backgroundObserver = new MutationObserver(() => applyPlayerBackground(detailBg.dataset.appliedBackground));
+        detailBg._backgroundObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-appearance', 'class'] });
+    }
 }
-
 // ========== 缓存统计与重置逻辑 ==========
 
 async function calcStorageUsage() {
@@ -10105,6 +10153,10 @@ function toggleLyrics(fromPopState = false) {
         }
     } else {
         view.classList.add('translate-y-[100%]', 'opacity-0');
+        if (toggleLyricsBtnTimeout) clearTimeout(toggleLyricsBtnTimeout);
+        const toggleBtn = document.getElementById('btn-toggle-lyrics');
+        if (toggleBtn) toggleBtn.classList.remove('faint');
+
         setTimeout(() => {
             view.classList.add('hidden');
             // Notify visualizer to switch back to footer
@@ -17354,6 +17406,8 @@ function toggleDetailCover() {
     const lyricsWrapper = document.getElementById('lyrics-wrapper');
     const lyricContent = document.getElementById('lyric-content');
     const detailTitle = document.getElementById('detail-title');
+    const viewPlayer = document.getElementById('view-player-detail');
+    const nowPlayingHeader = document.getElementById('now-playing-header');
 
     // 获取标题区域父容器
     const titleParent = lyricsWrapper ? lyricsWrapper.querySelector('div:first-child') : null;
@@ -17367,6 +17421,10 @@ function toggleDetailCover() {
         // --- 隐藏封面 ---
         cover.style.display = 'none'; // 彻底移除渲染占位
         cover.classList.add('opacity-0', 'scale-90', 'border-0');
+        if (viewPlayer) viewPlayer.classList.add('cover-collapsed');
+        if (nowPlayingHeader && window.innerWidth <= 1024) {
+            nowPlayingHeader.classList.add('opacity-0', 'pointer-events-none');
+        }
 
         // 隐藏封面时，不再需要那么大的 pt-8/md:pt-32。
         // 保留 md:pt-10 左右以避开顶部 Now Playing 即可，让歌词有更多纵向空间
@@ -17401,6 +17459,10 @@ function toggleDetailCover() {
         // --- 显示封面 ---
         cover.style.display = 'block'; // 恢复显示
         cover.classList.remove('opacity-0', 'scale-90', 'border-0');
+        if (viewPlayer) viewPlayer.classList.remove('cover-collapsed');
+        if (nowPlayingHeader) {
+            nowPlayingHeader.classList.remove('opacity-0', 'pointer-events-none');
+        }
 
         container.classList.remove('has-centered-lyrics');
 
@@ -17452,7 +17514,7 @@ function startExpandBtnTimer() {
     }, 3000);
 }
 
-// 启动歌词按钮淡化计时器
+// 启动歌词收起按钮淡化/隐藏计时器
 function startToggleLyricsBtnTimer() {
     const toggleBtn = document.getElementById('btn-toggle-lyrics');
     if (!toggleBtn) return;
@@ -17460,16 +17522,13 @@ function startToggleLyricsBtnTimer() {
     if (toggleLyricsBtnTimeout) clearTimeout(toggleLyricsBtnTimeout);
     toggleBtn.classList.remove('faint');
 
-    // 移动端/触摸屏永远不淡化退出按钮，保持绝对清晰可用
-    if (window.innerWidth < 1024) return;
-
     toggleLyricsBtnTimeout = setTimeout(() => {
-        // 只有当歌词页面处于显示状态且在桌面端才淡化
+        // 只有当歌词页面处于显示状态才淡化/隐藏
         const view = document.getElementById('view-player-detail');
         if (view && !view.classList.contains('translate-y-[100%]')) {
             toggleBtn.classList.add('faint');
         }
-    }, 4000);
+    }, 3500);
 }
 
 // 页面可见性恢复守护：防止切至后台重开后音调异常与 AudioContext 挂起

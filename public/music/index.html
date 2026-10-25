@@ -3036,7 +3036,7 @@
                                                 <i class="fas fa-image mr-2 text-emerald-500"></i> 歌曲播放页背景
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
-                                                    <span class="setting-tooltip-content">设置歌曲播放详情页背景的显示风格</span>
+                                                    <span class="setting-tooltip-content">选择封面虚化、极光渐变、午夜渐变、暖雾纸感、纯色或黑色背景。自动检查歌词与背景的对比度，颜色接近时调整歌词颜色，并尽量保留主题色；普通歌词、逐字歌词及翻译同步适配。封面虚化附加柔和遮罩，避免亮色封面影响阅读。</span>
                                                 </span>
                                             </h4>
                                         </div>
@@ -3044,6 +3044,9 @@
                                             onchange="updateSetting('playerBackground', this.value)"
                                             class="lm-select !w-full !py-2">
                                             <option value="blur">封面虚化</option>
+                                            <option value="aurora">极光渐变</option>
+                                            <option value="midnight">午夜渐变</option>
+                                            <option value="paper">暖雾纸感</option>
                                             <option value="solid">纯色背景</option>
                                             <option value="dark">黑色背景</option>
                                         </select>
@@ -4015,20 +4018,20 @@
         </div>
 
         <!-- Navbar / Controls -->
-        <div onclick="event.stopPropagation()"
+        <div id="player-detail-navbar" onclick="event.stopPropagation()"
             class="absolute top-0 inset-x-0 z-30 flex items-center justify-between px-4 md:px-6 h-16 md:h-20 pt-[env(safe-area-inset-top,0px)] pointer-events-none transition-all duration-300">
-            <button onclick="toggleLyrics()" id="btn-toggle-lyrics" title="收起歌词 / 返回"
-                class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/80 hover:t-bg-panel rounded-full px-3.5 py-1.5 h-10 flex items-center justify-center gap-1.5 transition-all shadow-md backdrop-blur-md border border-white/20 active:scale-95 cursor-pointer">
-                <i class="fas fa-chevron-down text-base"></i>
-                <span class="text-xs font-semibold md:hidden">收起</span>
-            </button>
-            <div class="flex-col items-center flex">
+            <div class="detail-nav-left flex items-center justify-start flex-1 pointer-events-none">
+                <button onclick="toggleLyrics()" id="btn-toggle-lyrics" title="收起歌词 / 返回"
+                    class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/80 hover:t-bg-panel rounded-full w-10 h-10 flex items-center justify-center transition-all duration-300 shadow-md backdrop-blur-md border border-white/20 active:scale-95 cursor-pointer">
+                    <i class="fas fa-chevron-down text-base"></i>
+                </button>
+            </div>
+            <div id="now-playing-header" class="detail-nav-center flex flex-col items-center flex-shrink-0 pointer-events-none transition-all duration-300">
                 <h2 class="text-xs md:text-sm font-bold text-gray-400 tracking-widest uppercase">Now Playing</h2>
             </div>
-            <button onclick="toggleLyrics()" id="btn-close-lyrics" title="关闭歌词 / 返回"
-                class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/80 hover:t-bg-panel rounded-full w-10 h-10 flex items-center justify-center transition-all shadow-md backdrop-blur-md border border-white/20 active:scale-95 cursor-pointer">
-                <i class="fas fa-times text-base"></i>
-            </button>
+            <div class="detail-nav-right flex items-center justify-end flex-1 pointer-events-none">
+                <!-- 右侧占位保持 Now Playing 绝对水平居中 -->
+            </div>
         </div>
 
         <!-- Main Content -->

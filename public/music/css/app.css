@@ -813,6 +813,15 @@ aside {
     background-color: rgba(255, 255, 255, 0.9) !important;
 }
 
+/* 移动端收起按钮不操作时完全隐藏并禁用触控 */
+@media (max-width: 1024px) {
+    #btn-toggle-lyrics.faint {
+        opacity: 0 !important;
+        pointer-events: none !important;
+        transform: scale(0.9) !important;
+    }
+}
+
 .custom-scrollbar::-webkit-scrollbar {
     width: 5px;
 }
@@ -2086,4 +2095,48 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     background-color: rgba(16, 185, 129, 0.15);
 }
 
+/* 详情页导航栏左右对称及 Now Playing 居中 */
+#player-detail-navbar .detail-nav-left,
+#player-detail-navbar .detail-nav-right {
+    flex: 1 1 0%;
+    display: flex;
+    align-items: center;
+}
 
+#player-detail-navbar .detail-nav-left {
+    justify-content: flex-start;
+}
+
+#player-detail-navbar .detail-nav-right {
+    justify-content: flex-end;
+}
+
+#player-detail-navbar .detail-nav-center {
+    flex: 0 0 auto;
+}
+
+/* 移动端收起封面时，标题上移至顶部，隐藏 Now Playing 避免与歌曲标题重叠 */
+@media (max-width: 1024px) {
+    #view-player-detail.cover-collapsed #now-playing-header {
+        opacity: 0 !important;
+        pointer-events: none !important;
+        visibility: hidden !important;
+    }
+}
+
+
+
+
+/* Player-local contrast palette, independent of the surrounding application. */
+#view-player-detail .lyric-line { color: var(--player-lyric, #b8c4d4); opacity: 1; }
+#view-player-detail .lyric-line.active,
+#view-player-detail .lyric-line.active .plain-lyric,
+#view-player-detail .lyric-line.active .extended { color: var(--player-active, #34d399); opacity: 1; }
+#view-player-detail .lyric-line .extended { opacity: 1; }
+#view-player-detail .lyric-line.active .word-item,
+#view-player-detail .lyric-line.has-words.active .extended .ext-item {
+    background-image: linear-gradient(to right, var(--player-active, #34d399) var(--word-progress, 0%), var(--player-lyric, #b8c4d4) var(--word-progress, 0%));
+}
+#view-player-detail .lyric-line.has-words.active .extended { color: var(--player-lyric, #b8c4d4); }
+#view-player-detail .lyric-line.scroll-target { color: var(--player-active, #34d399); }
+#view-player-detail #detail-visualizer { opacity: 0.12; }
