@@ -76,7 +76,7 @@ const setBoolConfig = <K extends keyof LX.Config>(key: K, val?: string) => {
         }
         return false
       }),
-  ].map(([e, v]) => `${e}: ${v as string}`)
+  ].map(([e, v]) => `${e}: [configured]`)
   if (envLog.length) console.log(`Load env: \n  ${envLog.join('\n  ')}`)
 }
 
@@ -239,7 +239,7 @@ const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string
     let value = String(v)
     if (envParamKeys.includes(envKey)) {
       if (envParams[envKey] == null) {
-        envLog.push(`${envKey}: ${value}`)
+        envLog.push(`${envKey}: [configured]`)
         envParams[envKey] = value
       }
     } else if (envKey.startsWith('LX_USER_') && value) {
@@ -249,7 +249,7 @@ const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string
           name,
           password: value,
         })
-        envLog.push(`${envKey}: ${value}`)
+        envLog.push(`${envKey}: [configured]`)
       }
     }
   }
@@ -491,10 +491,6 @@ if (envParams.SUBSONIC_QUALITY_ENABLED !== undefined) {
 if (envParams.SUBSONIC_QUALITY_PRIORITY) {
   global.lx.config['subsonic.quality.priority'] = envParams.SUBSONIC_QUALITY_PRIORITY.split(',').map((s: string) => s.trim()).filter(Boolean).join(',')
 }
-if (envParams.SUBSONIC_QUALITY_CLIENT_CAP_MODE) {
-  const mode = envParams.SUBSONIC_QUALITY_CLIENT_CAP_MODE as any
-  if (mode === 'hard' || mode === 'soft') global.lx.config['subsonic.quality.clientCapMode'] = mode
-}
 if (envParams.SUBSONIC_SOURCE_PRIORITY) {
   global.lx.config['subsonic.source.priority'] = envParams.SUBSONIC_SOURCE_PRIORITY.split(',').map((s: string) => s.trim()).filter(Boolean).join(',')
 }
@@ -640,7 +636,7 @@ const checkUserConfig = (users: LX.Config['users']) => {
 
   for (const user of users) {
     if (userNames.includes(user.name)) exit('User name duplicate: ' + user.name)
-    if (!allowDuplicatePasswords && passwords.includes(user.password)) exit('User password duplicate: ' + user.password)
+    if (!allowDuplicatePasswords && passwords.includes(user.password)) exit('User password duplicate (value redacted)')
     userNames.push(user.name)
     passwords.push(user.password)
   }
@@ -684,7 +680,7 @@ if (fs.existsSync(usersJsonPath)) {
 checkUserConfig(global.lx.config.users)
 
 console.log(`[用户] 已注册用户:
-${global.lx.config.users.map(user => `  ${user.name}: ${user.password}`).join('\n') || '  (暂无用户)'}
+${global.lx.config.users.map(user => `  ${user.name}`).join('\n') || '  (暂无用户)'}
 `)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { getUserDirname } = require('@/user')
@@ -832,7 +828,7 @@ if (webdavSync.isConfigured()) {
 
       // 3. 重新加载所有自定义源 (解决前端显示加载中/旧源问题)
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { initUserApis } = require('@/server/userApi')
+      const { initUserApis } = require('@/server/sources/userApi')
       console.log('[WebDAV] 正在重新初始化自定义源...')
       await initUserApis()
     }

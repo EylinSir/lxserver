@@ -35,9 +35,13 @@ This project features a powerful built-in **Web Player**, allowing you to enjoy 
 
 ## ✨ Web Player Key Features
 
+Chromecast support is available in Cast-enabled desktop/Android Chrome over HTTPS. Select the Cast button beside the playback controls to transfer music to a receiver. See [requirements and usage](docs/chromecast/requirements.md). Safari/iPhone playback retains AirPlay.
+
 ### 1. Modern Interface & Full Playback Controls
 
 Featuring a clean, responsive UI with automatic Light/Dark mode and full-screen lyrics mode. The integrated player bar offers sound quality switching, playback speed, and sleep timers.
+
+Player and About show the package version and source build fingerprint (for example, `v2.1.3 · build 123abcd`), so custom changes within the same release remain identifiable. Build/start scripts refresh this metadata from `package.json` and the sources. Unavailable metadata is reported explicitly instead of displaying a fictitious `v1.0.0`.
 
 <p align="center">
   <img src="md/player.png" width="800" alt="Web Player Interface">
@@ -310,7 +314,7 @@ The configuration file is persisted by default in the data directory at `data/co
 | `SUBSONIC_LEADERBOARD_SOURCE` | `subsonic.leaderboardSource` | Subsonic public leaderboard default platform (single platform, e.g., `tx`, `wy`) | `tx` |
 | `SUBSONIC_LYRIC_TRANSLATION` | `subsonic.lyricTranslation` | Include translations in Subsonic lyrics | `true` |
 | `SUBSONIC_CACHE_ON_PLAY` | `subsonic.cacheOnPlay` | Trigger server caching on Subsonic playback (cached to user dir) | `false` |
-| `SUBSONIC_PLAY_CACHE_FIRST` | `subsonic.playCacheFirst` | Prefer streaming local cached/downloaded files on Subsonic playback | `true` |
+| `SUBSONIC_PLAY_CACHE_FIRST` | `subsonic.playCacheFirst` | Prefer streaming local cached/downloaded files on Subsonic playback (default off, to avoid server egress) | `false` |
 | `SUBSONIC_QUALITY_ENABLED` | `subsonic.quality.enabled` | Enable Subsonic audio quality selection | `true` |
 | `SUBSONIC_QUALITY_PRIORITY` | `subsonic.quality.priority` | Subsonic audio quality priority order (e.g. `flac,320k,128k`) | `flac,320k,128k` |
 | `ARTIST_MAX_FETCH_PAGES` | `artist.maxFetchPages` | Maximum fetch pages for artist tracks | `20` |

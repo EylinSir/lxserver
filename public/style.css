@@ -2739,20 +2739,30 @@ select.form-input option:checked {
 .modal-content {
     width: 520px;
     max-width: 92%;
-    padding: 2.25rem;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    padding: 2rem 2.25rem;
+    box-sizing: border-box;
     border-radius: 20px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
     animation: fadeInUp 0.3s ease-out;
 }
 
+/* 用户配置面板内容项较多，宽度适当放宽以提供更好的排版 */
+#rename-user-modal .modal-content {
+    width: 560px;
+}
+
 .modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.25rem;
     padding-bottom: 1rem;
     border-bottom: 1px solid var(--glass-border);
+    flex-shrink: 0;
 }
 
 .modal-header h3 {
@@ -2786,7 +2796,29 @@ select.form-input option:checked {
 
 .modal-body {
     color: var(--text-primary);
-    margin-bottom: 1.75rem;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 6px;
+    margin-right: -4px;
+    overscroll-behavior: contain;
+}
+
+.modal-body::-webkit-scrollbar {
+    width: 6px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.32);
 }
 
 .modal-footer {
@@ -2796,6 +2828,7 @@ select.form-input option:checked {
     margin-top: 1.25rem;
     padding-top: 1.25rem;
     border-top: 1px solid var(--glass-border);
+    flex-shrink: 0;
 }
 
 .modal-footer .btn-primary,
@@ -4493,6 +4526,21 @@ select.form-input option:checked {
     animation: pulse-dot-active 2s infinite;
 }
 
+.status-badge.disabled {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.status-badge.disabled::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    background: #ef4444;
+    border-radius: 50%;
+    opacity: 0.6;
+}
+
 @keyframes pulse-dot-active {
     0% {
         transform: scale(1);
@@ -4508,6 +4556,36 @@ select.form-input option:checked {
         transform: scale(1);
         opacity: 1;
     }
+}
+
+/* 用户同步账号在线状态指示小圆点 */
+.user-online-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-left: 8px;
+    margin-right: -2px;
+    position: relative;
+    cursor: help;
+    transition: all 0.3s ease;
+}
+
+.user-online-dot.online {
+    background: #10b981;
+    box-shadow: 0 0 6px #10b981, 0 0 10px rgba(16, 185, 129, 0.4);
+    animation: livePulse 2s infinite;
+}
+
+.user-online-dot.offline {
+    background: #ef4444;
+    box-shadow: 0 0 5px rgba(239, 68, 68, 0.35);
+    opacity: 0.7;
+}
+
+.user-online-dot:hover {
+    transform: scale(1.25);
+    opacity: 1;
 }
 
 /* 密码列样式 */
@@ -4611,9 +4689,14 @@ input:-webkit-autofill:active {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    /* 头像和文字之间的间距 */
+    overflow: visible;
+    padding-left: 2px;
+}
+
+.user-name-text {
     overflow: hidden;
-    /* 防止文字溢出 */
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .user-avatar {
@@ -5616,8 +5699,10 @@ input:-webkit-autofill:active {
     /* 用户管理卡片精修 — 紧凑横向布局 */
     .user-row {
         display: grid;
-        grid-template: "check info actions" auto "check pwd  actions" auto / 32px 1fr auto !important;
-        gap: 0.4rem 0.75rem !important;
+        grid-template: 
+            "check info status actions" auto 
+            "check pwd  pwd    actions" auto / 32px 1fr auto auto !important;
+        gap: 0.4rem 0.6rem !important;
         padding: 0.875rem 1rem !important;
         margin: 0 0.75rem 0.75rem !important;
         align-items: center;
@@ -5641,6 +5726,7 @@ input:-webkit-autofill:active {
         align-items: center !important;
         gap: 0.6rem !important;
         margin-top: 0 !important;
+        min-width: 0;
     }
 
     .user-avatar {
@@ -5673,7 +5759,18 @@ input:-webkit-autofill:active {
     }
 
     .user-row .col-status {
-        display: none !important;
+        grid-area: status !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+    }
+
+    .user-row .col-status .status-badge {
+        padding: 0.22rem 0.55rem !important;
+        font-size: 0.7rem !important;
+        border-radius: 8px !important;
+        gap: 0.35rem !important;
+        white-space: nowrap !important;
     }
 
     .user-row .col-actions {

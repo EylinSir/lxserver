@@ -104,7 +104,8 @@ class App {
         document.getElementById('refresh-users-btn')?.addEventListener('click', async () => {
             try {
                 // 在重载前先保存配置
-                await this.saveConfig(true);
+                const restarting = await this.saveConfig(true);
+                if (restarting) return;
                 await this.request('/api/admin/reload', { method: 'POST' });
                 this.loadUsers();
                 this.loadDashboard();
@@ -166,8 +167,13 @@ class App {
             e.preventDefault();
             this.saveConfig();
         });
+        document.getElementById('subsonic-form')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveSubsonicConfig();
+        });
         document.getElementById('reload-config-btn')?.addEventListener('click', async () => {
-            await this.saveConfig(true);
+            const restarting = await this.saveConfig(true);
+            if (restarting) return;
             this.loadConfig();
         });
         document.querySelector('input[name="user.enablePublicFavorites"]')?.addEventListener('change', () => {
@@ -494,6 +500,7 @@ class App {
             config: '系统配置',
             logs: '系统日志',
             webdav: 'WebDAV同步',
+            subsonic: 'Subsonic 配置',
             files: '文件管理',
             snapshots: '快照管理',
             about: '关于'
@@ -528,6 +535,9 @@ class App {
                 } catch (e) {
                     console.error('Failed to check webdav status:', e);
                 }
+                break;
+            case 'subsonic':
+                this.loadSubsonicConfig();
                 break;
             case 'backups':
             case 'snapshots':
@@ -578,11 +588,14 @@ class App {
             if (!response.ok) throw new Error('Failed to load about.md');
             const text = await response.text();
 
-            // Render Markdown or HTML directly
             const version = (window.CONFIG && window.CONFIG.version) || 'v1.0.0';
             const buildHash = (window.CONFIG && window.CONFIG.buildHash) || 'unknown';
             let content = text.replace(/{{version}}/g, version);
             content = content.replace(/{{buildHash}}/g, buildHash);
+
+            const pPath = (window.CONFIG && window.CONFIG['player.path']) ?? '/';
+            const targetPPath = String(pPath).trim() === '' ? '/' : String(pPath).trim();
+            content = content.replace(/href="\/music"/g, `href="${targetPPath}"`);
 
             if (content.trim().startsWith('<style') || content.trim().startsWith('<div') || content.trim().startsWith('<')) {
                 container.innerHTML = content;
@@ -625,11 +638,28 @@ class App {
                 loginTitleEl.textContent = window.CONFIG.serverName;
             }
         }
-        // 初始化播放器链接
-        const navPlayerLink = document.getElementById('nav-player-link');
-        if (navPlayerLink && window.CONFIG && window.CONFIG['player.path']) {
-            navPlayerLink.href = window.CONFIG['player.path'];
+        // 初始化动态播放器链接 (包括侧边栏和登录面板)
+        this.updatePlayerLinks();
+    }
+
+    updatePlayerLinks(playerPath) {
+        if (playerPath === undefined || playerPath === null) {
+            playerPath = (window.CONFIG && window.CONFIG['player.path']) ?? '/';
         }
+        let target = String(playerPath).trim();
+        if (target === '') target = '/';
+        else if (!target.startsWith('/') && !target.startsWith('http://') && !target.startsWith('https://')) {
+            target = '/' + target;
+        }
+
+        const navPlayerLink = document.getElementById('nav-player-link');
+        if (navPlayerLink) navPlayerLink.href = target;
+
+        const loginPlayerLink = document.getElementById('login-player-link');
+        if (loginPlayerLink) loginPlayerLink.href = target;
+
+        const aboutPlayerLink = document.querySelector('.about-actions a[href*="music"], .about-actions a.about-btn-primary');
+        if (aboutPlayerLink) aboutPlayerLink.href = target;
     }
 
     async loadDashboard() {
@@ -1200,6 +1230,7 @@ class App {
                     <input type="checkbox" class="user-checkbox" data-index="${index}" onchange="app.updateUserBatchBtn()">
                 </div>
                 <div class="col-name">
+                    <span class="user-online-dot ${user.online ? 'online' : 'offline'}" title="${user.online ? `同步连接：在线 (${user.onlineDevices} 台设备)` : '同步连接：离线'}"></span>
                     <div class="user-avatar" style="background-color: ${stringToColor(user.name)}">
                         <span>${this.escapeHtml(user.name.charAt(0).toUpperCase())}</span>
                     </div>
@@ -1227,7 +1258,7 @@ class App {
                     </button>
                 </div>
                 <div class="col-status">
-                    <span class="status-badge active">活跃</span>
+                    <span class="status-badge ${user.disabled ? 'disabled' : 'active'}">${user.disabled ? '已禁用' : '活跃'}</span>
                 </div>
                 <div class="col-actions">
                     <button class="btn-delete" onclick="app.deleteUser(${index})" title="删除用户">
@@ -1514,12 +1545,14 @@ class App {
         const writeToggle = document.getElementById('user-custom-dir-write-toggle');
         const statusEl = document.getElementById('user-custom-dir-status');
         const autoDownloadToggle = document.getElementById('user-auto-download-toggle');
+        const disabledToggle = document.getElementById('user-disabled-toggle');
 
         if (toggle) toggle.checked = user.enableCustomMusicDir === true;
         if (dirInput) dirInput.value = user.customMusicDir || '';
         if (operateToggle) operateToggle.checked = user.allowOperateCustomMusicDir === true;
         if (writeToggle) writeToggle.checked = user.allowWriteCustomMusicDir === true;
         if (autoDownloadToggle) autoDownloadToggle.checked = user.enableAutoDownload === true;
+        if (disabledToggle) disabledToggle.checked = user.disabled === true;
         if (statusEl) statusEl.textContent = '';
 
         if (user.enableCustomMusicDir) {
@@ -1542,6 +1575,7 @@ class App {
         const allowOperateCustomDir = document.getElementById('user-custom-dir-operate-toggle')?.checked || false;
         const allowWriteCustomDir = document.getElementById('user-custom-dir-write-toggle')?.checked || false;
         const enableAutoDownload = document.getElementById('user-auto-download-toggle')?.checked || false;
+        const disabled = document.getElementById('user-disabled-toggle')?.checked || false;
 
         if (!newName) {
             showInfo('请填写用户名');
@@ -1556,6 +1590,7 @@ class App {
                 allowOperateCustomMusicDir: allowOperateCustomDir,
                 allowWriteCustomMusicDir: allowWriteCustomDir,
                 enableAutoDownload: enableAutoDownload,
+                disabled: disabled,
             };
             if (newName !== this.editingUser) {
                 bodyData.newName = newName;
@@ -2614,9 +2649,7 @@ class App {
             if (form.elements['system.allowUnsafeVM']) {
                 form.elements['system.allowUnsafeVM'].checked = config['system.allowUnsafeVM'] === true;
             }
-            if (form.elements['singer.sourcePriority']) {
-                form.elements['singer.sourcePriority'].value = config['singer.sourcePriority'] || 'tx,wy';
-            }
+
             form.elements['admin.password'].value = config['admin.password'] || '';
 
             // Web播放器配置
@@ -2686,146 +2719,8 @@ class App {
                 form.elements['player.path'].value = pPath === '' ? '/' : pPath;
             }
 
-            // [新增] 同时更新侧边栏链接
-            const navPlayerLink = document.getElementById('nav-player-link');
-            if (navPlayerLink) navPlayerLink.href = (config['player.path'] === '' ? '/' : (config['player.path'] ?? '/'));
-
-            // Subsonic 配置
-            if (form.elements['subsonic.enable']) {
-                form.elements['subsonic.enable'].checked = config['subsonic.enable'] === true;
-            }
-            if (form.elements['subsonic.path']) {
-                form.elements['subsonic.path'].value = config['subsonic.path'] || '/rest';
-            }
-            if (form.elements['subsonic.enableDebug']) {
-                form.elements['subsonic.enableDebug'].checked = config['subsonic.enableDebug'] === true;
-            }
-            if (form.elements['subsonic.port']) {
-                form.elements['subsonic.port'].value = config['subsonic.port'] || 0;
-            }
-            // Subsonic 独立端口开关：port>0 视为开启，切换端口输入框显隐
-            const standaloneToggle = document.getElementById('subsonic-standalone-toggle');
-            const standaloneFields = document.getElementById('subsonic-standalone-fields');
-            const portErrEl = document.getElementById('subsonic-port-error');
-            if (standaloneToggle && standaloneFields) {
-                const enabled = (parseInt(config['subsonic.port']) || 0) > 0;
-                standaloneToggle.checked = enabled;
-                standaloneFields.classList.toggle('hidden', !enabled);
-                standaloneToggle.onchange = () => {
-                    const on = standaloneToggle.checked;
-                    standaloneFields.classList.toggle('hidden', !on);
-                    const portInput = form.elements['subsonic.port'];
-                    if (on && (!portInput.value || parseInt(portInput.value) === 0)) {
-                        portInput.value = 4050;
-                    } else if (!on) {
-                        portInput.value = 0;
-                    }
-                    if (portErrEl && !on) {
-                        portErrEl.style.display = 'none';
-                    }
-                };
-            }
-            if (portErrEl) {
-                const currentPort = parseInt(config['subsonic.port']) || 0;
-                if (config.subsonicPortConflict && config.subsonicPortConflict.port === currentPort && currentPort > 0) {
-                    portErrEl.textContent = `⚠️ 独立端口 ${currentPort} 启动失败（${config.subsonicPortConflict.error || '端口已被占用'}），配置未生效，请更换端口后保存并重启服务器。`;
-                    portErrEl.style.display = 'block';
-                } else {
-                    portErrEl.style.display = 'none';
-                }
-            }
-            if (form.elements['subsonic.onlineSearch']) {
-                form.elements['subsonic.onlineSearch'].checked = config['subsonic.onlineSearch'] !== false;
-            }
-            if (form.elements['subsonic.onlineSearchMode']) {
-                form.elements['subsonic.onlineSearchMode'].value = config['subsonic.onlineSearchMode'] || 'fallback';
-            }
-            if (form.elements['subsonic.onlineSearchSources']) {
-                const searchSources = config['subsonic.onlineSearchSources'] || 'wy,tx,kw,kg,mg';
-                form.elements['subsonic.onlineSearchSources'].value = searchSources;
-                this.updateSearchSourcesTagUI(searchSources);
-            }
-            if (form.elements['subsonic.publicLeaderboards']) {
-                form.elements['subsonic.publicLeaderboards'].checked = config['subsonic.publicLeaderboards'] === true;
-            }
-            if (form.elements['subsonic.leaderboardSource']) {
-                const lbSource = config['subsonic.leaderboardSource'] || 'tx';
-                form.elements['subsonic.leaderboardSource'].value = lbSource;
-                this.updateLeaderboardSourceTagUI(lbSource);
-            }
-            if (form.elements['subsonic.sharedListMode']) {
-                const mode = config['subsonic.sharedListMode'] || 'leaderboard';
-                form.elements['subsonic.sharedListMode'].value = mode;
-                this.updateTagGroupActive('tag-group-shared-mode', mode);
-            }
-            if (form.elements['subsonic.sharedListSort']) {
-                const sort = config['subsonic.sharedListSort'] || 'hot';
-                form.elements['subsonic.sharedListSort'].value = sort;
-                this.updateTagGroupActive('tag-group-shared-sort', sort);
-            }
-            this.toggleSubsonicLeaderboardVisibility();
-            if (form.elements['subsonic.lyricTranslation']) {
-                form.elements['subsonic.lyricTranslation'].checked = config['subsonic.lyricTranslation'] !== false;
-            }
-            if (form.elements['subsonic.cacheOnPlay']) {
-                form.elements['subsonic.cacheOnPlay'].checked = config['subsonic.cacheOnPlay'] === true;
-            }
-            if (form.elements['subsonic.playCacheFirst']) {
-                form.elements['subsonic.playCacheFirst'].checked = config['subsonic.playCacheFirst'] !== false;
-            }
-
-            // 不喜欢 / 评分联动
-            if (form.elements['subsonic.dislikeRating'] !== undefined) {
-                form.elements['subsonic.dislikeRating'].value = String(config['subsonic.dislikeRating'] ?? 1);
-            }
-            if (form.elements['subsonic.hideDisliked']) {
-                form.elements['subsonic.hideDisliked'].checked = config['subsonic.hideDisliked'] !== false;
-            }
-            if (form.elements['subsonic.dislikeCrossSource']) {
-                form.elements['subsonic.dislikeCrossSource'].checked = config['subsonic.dislikeCrossSource'] === true;
-            }
-            if (form.elements['subsonic.dislikeNoRecommend']) {
-                form.elements['subsonic.dislikeNoRecommend'].checked = config['subsonic.dislikeNoRecommend'] !== false;
-            }
-            if (form.elements['subsonic.dislikeDuetMode']) {
-                form.elements['subsonic.dislikeDuetMode'].value = config['subsonic.dislikeDuetMode'] || 'any';
-            }
-            if (form.elements['subsonic.dislikeNormalizeName']) {
-                form.elements['subsonic.dislikeNormalizeName'].checked = config['subsonic.dislikeNormalizeName'] !== false;
-            }
-            if (form.elements['subsonic.dislikeRequireSinger']) {
-                form.elements['subsonic.dislikeRequireSinger'].checked = config['subsonic.dislikeRequireSinger'] !== false;
-            }
-            if (form.elements['subsonic.linkRatingToDislike']) {
-                form.elements['subsonic.linkRatingToDislike'].checked = config['subsonic.linkRatingToDislike'] === true;
-            }
-            if (form.elements['subsonic.linkDislikeToRating']) {
-                form.elements['subsonic.linkDislikeToRating'].checked = config['subsonic.linkDislikeToRating'] === true;
-            }
-
-            // 音质 / 源优选
-            if (form.elements['subsonic.quality.enabled']) {
-                form.elements['subsonic.quality.enabled'].checked = config['subsonic.quality.enabled'] !== false;
-            }
-            if (form.elements['subsonic.quality.priority']) {
-                const qVal = config['subsonic.quality.priority'] || 'flac,320k,128k';
-                form.elements['subsonic.quality.priority'].value = qVal;
-                this.updateQualityPriorityTagUI(qVal);
-            }
-            if (form.elements['subsonic.quality.clientCapMode']) {
-                form.elements['subsonic.quality.clientCapMode'].value = config['subsonic.quality.clientCapMode'] || 'soft';
-            }
-            if (form.elements['subsonic.source.priority']) {
-                const sVal = config['subsonic.source.priority'] || 'kw,tx,wy,mg,kg';
-                form.elements['subsonic.source.priority'].value = sVal;
-                this.updateSourcePriorityTagUI(sVal);
-            }
-            if (form.elements['subsonic.source.crossPlatform']) {
-                form.elements['subsonic.source.crossPlatform'].checked = config['subsonic.source.crossPlatform'] !== false;
-            }
-            if (form.elements['subsonic.source.autoSwitchCustom']) {
-                form.elements['subsonic.source.autoSwitchCustom'].checked = config['subsonic.source.autoSwitchCustom'] !== false;
-            }
+            // 动态同步更新所有播放器链接 (侧边栏、登录面板等)
+            this.updatePlayerLinks(config['player.path']);
 
             // 自定义歌曲目录配置
             if (form.elements['user.enableCustomMusicDir']) {
@@ -3188,6 +3083,33 @@ class App {
         }
     }
 
+    toggleHelp(el) {
+        const text = el.getAttribute('data-help') || ''
+        const existing = document.querySelector('.help-pop')
+        if (existing) {
+            if (existing._owner === el) { existing.remove(); return }
+            existing.remove()
+        }
+        if (!text) return
+        const pop = document.createElement('div')
+        pop.className = 'help-pop'
+        pop._owner = el
+        pop.textContent = text
+        document.body.appendChild(pop)
+        const r = el.getBoundingClientRect()
+        pop.style.top = (window.scrollY + r.bottom + 6) + 'px'
+        pop.style.left = (window.scrollX + r.left) + 'px'
+        const pr = pop.getBoundingClientRect()
+        if (pr.right > window.innerWidth - 8) pop.style.left = (window.scrollX + r.left - pr.width + r.width) + 'px'
+        if (pr.bottom > window.innerHeight - 8) pop.style.top = (window.scrollY + r.top - pr.height - 6) + 'px'
+        setTimeout(() => {
+            const onDocClick = (e) => {
+                if (!pop.contains(e.target) && e.target !== el) { pop.remove(); document.removeEventListener('click', onDocClick) }
+            }
+            document.addEventListener('click', onDocClick)
+        }, 0)
+    }
+
     async saveConfig(silent = false) {
         if (!this.configLoaded) return;
         const form = document.getElementById('config-form');
@@ -3268,43 +3190,13 @@ class App {
             'snapshot.backupPath': (formData.get('snapshot.backupPath') || '').trim(),
             'admin.path': adminPath,
             'player.path': playerPath,
-            'subsonic.enable': formData.get('subsonic.enable') === 'on',
-            'subsonic.path': (formData.get('subsonic.path') || '').trim() || '/rest',
-            'subsonic.enableDebug': formData.get('subsonic.enableDebug') === 'on',
-            'subsonic.port': parseInt(formData.get('subsonic.port')) || 0,
-            'subsonic.onlineSearch': formData.get('subsonic.onlineSearch') === 'on',
-            'subsonic.onlineSearchMode': formData.get('subsonic.onlineSearchMode') || 'fallback',
-            'subsonic.onlineSearchSources': (formData.get('subsonic.onlineSearchSources') || '').trim() || 'wy,tx,kw,kg,mg',
-            'subsonic.publicLeaderboards': formData.get('subsonic.publicLeaderboards') === 'on',
-            'subsonic.leaderboardSource': (formData.get('subsonic.leaderboardSource') || '').trim() || 'tx',
-            'subsonic.sharedListMode': (formData.get('subsonic.sharedListMode') || '').trim() || 'leaderboard',
-            'subsonic.sharedListSort': (formData.get('subsonic.sharedListSort') || '').trim() || 'hot',
-            'subsonic.lyricTranslation': formData.get('subsonic.lyricTranslation') === 'on',
-            'subsonic.cacheOnPlay': formData.get('subsonic.cacheOnPlay') === 'on',
-            'subsonic.playCacheFirst': formData.get('subsonic.playCacheFirst') === 'on',
-            'subsonic.dislikeRating': Number(formData.get('subsonic.dislikeRating') || 1),
-            'subsonic.hideDisliked': formData.get('subsonic.hideDisliked') === 'on',
-            'subsonic.dislikeCrossSource': formData.get('subsonic.dislikeCrossSource') === 'on',
-            'subsonic.dislikeNoRecommend': formData.get('subsonic.dislikeNoRecommend') === 'on',
-            'subsonic.dislikeDuetMode': formData.get('subsonic.dislikeDuetMode') || 'any',
-            'subsonic.dislikeNormalizeName': formData.get('subsonic.dislikeNormalizeName') === 'on',
-            'subsonic.dislikeRequireSinger': formData.get('subsonic.dislikeRequireSinger') === 'on',
-            'subsonic.linkRatingToDislike': formData.get('subsonic.linkRatingToDislike') === 'on',
-            'subsonic.linkDislikeToRating': formData.get('subsonic.linkDislikeToRating') === 'on',
-            'subsonic.quality.enabled': formData.get('subsonic.quality.enabled') === 'on',
-            'subsonic.quality.priority': (formData.get('subsonic.quality.priority') || '').trim() || 'flac,320k,128k',
-            'subsonic.quality.clientCapMode': formData.get('subsonic.quality.clientCapMode') || 'soft',
-            'subsonic.source.priority': (formData.get('subsonic.source.priority') || '').trim() || 'kw,tx,wy,mg,kg',
-            'subsonic.source.crossPlatform': formData.get('subsonic.source.crossPlatform') === 'on',
-            'subsonic.source.autoSwitchCustom': formData.get('subsonic.source.autoSwitchCustom') === 'on',
-            'singer.sourcePriority': formData.get('singer.sourcePriority'),
             'system.allowUnsafeVM': formData.get('system.allowUnsafeVM') === 'on',
         };
 
         // [需要重启] 以下配置仅在进程启动时由 server.ts 读取
         // （startSubsonicStandaloneServer / handleStartServer），保存后不会即时生效，必须重启服务。
         // 检测本次保存是否实际修改了它们，若是则提示用户重启。
-        const restartRequiredKeys = ['subsonic.enable', 'subsonic.port'];
+        const restartRequiredKeys = []; // Subsonic 重启检测已移至 saveSubsonicConfig
         const prevConfig = this.loadedConfig || {};
         const changedRestartKeys = restartRequiredKeys.filter(k => {
             if (k === 'subsonic.port') return Number(config[k]) !== Number(prevConfig[k]);
@@ -3324,9 +3216,8 @@ class App {
                 localStorage.setItem('lx_auth', config['admin.password']);
             }
 
-            // 更新侧边栏播放器链接
-            const navPlayerLink = document.getElementById('nav-player-link');
-            if (navPlayerLink) navPlayerLink.href = playerPath === '' ? '/' : (playerPath ?? '/');
+            // 动态同步更新所有播放器链接
+            this.updatePlayerLinks(playerPath);
 
             // 保存成功后同步「已加载配置」，供下次保存对比
             this.loadedConfig = config;
@@ -3337,31 +3228,286 @@ class App {
                 } else {
                     showSuccess('配置保存成功！');
                 }
-                // 若改动了需重启才生效的配置，提醒并支持一键重启
-                if (needRestart) {
-                    const ok = await showSelect(
-                        '需要重启服务器',
-                        `你修改了以下「需重启才能生效」的配置：\n\n• ${changedRestartKeys.join('\n• ')}\n\n` +
-                        `当前修改已保存，但必须重启 lx-server 后才会生效（例如 Subsonic 独立端口）。\n是否立即重启服务器？`,
-                        { danger: true, confirmText: '立即重启', cancelText: '稍后手动重启' }
-                    );
-                    if (ok) {
-                        try {
-                            const r = await this.request('/api/restart', { method: 'POST' });
-                            if (r.success) {
-                                showSuccess('服务器正在重启，新配置（如 Subsonic 独立端口）将在重启后生效。\n\n页面将在 5 秒后自动刷新。');
-                                setTimeout(() => window.location.reload(), 5000);
-                            } else {
-                                showError('重启失败: ' + (r.message || '未知错误'));
-                            }
-                        } catch (e) {
-                            showError('重启请求失败: ' + e.message);
+            }
+            // 即使静默保存（如「重载配置 / 刷新用户」调用 saveConfig(true)），
+            // 只要改动了需重启才生效的配置（subsonic.standalone / subsonic.port 等），
+            // 也必须提示重启，否则独立端口仍在监听而表单已显示关闭，造成状态不一致
+            if (needRestart) {
+                const ok = await showSelect(
+                    '需要重启服务器',
+                    `你修改了以下「需重启才能生效」的配置：\n\n• ${changedRestartKeys.join('\n• ')}\n\n` +
+                    `当前修改已保存，但必须重启 lx-server 后才会生效（例如 Subsonic 独立端口）。\n是否立即重启服务器？`,
+                    { danger: true, confirmText: '立即重启', cancelText: '稍后手动重启' }
+                );
+                if (ok) {
+                    try {
+                        const r = await this.request('/api/restart', { method: 'POST' });
+                        if (r.success) {
+                            showSuccess('服务器正在重启，新配置（如 Subsonic 独立端口）将在重启后生效。\n\n页面将在 5 秒后自动刷新。');
+                            setTimeout(() => window.location.reload(), 5000);
+                            return true;
+                        } else {
+                            showError('重启失败: ' + (r.message || '未知错误'));
                         }
+                    } catch (e) {
+                        showError('重启请求失败: ' + e.message);
                     }
                 }
             }
         } catch (err) {
             if (!silent) showError('配置保存失败: ' + err.message);
+            throw err;
+        }
+    }
+
+
+    async loadSubsonicConfig() {
+        const form = document.getElementById('subsonic-form');
+        if (!form) return;
+        try {
+            const config = await this.request('/api/config');
+            // 保存 Subsonic 专用基准配置，供 saveSubsonicConfig 对比「需重启」字段是否变更。
+            // 不能复用 loadedConfig：它会被主表单 saveConfig 覆盖为不含 subsonic.* 的载荷。
+            this.loadedSubsonicConfig = config;
+            if (form.elements['singer.sourcePriority']) {
+                form.elements['singer.sourcePriority'].value = config['singer.sourcePriority'] || 'tx,wy';
+            }
+            // Subsonic 配置
+            if (form.elements['subsonic.enable']) {
+                form.elements['subsonic.enable'].checked = config['subsonic.enable'] === true;
+            }
+            if (form.elements['subsonic.path']) {
+                form.elements['subsonic.path'].value = config['subsonic.path'] || '/rest';
+            }
+            if (form.elements['subsonic.enableDebug']) {
+                form.elements['subsonic.enableDebug'].checked = config['subsonic.enableDebug'] === true;
+            }
+            if (form.elements['subsonic.port']) {
+                form.elements['subsonic.port'].value = config['subsonic.port'] || 0;
+            }
+            // Subsonic 独立端口开关：以 subsonic.standalone 独立开关为准，切换端口输入框显隐
+            const standaloneToggle = document.getElementById('subsonic-standalone-toggle');
+            const standaloneFields = document.getElementById('subsonic-standalone-fields');
+            const portErrEl = document.getElementById('subsonic-port-error');
+            if (standaloneToggle && standaloneFields) {
+                // subsonic.standalone 为独立开关；旧配置无此键时按默认值(关闭)处理
+                const enabled = config['subsonic.standalone'] !== undefined
+                    ? !!config['subsonic.standalone']
+                    : false;
+                standaloneToggle.checked = enabled;
+                standaloneFields.classList.toggle('hidden', !enabled);
+                const portInput = form.elements['subsonic.port'];
+                if (portInput) portInput.min = enabled ? '1' : '0';
+                standaloneToggle.onchange = () => {
+                    const on = standaloneToggle.checked;
+                    standaloneFields.classList.toggle('hidden', !on);
+                    const portInput = form.elements['subsonic.port'];
+                    if (on && (!portInput.value || parseInt(portInput.value) === 0)) {
+                        portInput.value = 4050;
+                    }
+                    // 独立监听关闭时端口最小值允许为 0，开启时最小为 1
+                    portInput.min = on ? '1' : '0';
+                    // 关闭开关不再清零端口：端口值保留，重新开启无需重填
+                    if (portErrEl && !on) {
+                        portErrEl.style.display = 'none';
+                    }
+                };
+            }
+            if (portErrEl) {
+                const currentPort = parseInt(config['subsonic.port']) || 0;
+                if (config.subsonicPortConflict && config.subsonicPortConflict.port === currentPort && currentPort > 0) {
+                    portErrEl.textContent = `⚠️ 独立端口 ${currentPort} 启动失败（${config.subsonicPortConflict.error || '端口已被占用'}），配置未生效，请更换端口后保存并重启服务器。`;
+                    portErrEl.style.display = 'block';
+                } else {
+                    portErrEl.style.display = 'none';
+                }
+            }
+            if (form.elements['subsonic.onlineSearch']) {
+                form.elements['subsonic.onlineSearch'].checked = config['subsonic.onlineSearch'] !== false;
+            }
+            if (form.elements['subsonic.onlineSearchMode']) {
+                form.elements['subsonic.onlineSearchMode'].value = config['subsonic.onlineSearchMode'] || 'fallback';
+            }
+            if (form.elements['subsonic.onlineSearchSources']) {
+                const searchSources = config['subsonic.onlineSearchSources'] || 'wy,tx,kw,kg,mg';
+                form.elements['subsonic.onlineSearchSources'].value = searchSources;
+                this.updateSearchSourcesTagUI(searchSources);
+            }
+            if (form.elements['subsonic.publicLeaderboards']) {
+                form.elements['subsonic.publicLeaderboards'].checked = config['subsonic.publicLeaderboards'] === true;
+            }
+            if (form.elements['subsonic.leaderboardSource']) {
+                const lbSource = config['subsonic.leaderboardSource'] || 'tx';
+                form.elements['subsonic.leaderboardSource'].value = lbSource;
+                this.updateLeaderboardSourceTagUI(lbSource);
+            }
+            if (form.elements['subsonic.sharedListMode']) {
+                const mode = config['subsonic.sharedListMode'] || 'leaderboard';
+                form.elements['subsonic.sharedListMode'].value = mode;
+                this.updateTagGroupActive('tag-group-shared-mode', mode);
+            }
+            if (form.elements['subsonic.sharedListSort']) {
+                const sort = config['subsonic.sharedListSort'] || 'hot';
+                form.elements['subsonic.sharedListSort'].value = sort;
+                this.updateTagGroupActive('tag-group-shared-sort', sort);
+            }
+            this.toggleSubsonicLeaderboardVisibility();
+            if (form.elements['subsonic.lyricTranslation']) {
+                form.elements['subsonic.lyricTranslation'].checked = config['subsonic.lyricTranslation'] !== false;
+            }
+            if (form.elements['subsonic.cacheOnPlay']) {
+                form.elements['subsonic.cacheOnPlay'].checked = config['subsonic.cacheOnPlay'] === true;
+            }
+            if (form.elements['subsonic.playCacheFirst']) {
+                form.elements['subsonic.playCacheFirst'].checked = config['subsonic.playCacheFirst'] === true;
+            }
+
+
+            // 不喜欢 / 评分联动
+            if (form.elements['subsonic.dislikeRating'] !== undefined) {
+                form.elements['subsonic.dislikeRating'].value = String(config['subsonic.dislikeRating'] ?? 1);
+            }
+            if (form.elements['subsonic.hideDisliked']) {
+                form.elements['subsonic.hideDisliked'].checked = config['subsonic.hideDisliked'] !== false;
+            }
+            if (form.elements['subsonic.dislikeCrossSource']) {
+                form.elements['subsonic.dislikeCrossSource'].checked = config['subsonic.dislikeCrossSource'] === true;
+            }
+            if (form.elements['subsonic.dislikeNoRecommend']) {
+                form.elements['subsonic.dislikeNoRecommend'].checked = config['subsonic.dislikeNoRecommend'] !== false;
+            }
+            if (form.elements['subsonic.dislikeDuetMode']) {
+                form.elements['subsonic.dislikeDuetMode'].value = config['subsonic.dislikeDuetMode'] || 'any';
+            }
+            if (form.elements['subsonic.dislikeNormalizeName']) {
+                form.elements['subsonic.dislikeNormalizeName'].checked = config['subsonic.dislikeNormalizeName'] !== false;
+            }
+            if (form.elements['subsonic.dislikeRequireSinger']) {
+                form.elements['subsonic.dislikeRequireSinger'].checked = config['subsonic.dislikeRequireSinger'] !== false;
+            }
+            if (form.elements['subsonic.linkRatingToDislike']) {
+                form.elements['subsonic.linkRatingToDislike'].checked = config['subsonic.linkRatingToDislike'] === true;
+            }
+            if (form.elements['subsonic.linkDislikeToRating']) {
+                form.elements['subsonic.linkDislikeToRating'].checked = config['subsonic.linkDislikeToRating'] === true;
+            }
+
+            // 音质 / 源优选
+            if (form.elements['subsonic.quality.enabled']) {
+                form.elements['subsonic.quality.enabled'].checked = config['subsonic.quality.enabled'] !== false;
+            }
+            if (form.elements['subsonic.quality.priority']) {
+                const qVal = config['subsonic.quality.priority'] || 'flac,320k,128k';
+                form.elements['subsonic.quality.priority'].value = qVal;
+                this.updateQualityPriorityTagUI(qVal);
+            }
+
+            if (form.elements['subsonic.source.priority']) {
+                const sVal = config['subsonic.source.priority'] || 'kw,tx,wy,mg,kg';
+                form.elements['subsonic.source.priority'].value = sVal;
+                this.updateSourcePriorityTagUI(sVal);
+            }
+            if (form.elements['subsonic.source.crossPlatform']) {
+                form.elements['subsonic.source.crossPlatform'].checked = config['subsonic.source.crossPlatform'] !== false;
+            }
+            if (form.elements['subsonic.source.autoSwitchCustom']) {
+                form.elements['subsonic.source.autoSwitchCustom'].checked = config['subsonic.source.autoSwitchCustom'] !== false;
+            }
+
+        } catch (e) {
+            console.error('Failed to load subsonic config:', e);
+        }
+    }
+
+    async saveSubsonicConfig() {
+        const form = document.getElementById('subsonic-form');
+        if (!form) return;
+        const formData = new FormData(form);
+        const config = {
+            'subsonic.enable': formData.get('subsonic.enable') === 'on',
+            'subsonic.standalone': document.getElementById('subsonic-standalone-toggle')?.checked
+                ?? false,
+            'subsonic.path': (formData.get('subsonic.path') || '').trim() || '/rest',
+            'subsonic.enableDebug': formData.get('subsonic.enableDebug') === 'on',
+            'subsonic.port': parseInt(formData.get('subsonic.port')) || 0,
+            'subsonic.onlineSearch': formData.get('subsonic.onlineSearch') === 'on',
+            'subsonic.onlineSearchMode': formData.get('subsonic.onlineSearchMode') || 'fallback',
+            'subsonic.onlineSearchSources': (formData.get('subsonic.onlineSearchSources') || '').trim() || 'wy,tx,kw,kg,mg',
+            'subsonic.publicLeaderboards': formData.get('subsonic.publicLeaderboards') === 'on',
+            'subsonic.leaderboardSource': (formData.get('subsonic.leaderboardSource') || '').trim() || 'tx',
+            'subsonic.sharedListMode': (formData.get('subsonic.sharedListMode') || '').trim() || 'leaderboard',
+            'subsonic.sharedListSort': (formData.get('subsonic.sharedListSort') || '').trim() || 'hot',
+            'subsonic.lyricTranslation': formData.get('subsonic.lyricTranslation') === 'on',
+            'subsonic.cacheOnPlay': formData.get('subsonic.cacheOnPlay') === 'on',
+            'subsonic.playCacheFirst': formData.get('subsonic.playCacheFirst') === 'on',
+
+            'subsonic.dislikeRating': Number(formData.get('subsonic.dislikeRating') || 1),
+            'subsonic.hideDisliked': formData.get('subsonic.hideDisliked') === 'on',
+            'subsonic.dislikeCrossSource': formData.get('subsonic.dislikeCrossSource') === 'on',
+            'subsonic.dislikeNoRecommend': formData.get('subsonic.dislikeNoRecommend') === 'on',
+            'subsonic.dislikeDuetMode': formData.get('subsonic.dislikeDuetMode') || 'any',
+            'subsonic.dislikeNormalizeName': formData.get('subsonic.dislikeNormalizeName') === 'on',
+            'subsonic.dislikeRequireSinger': formData.get('subsonic.dislikeRequireSinger') === 'on',
+            'subsonic.linkRatingToDislike': formData.get('subsonic.linkRatingToDislike') === 'on',
+            'subsonic.linkDislikeToRating': formData.get('subsonic.linkDislikeToRating') === 'on',
+            'subsonic.quality.enabled': formData.get('subsonic.quality.enabled') === 'on',
+            'subsonic.quality.priority': (formData.get('subsonic.quality.priority') || '').trim() || 'flac,320k,128k',
+
+            'subsonic.source.priority': (formData.get('subsonic.source.priority') || '').trim() || 'kw,tx,wy,mg,kg',
+            'subsonic.source.crossPlatform': formData.get('subsonic.source.crossPlatform') === 'on',
+            'subsonic.source.autoSwitchCustom': formData.get('subsonic.source.autoSwitchCustom') === 'on',
+            'singer.sourcePriority': formData.get('singer.sourcePriority'),
+        };
+        // [校验] 启用独立监听端口时，端口必须是 1-65535 的合法整数，否则独立监听无法启动；
+        // 校验不通过则中止保存并提示，不再向服务端发送请求
+        if (config['subsonic.standalone']) {
+            const port = Number(config['subsonic.port']);
+            if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                showError('已启用 Subsonic 独立监听端口，但端口号不合法（需为 1-65535 的整数）。请先填写合法端口再保存。');
+                return;
+            }
+        }
+        const restartRequiredKeys = ['subsonic.enable', 'subsonic.standalone', 'subsonic.port'];
+        const prevConfig = this.loadedSubsonicConfig || {};
+        const changedRestartKeys = restartRequiredKeys.filter(k => {
+            if (k === 'subsonic.port') return Number(config[k]) !== Number(prevConfig[k]);
+            return config[k] !== prevConfig[k];
+        });
+        const needRestart = changedRestartKeys.length > 0;
+        try {
+            const res = await this.request('/api/config', {
+                method: 'POST',
+                body: JSON.stringify(config)
+            });
+            this.loadedSubsonicConfig = Object.assign({}, this.loadedSubsonicConfig || {}, config);
+            if (res.warning) {
+                showInfo('Subsonic 配置保存成功！\n\n⚠️ 警告：' + res.warning);
+            } else {
+                showSuccess('Subsonic 配置保存成功！');
+            }
+            if (needRestart) {
+                const ok = await showSelect(
+                    '需要重启服务器',
+                    '你修改了以下「需重启才能生效」的配置：\n\n• ' + changedRestartKeys.join('\n• ') + '\n\n' +
+                    '当前修改已保存，但必须重启 lx-server 后才会生效（例如 Subsonic 独立端口）。\n是否立即重启服务器？',
+                    { danger: true, confirmText: '立即重启', cancelText: '稍后手动重启' }
+                );
+                if (ok) {
+                    try {
+                        const r = await this.request('/api/restart', { method: 'POST' });
+                        if (r.success) {
+                            showSuccess('服务器正在重启，新配置（如 Subsonic 独立端口）将在重启后生效。\n\n页面将在 5 秒后自动刷新。');
+                            setTimeout(() => window.location.reload(), 5000);
+                        } else {
+                            showError('重启失败: ' + (r.message || '未知错误'));
+                        }
+                    } catch (e) {
+                        showError('重启请求失败: ' + e.message);
+                    }
+                }
+            }
+        } catch (err) {
+            showError('Subsonic 配置保存失败: ' + err.message);
             throw err;
         }
     }
