@@ -52,6 +52,8 @@ window.soundEffects = (function () {
 
     let dryGainNode, wetGainNode, mixerNode;
     let isGraphBuilt = false;
+    // Mobile starts native on every page load. Only a local effect edit opts into DSP.
+    let mobileEffectsEnabled = false;
 
     function hasActiveEffects() {
         const isEqActive = settings.eq && settings.eq.some(val => val !== 0);
@@ -81,8 +83,8 @@ window.soundEffects = (function () {
 
     function canProcessLocally() {
         // Capturing a mobile media element cannot be undone by disconnecting Web Audio.
-        // Keep native playback even before Safari reports an AirPlay target.
-        return (isGraphBuilt || !isMobileDevice()) &&
+        // Keep native playback until an explicit local effect edit opts into DSP.
+        return (isGraphBuilt || mobileEffectsEnabled || !isMobileDevice()) &&
             !document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless &&
             !window.LXPlayback?.isRemote;
     }
@@ -91,7 +93,7 @@ window.soundEffects = (function () {
         if (!canProcessLocally()) return;
         if (audioContext && isGraphBuilt) return;
         loadSettings();
-        if (!force && (isMobileDevice() || !hasActiveEffects())) {
+        if (!force && ((isMobileDevice() && !mobileEffectsEnabled) || !hasActiveEffects())) {
             console.log('[SoundEffects] No custom sound effects enabled or mobile device detected. Keeping direct native audio output (zero throttling).');
             return;
         }
@@ -450,6 +452,17 @@ window.soundEffects = (function () {
     }
 
     function renderUI() {
+        const remote = !!document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || !!window.LXPlayback?.isRemote;
+        const status = document.getElementById('sound-effects-status');
+        if (status) status.textContent = remote
+            ? 'AirPlay / 投放正在播放：音效仅保存，不改变接收设备的声音。'
+            : isGraphBuilt
+                ? (isMobileDevice() ? '本机音效已开启。使用 AirPlay 前请恢复原生播放。' : '本机音效已开启。')
+                : isMobileDevice()
+                    ? '选择音效后立即在本机生效。使用 AirPlay 前需恢复原生播放；刷新后默认使用原生播放。'
+                    : '选择音效后立即在本机生效。';
+        const nativeButton = document.getElementById('sound-effects-native');
+        if (nativeButton) nativeButton.hidden = !isGraphBuilt || !isMobileDevice();
         // EQ Presets
         const presetContainer = document.getElementById('eq-presets');
         if (presetContainer) {
@@ -580,8 +593,14 @@ window.soundEffects = (function () {
     }
 
     function ensureLocalGraph() {
+        const audio = document.getElementById('audio-player');
+        if (audio?.webkitCurrentPlaybackTargetIsWireless || window.LXPlayback?.isRemote) return false;
+        if (isMobileDevice() && hasActiveEffects()) mobileEffectsEnabled = true;
         if (!canProcessLocally()) return false;
         if (!audioContext || !isGraphBuilt) init(true);
+        if (audioContext && ['suspended', 'interrupted'].includes(audioContext.state)) {
+            audioContext.resume().catch(() => window.showError?.('音效启动失败，请点击播放后重试。'));
+        }
         return !!audioContext && isGraphBuilt;
     }
 
@@ -598,9 +617,6 @@ window.soundEffects = (function () {
         open: function () {
             // 打开面板时只加载并显示设置，不在此强制初始化 Web Audio 图
             loadSettings();
-            if (!canProcessLocally() && window.showInfo) {
-                window.showInfo('移动设备、AirPlay 和投放播放使用原生音频，音效设置仅保存，供本地桌面播放使用。', 5000);
-            }
             const modal = document.getElementById('sound-effects-modal');
             if (!modal) return;
             modal.classList.remove('hidden');
@@ -709,6 +725,14 @@ window.soundEffects = (function () {
             renderUI();
         },
         isGraphBuilt: () => isGraphBuilt,
+        needsNativeReload: () => isMobileDevice() && isGraphBuilt,
+        restoreNativePlayback: function () {
+            if (!this.needsNativeReload()) return;
+            // Disconnecting nodes cannot release a captured media element.
+            window.savePlaybackState?.();
+            sessionStorage.setItem('lx_native_audio_restore', '1');
+            window.location.reload();
+        },
         getContext: () => audioContext || window._sharedAudioContext || null,
         getSourceNode: () => mediaSource || window._sharedAudioSourceNode || null,
         getAnalyser: () => analyser || window._sharedAudioAnalyser || null,
@@ -803,6 +827,7 @@ window.soundEffects = (function () {
         console.log('[SoundEffects] Attaching event listeners...');
         const restoreLocalEffects = () => {
             if (isGraphBuilt && canProcessLocally()) applySettings();
+            renderUI();
         };
         document.getElementById('audio-player')?.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', restoreLocalEffects);
         window.addEventListener('lx-cast-route', restoreLocalEffects);

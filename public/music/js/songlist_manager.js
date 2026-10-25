@@ -38,6 +38,50 @@ window.SongListManager = (function () {
     // Working copy of list in sort mode (to avoid mutating detailState.list until save)
     let sortWorkList = [];
 
+    let activeSearchAbortController = null;
+
+    function cancelSearch() {
+        if (activeSearchAbortController) {
+            activeSearchAbortController.abort();
+            activeSearchAbortController = null;
+        }
+        setSongListSearchStatus('搜索已取消，可修改关键词后重试', false);
+    }
+
+    function setSongListSearchStatus(message = '', loading = false) {
+        const wave = document.getElementById('songlist-search-progress-wave');
+        if (wave) wave.classList.toggle('is-active', !!loading);
+
+        const status = document.getElementById('songlist-search-status');
+        if (!status) return;
+        status.classList.toggle('hidden', !message);
+
+        const textEl = document.getElementById('songlist-search-status-text');
+        if (textEl) textEl.textContent = message;
+
+        const spinner = document.getElementById('songlist-search-status-spinner');
+        if (spinner) spinner.style.display = loading ? 'inline-flex' : 'none';
+
+        const cancelBtn = document.getElementById('songlist-search-cancel');
+        if (cancelBtn) cancelBtn.classList.toggle('hidden', !loading);
+
+        const homeBtn = document.getElementById('songlist-search-home-btn');
+        if (homeBtn) homeBtn.classList.toggle('hidden', !message);
+    }
+
+    function returnHome() {
+        if (activeSearchAbortController) {
+            activeSearchAbortController.abort();
+            activeSearchAbortController = null;
+        }
+        const searchInput = document.getElementById('songlist-search-input');
+        if (searchInput) searchInput.value = '';
+        setSongListSearchStatus('', false);
+        const pagination = document.getElementById('songlist-pagination');
+        if (pagination) pagination.classList.remove('hidden');
+        loadList(1);
+    }
+
     // Initialize
     async function init() {
         console.log('[SongList] Initializing...');
@@ -186,6 +230,14 @@ window.SongListManager = (function () {
     }
 
     async function loadList(page = 1) {
+        if (activeSearchAbortController) {
+            activeSearchAbortController.abort();
+            activeSearchAbortController = null;
+        }
+        setSongListSearchStatus('', false);
+        const pagination = document.getElementById('songlist-pagination');
+        if (pagination) pagination.classList.remove('hidden');
+
         currentState.page = page;
         const { source, tagId, sortId } = currentState;
         const container = document.getElementById('songlist-container');
@@ -802,6 +854,8 @@ window.SongListManager = (function () {
             // 保存到缓存
             localStorage.setItem('songlist-source', currentState.source);
 
+            const searchInput = document.getElementById('songlist-search-input');
+            if (searchInput) searchInput.value = '';
             currentState.tagId = '';
             currentState.tagName = '全部分类';
             document.getElementById('current-tag-name').innerText = '全部分类';
@@ -893,29 +947,93 @@ window.SongListManager = (function () {
                 this.closeDetail();
             }
         },
+        cancelSearch: cancelSearch,
+        returnHome: returnHome,
         search: async function () {
-            const text = document.getElementById('songlist-search-input').value.trim();
+            const text = document.getElementById('songlist-search-input')?.value.trim() || '';
             if (!text) {
-                loadList(1);
+                // 搜索框为空时不进行任何操作，不回到主页
                 return;
             }
+
+            if (activeSearchAbortController) {
+                activeSearchAbortController.abort();
+            }
+            const currentController = new AbortController();
+            activeSearchAbortController = currentController;
+            const isCurrent = () => activeSearchAbortController === currentController && !currentController.signal.aborted;
 
             const container = document.getElementById('songlist-container');
             container.innerHTML = '<div class="col-span-full py-20 text-center t-text-muted"><i class="fas fa-spinner fa-spin text-4xl mb-4 text-emerald-500"></i><p>正在搜索歌单...</p></div>';
 
+            const pagination = document.getElementById('songlist-pagination');
+            if (pagination) pagination.classList.add('hidden');
+
+            const source = currentState.source;
+            const sources = ['wy', 'tx', 'kg', 'kw', 'mg'];
+            const sourceName = typeof getSourceName === 'function' ? getSourceName(source) : source;
+
+            if (source === 'all') {
+                setSongListSearchStatus(`已完成 0/${sources.length} 个音源，找到 0 条结果`, true);
+            } else {
+                setSongListSearchStatus(`正在搜索 ${sourceName} 歌单...`, true);
+            }
+
+            const failures = [];
             try {
-                if (currentState.source === 'all') {
-                    const sources = ['wy', 'tx', 'kg', 'kw', 'mg'];
-                    const promises = sources.map(s =>
-                        fetch(`${API_BASE}/songList/search?source=${s}&text=${encodeURIComponent(text)}&page=1`)
-                            .then(r => r.json())
-                            .then(d => (d.list || []).map(item => ({ ...item, source: s })))
-                            .catch(e => {
-                                console.warn(`[SongList] ${s} search failed:`, e);
-                                return [];
-                            })
-                    );
+                if (source === 'all') {
+                    let completed = 0;
+                    const partial = [];
+                    const promises = sources.map(async s => {
+                        try {
+                            const subController = new AbortController();
+                            const abortSub = () => subController.abort();
+                            currentController.signal.addEventListener('abort', abortSub, { once: true });
+                            if (currentController.signal.aborted) abortSub();
+                            const timeoutTimer = setTimeout(abortSub, 15000);
+
+                            let data;
+                            try {
+                                const res = await fetch(`${API_BASE}/songList/search?source=${s}&text=${encodeURIComponent(text)}&page=1`, {
+                                    signal: subController.signal
+                                });
+                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                                data = await res.json();
+                            } finally {
+                                clearTimeout(timeoutTimer);
+                                currentController.signal.removeEventListener('abort', abortSub);
+                            }
+
+                            const items = Array.isArray(data) ? data : (data && Array.isArray(data.list) ? data.list : null);
+                            if (!items) throw new Error('音源返回数据异常');
+                            const tagged = items.map(item => ({ ...item, source: s }));
+                            if (isCurrent() && tagged.length > 0) {
+                                partial.push(...tagged);
+                                currentState.list = typeof window.sortSearchResults === 'function'
+                                    ? window.sortSearchResults(partial, text, false)
+                                    : [...partial];
+                                currentState.total = currentState.list.length;
+                                renderList();
+                            }
+                            return tagged;
+                        } catch (e) {
+                            failures.push(s);
+                            return [];
+                        } finally {
+                            completed++;
+                            if (isCurrent()) {
+                                setSongListSearchStatus(`已完成 ${completed}/${sources.length} 个音源，找到 ${partial.length} 条结果`, true);
+                            }
+                        }
+                    });
+
                     const results = await Promise.all(promises);
+                    if (!isCurrent()) return;
+
+                    if (failures.length === sources.length) {
+                        throw new Error('所有音源请求失败或超时，请重试或切换音源');
+                    }
+
                     const flatList = results.flat();
                     if (typeof window.sortSearchResults === 'function') {
                         currentState.list = window.sortSearchResults(flatList, text, false);
@@ -923,18 +1041,51 @@ window.SongListManager = (function () {
                         currentState.list = flatList;
                     }
                     currentState.total = currentState.list.length;
+                    renderList();
+
+                    const totalCount = currentState.total;
+                    const successCount = sources.length - failures.length;
+                    let completionMsg = '';
+                    if (failures.length === 0) {
+                        completionMsg = `全部 ${sources.length}/${sources.length} 个音源成功，找到 ${totalCount} 条结果`;
+                    } else {
+                        const failedNames = failures.map(s => (typeof getSourceName === 'function' ? getSourceName(s) : s)).join('、');
+                        completionMsg = `已完成 ${successCount}/${sources.length} 个音源，找到 ${totalCount} 条结果，${failedNames}源失败`;
+                    }
+                    setSongListSearchStatus(completionMsg, false);
                 } else {
-                    const url = `${API_BASE}/songList/search?source=${currentState.source}&text=${encodeURIComponent(text)}&page=1`;
-                    const res = await fetch(url);
-                    const data = await res.json();
+                    const subController = new AbortController();
+                    const abortSub = () => subController.abort();
+                    currentController.signal.addEventListener('abort', abortSub, { once: true });
+                    if (currentController.signal.aborted) abortSub();
+                    const timeoutTimer = setTimeout(abortSub, 15000);
+
+                    let data;
+                    try {
+                        const url = `${API_BASE}/songList/search?source=${source}&text=${encodeURIComponent(text)}&page=1`;
+                        const res = await fetch(url, { signal: subController.signal });
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        data = await res.json();
+                    } finally {
+                        clearTimeout(timeoutTimer);
+                        currentController.signal.removeEventListener('abort', abortSub);
+                    }
+
+                    if (!isCurrent()) return;
                     currentState.list = data.list || [];
-                    currentState.total = data.total || 0;
+                    currentState.total = data.total || currentState.list.length;
+                    renderList();
+                    setSongListSearchStatus(`找到 ${currentState.total} 条结果`, false);
                 }
-                renderList();
-                document.getElementById('songlist-pagination').classList.add('hidden');
+                if (pagination) pagination.classList.add('hidden');
             } catch (e) {
+                if (!isCurrent()) return;
                 console.error('[SongList] Search failed:', e);
-                container.innerHTML = `<div class="col-span-full py-20 text-center text-red-500">搜索失败: ${escapeHtml(e.message)}</div>`;
+                setSongListSearchStatus(e.message || '搜索失败，请重试或切换音源', false);
+                const hasExistingCards = container.querySelector('.group, .cursor-pointer');
+                if (!hasExistingCards) {
+                    container.innerHTML = `<div class="col-span-full py-20 text-center text-red-500">搜索失败: ${escapeHtml(e.message)}</div>`;
+                }
             }
         },
         handleRowClick: function (index) {

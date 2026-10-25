@@ -1,4 +1,5 @@
-const CACHE_NAME = 'lx-music-web-v51';
+const CACHE_NAME = 'lx-music-web-v55';
+// Refresh assets for explicit iPhone effects processing and native playback return.
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -6,11 +7,14 @@ const ASSETS_TO_CACHE = [
     './app.js',
     // CSS
     './css/theme_variables.css',
+    './css/utilities.css',
+    './css/app.css',
+    './js/search_requests.js',
+    './js/ui_accessibility.js',
     './assets/fontawesome/css/all.min.css',
     // 核心 JS
     './js/lyric-parser.js',
     './js/lyric-utils.js',
-    './js/lyric-card.js',
     './js/quality.js',
     './js/idb_store.js',
     './js/user_sync.js',
@@ -25,14 +29,12 @@ const ASSETS_TO_CACHE = [
     './js/common_ui.js',
     './js/pwa.js',
     './js/theme_manager.js',
-    './js/tailwind_setup.js',
     './js/log_viewer.js',
     './js/ios-background-audio.js',
     './js/airplay.js',
     './js/playback.js',
     './js/chromecast.js',
     // 第三方库
-    './assets/tailwindcss.js',
     './js/crypto-js.min.js',
     './js/NoSleep.min.js',
     './js/Sortable.min.js',

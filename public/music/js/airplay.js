@@ -20,6 +20,11 @@
     });
     audio.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', update);
     button.addEventListener('click', () => {
+        if (window.soundEffects?.needsNativeReload()) {
+            window.soundEffects.open();
+            window.showInfo?.('请先点击“刷新并恢复原生播放 / AirPlay”，再选择 AirPlay 设备。', 5000);
+            return;
+        }
         try { audio.webkitShowPlaybackTargetPicker(); }
         catch (error) { console.warn('[AirPlay] Picker unavailable:', error); }
     });

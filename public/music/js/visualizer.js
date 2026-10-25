@@ -1223,6 +1223,79 @@ class LXStudioVUMeterAnimation {
     }
 }
 
+class LXStudioBarsAnimation {
+    constructor({ globalStyle = 'blocks', themeColor = '#10b981' } = {}) {
+        this.globalStyle = globalStyle;
+        this.themeColor = themeColor;
+        this.prevRatios = null;
+    }
+
+    draw(data, ctx) {
+        if (!data || data.length === 0) return;
+        const width = ctx.canvas.width;
+        const height = ctx.canvas.height;
+        if (width === 0 || height === 0) return;
+
+        const isBlocks = this.globalStyle === 'blocks';
+        // 降低密度，拉开柱间距，增强透气感，避免密集拥挤
+        const stepPitch = isBlocks ? 9 : 8;
+        const numBars = Math.min(54, Math.max(20, Math.floor(width / stepPitch)));
+        const colWidth = width / numBars;
+        const barWidth = Math.max(3, Math.floor(colWidth - (isBlocks ? 3.5 : 2.5)));
+
+        if (!this.prevRatios || this.prevRatios.length !== numBars) {
+            this.prevRatios = new Float32Array(numBars);
+        }
+
+        ctx.fillStyle = this.themeColor;
+        const blockSize = 3;
+        const blockGap = 1.6;
+        const blockPitch = blockSize + blockGap;
+
+        for (let i = 0; i < numBars; i++) {
+            // 对数频带映射：覆盖全频带，平滑过渡
+            const normX = i / numBars;
+            const logRatio = Math.pow(normX, 1.35);
+            const binIdx = Math.min(data.length - 1, Math.floor(logRatio * (data.length * 0.82)));
+            const rawVal = (data[binIdx] || 0) / 255;
+
+            // 不限制最高显示高度，同时避免无脑放大削平顶：
+            // 使用非线性感知对比度增强动态（弱音更低，强音直冲高处），形成跌宕起伏的错落律动
+            const dynamicVal = Math.pow(rawVal, 1.32);
+            const freqCurve = 0.90 + 0.15 * Math.sin(normX * Math.PI);
+            let targetRatio = Math.max(0.02, Math.min(1.0, dynamicVal * freqCurve * 1.05));
+
+            // 平滑回落，避免视觉生硬闪烁
+            const prev = this.prevRatios[i];
+            const currentRatio = targetRatio >= prev
+                ? targetRatio
+                : prev * 0.83 + targetRatio * 0.17;
+            this.prevRatios[i] = currentRatio;
+
+            const barH = currentRatio * height;
+            const x = i * colWidth + (colWidth - barWidth) / 2;
+
+            if (isBlocks) {
+                const totalBlocks = Math.max(1, Math.floor(barH / blockPitch));
+                for (let b = 0; b < totalBlocks; b++) {
+                    const y = height - (b + 1) * blockPitch;
+                    if (y < 0) break;
+                    ctx.fillRect(x, y, barWidth, blockSize);
+                }
+            } else {
+                const y = height - barH;
+                ctx.beginPath();
+                if (typeof ctx.roundRect === 'function') {
+                    ctx.roundRect(x, y, barWidth, barH, [2, 2, 0, 0]);
+                } else {
+                    ctx.fillRect(x, y, barWidth, barH);
+                }
+                ctx.fill();
+            }
+        }
+    }
+}
+
 const musicVisualizer = (function () {
     let audioContext, audioSource, audioAnalyser;
     let splitterNode, analyserL, analyserR;
@@ -1237,6 +1310,20 @@ const musicVisualizer = (function () {
     const footerCanvas = document.getElementById('footer-visualizer');
     const detailCanvas = document.getElementById('detail-visualizer');
     const playerFooter = document.getElementById('player-footer');
+
+    function isIOSDevice() {
+        const ua = navigator.userAgent;
+        if (/Macintosh/i.test(ua) && !('ontouchend' in document)) return false;
+        if (/Windows|Linux|X11/i.test(ua)) return false;
+        if (/iPhone|iPod/.test(ua)) return true;
+        return (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) && ('ontouchend' in document);
+    }
+
+    function isVisualizerSuppressedByIOS() {
+        const s = window.settings || {};
+        const iosAdaptive = s.iosAdaptiveVisualizer !== false; // 默认开启
+        return iosAdaptive && isIOSDevice();
+    }
 
     function isMobileDevice() {
         const ua = navigator.userAgent;
@@ -1274,11 +1361,6 @@ const musicVisualizer = (function () {
                 const binIdx = Math.min(data.length - 1, Math.floor(Math.pow(i / numBars, 1.35) * (data.length * 0.72)));
                 const val = (data[binIdx] || 0) / 255;
                 hRatio = Math.max(0.06, Math.min(0.96, val * 1.18));
-            } else if (isPlaying) {
-                // Gentle idle breathing only when no PCM data is yet available
-                const t = performance.now() * 0.0018;
-                const wave = Math.sin(t * 1.8 + i * 0.25) * 0.04;
-                hRatio = Math.max(0.04, 0.07 + wave);
             }
             const barH = hRatio * height;
             const x = i * (width / numBars);
@@ -1325,15 +1407,11 @@ const musicVisualizer = (function () {
         const steps = 36;
         for (let s = 0; s <= steps; s++) {
             const x = (s / steps) * width;
-            let y = height * 0.88;
+            let y = height * 0.94;
             if (hasRealAudio) {
                 const binIdx = Math.min(data.length - 1, Math.floor((s / steps) * (data.length * 0.65)));
                 const val = (data[binIdx] || 0) / 255;
                 y = height * 0.92 - val * (height * 0.82);
-            } else if (isPlaying) {
-                const t = performance.now() * 0.002;
-                const wave = Math.sin(t * 2.2 + s * 0.35) * 0.08;
-                y = height * 0.85 - wave * height;
             }
             ctx.lineTo(x, y);
         }
@@ -1345,15 +1423,11 @@ const musicVisualizer = (function () {
         ctx.beginPath();
         for (let s = 0; s <= steps; s++) {
             const x = (s / steps) * width;
-            let y = height * 0.88;
+            let y = height * 0.94;
             if (hasRealAudio) {
                 const binIdx = Math.min(data.length - 1, Math.floor((s / steps) * (data.length * 0.65)));
                 const val = (data[binIdx] || 0) / 255;
                 y = height * 0.92 - val * (height * 0.82);
-            } else if (isPlaying) {
-                const t = performance.now() * 0.002;
-                const wave = Math.sin(t * 2.2 + s * 0.35) * 0.08;
-                y = height * 0.85 - wave * height;
             }
             if (s === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
@@ -1391,22 +1465,33 @@ const musicVisualizer = (function () {
 
         function renderLoop() {
             const currentSettings = window.settings || {};
-            const needFooter = currentSettings.showFooterVisualizer && footerCanvas;
-            const needDetail = currentSettings.showDetailVisualizer && detailCanvas && isDetailVisible();
+            const needFooter = currentSettings.showFooterVisualizer && !isVisualizerSuppressedByIOS() && footerCanvas;
+            const needDetail = currentSettings.showDetailVisualizer && !isVisualizerSuppressedByIOS() && detailCanvas && isDetailVisible();
 
             if (isInitialized || (!needFooter && !needDetail)) {
                 standaloneRafId = null;
                 return;
             }
 
+            // 无真实音频数据时不生成假波形
+            if (!audioAnalyser) {
+                standaloneRafId = null;
+                if (footerCanvas && needFooter) {
+                    const ctx = footerCanvas.getContext('2d');
+                    ctx.clearRect(0, 0, footerCanvas.width, footerCanvas.height);
+                }
+                if (detailCanvas && needDetail) {
+                    const ctx = detailCanvas.getContext('2d');
+                    ctx.clearRect(0, 0, detailCanvas.width, detailCanvas.height);
+                }
+                return;
+            }
+
             const themeColor = getComputedStyle(document.documentElement).getPropertyValue('--c-500').trim() || '#10b981';
             const globalStyle = currentSettings.visualizerGlobalStyle || 'blocks';
 
-            let realData = null;
-            if (audioAnalyser) {
-                realData = new Uint8Array(audioAnalyser.frequencyBinCount);
-                audioAnalyser.getByteFrequencyData(realData);
-            }
+            const realData = new Uint8Array(audioAnalyser.frequencyBinCount);
+            audioAnalyser.getByteFrequencyData(realData);
 
             if (needFooter) {
                 if (footerCanvas.width === 0 || footerCanvas.height === 0) syncSize();
@@ -1454,17 +1539,17 @@ const musicVisualizer = (function () {
 
         const isFooterOn = window.settings ? window.settings.showFooterVisualizer !== false : true;
         const isDetailOn = window.settings ? window.settings.showDetailVisualizer : false;
-        const isAnyVisualizerWanted = isFooterOn || isDetailOn;
+        const isSuppressed = isVisualizerSuppressedByIOS();
+        const isAnyVisualizerWanted = !isSuppressed && (isFooterOn || isDetailOn);
         const hasEffectsAnalyser = window.soundEffects && window.soundEffects.getAnalyser && window.soundEffects.getAnalyser();
 
         if (!isAnyVisualizerWanted && !hasEffectsAnalyser) {
-            console.log('[Visualizer] Visualizer disabled. Skipping AudioContext creation.');
+            console.log('[Visualizer] Visualizer disabled or suppressed by iOS adaptive setting. Skipping AudioContext creation.');
             return;
         }
 
-        // Only avoid Web Audio when wireless target like AirPlay is actively routing stream
+        // AirPlay / 无线投送期间本地不创建音频流
         if (audio.webkitCurrentPlaybackTargetIsWireless) {
-            triggerStandaloneLoop();
             return;
         }
 
@@ -1554,9 +1639,67 @@ const musicVisualizer = (function () {
             const rect = canvas.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) return;
             const dpr = window.devicePixelRatio || 1;
-            canvas.width = Math.round(rect.width * dpr);
-            canvas.height = Math.round(rect.height * dpr);
+            const width = Math.round(rect.width * dpr), height = Math.round(rect.height * dpr);
+            if (canvas.width !== width) canvas.width = width;
+            if (canvas.height !== height) canvas.height = height;
         });
+    }
+
+    // Keep the meter in normal flow on phones; the player and theme use 1025px.
+    function updateFooterLayout(s) {
+        const container = document.getElementById('visualizer-container');
+        const progress = document.getElementById('player-progress-row');
+        if (!container || !playerFooter || !progress) return;
+
+        const isMobile = window.innerWidth < 1025;
+        const style = s.footerVisualizerStyle || 'bars';
+        const isVumeter = style === 'vumeter';
+        const shouldShow = !!s.showFooterVisualizer && !isVisualizerSuppressedByIOS();
+
+        playerFooter.classList.toggle('has-footer-visualizer', shouldShow);
+        container.style.display = shouldShow ? 'flex' : 'none';
+
+        if (isMobile) {
+            // 移动端：波形扩展到进度条两侧（横跨全宽）
+            if (container.parentElement !== progress.parentElement) {
+                progress.before(container);
+            }
+            container.style.position = 'static';
+            container.style.width = '100%';
+            container.style.maxWidth = '';
+            container.style.left = '0';
+            container.style.transform = 'none';
+            // 双表头模式下需要较大空间，其他模式（条形/波浪）也保持充分展示高度，不人为压扁
+            container.style.height = shouldShow ? (isVumeter ? (window.innerWidth < 380 ? '46px' : '56px') : (window.innerWidth < 380 ? '42px' : '52px')) : '';
+            playerFooter.style.height = '';
+            playerFooter.style.justifyContent = '';
+        } else {
+            // 电脑端：波形不需要扩展到两侧，仅在中间进度条上方（时间标签之间）
+            const centerWrapper = progress.querySelector('.flex-1.h-8');
+            if (centerWrapper && container.parentElement !== centerWrapper) {
+                centerWrapper.prepend(container);
+            }
+            container.style.position = 'absolute';
+            container.style.width = '100%';
+            container.style.maxWidth = isVumeter ? '460px' : '';
+            container.style.left = isVumeter ? '50%' : '0';
+            container.style.transform = isVumeter ? 'translateX(-50%)' : 'none';
+            // The 0.375rem track is centered in its h-8 wrapper. Keep every
+            // desktop visualization 4px above its top edge, not below it.
+            container.style.bottom = 'calc(50% + 0.1875rem + 4px)';
+            const isShortWindow = window.innerHeight <= 845;
+            // 不限制显示高度：给条形阵列充裕的纵向展示空间，避免压成平条
+            container.style.height = shouldShow ? (isVumeter ? (isShortWindow ? '58px' : '68px') : (isShortWindow ? '50px' : '70px')) : '';
+
+            // 电脑端底栏高度：仅在双表头模式下留出大空间，其他模式不用这么高
+            if (shouldShow && isVumeter) {
+                playerFooter.style.height = isShortWindow ? '90px' : '125px';
+                playerFooter.style.justifyContent = 'center';
+            } else {
+                playerFooter.style.height = '';
+                playerFooter.style.justifyContent = '';
+            }
+        }
     }
 
     /**
@@ -1566,7 +1709,8 @@ const musicVisualizer = (function () {
         syncSize();
 
         const s = window.settings || {};
-        const isMobile = window.innerWidth < 768;
+        const isMobile = window.innerWidth < 1025;
+        updateFooterLayout(s);
         const themeColor = getComputedStyle(document.documentElement).getPropertyValue('--c-500').trim() || '#10b981';
         const opacity = s.visualizerOpacity !== undefined ? s.visualizerOpacity : 0.85;
         const globalStyle = s.visualizerGlobalStyle || 'blocks';
@@ -1574,42 +1718,19 @@ const musicVisualizer = (function () {
         const visualizerContainer = document.getElementById('visualizer-container');
         const progressRow = document.getElementById('player-progress-row');
 
+        const shouldShowFooter = !!s.showFooterVisualizer && !isVisualizerSuppressedByIOS();
+        const shouldShowDetail = !!s.showDetailVisualizer && !isVisualizerSuppressedByIOS();
+
         if (!isInitialized) {
-            triggerStandaloneLoop();
-            if (s.showFooterVisualizer && footerCanvas && visualizerContainer) {
-                if (s.footerVisualizerStyle === 'vumeter') {
-                    if (progressRow) progressRow.style.marginTop = isMobile ? '24px' : '';
-                    footerCanvas.style.opacity = opacity;
-                    visualizerContainer.style.width = '100%';
-                    visualizerContainer.style.maxWidth = isMobile ? 'calc(100% - 16px)' : '460px';
-                    visualizerContainer.style.left = '50%';
-                    visualizerContainer.style.transform = 'translateX(-50%)';
-                    visualizerContainer.style.bottom = isMobile ? '16px' : '';
-                    visualizerContainer.style.marginBottom = '';
-                    visualizerContainer.style.height = isMobile ? '40px' : (window.innerHeight <= 845 ? '58px' : '72px');
-                    visualizerContainer.style.display = 'flex';
-                    visualizerContainer.style.zIndex = isMobile ? '1' : '5';
-                } else {
-                    if (progressRow) progressRow.style.marginTop = '';
-                    visualizerContainer.style.width = '100%';
-                    visualizerContainer.style.maxWidth = '';
-                    visualizerContainer.style.left = '0';
-                    visualizerContainer.style.transform = '';
-                    visualizerContainer.style.bottom = '';
-                    visualizerContainer.style.marginBottom = '';
-                    visualizerContainer.style.height = isMobile ? '62px' : (window.innerHeight <= 845 ? '50px' : '80px');
-                    visualizerContainer.style.display = 'flex';
-                    visualizerContainer.style.zIndex = '1';
+            if (!shouldShowFooter && !shouldShowDetail) {
+                if (standaloneRafId) {
+                    cancelAnimationFrame(standaloneRafId);
+                    standaloneRafId = null;
                 }
-                footerCanvas.style.opacity = opacity;
-                syncSize();
-            } else if (progressRow) {
-                progressRow.style.marginTop = '';
+                return;
             }
-            if (s.showDetailVisualizer && detailCanvas) {
-                if (s.detailVisualizerStyle === 'vumeter') {
-                    detailCanvas.style.opacity = opacity;
-                }
+            if (audio && !audio.paused) {
+                init();
             }
             return;
         }
@@ -1617,7 +1738,7 @@ const musicVisualizer = (function () {
         // --- Handle Footer Visualizer ---
         waveFooter.clearAnimations();
 
-        if (s.showFooterVisualizer && footerCanvas && visualizerContainer) {
+        if (shouldShowFooter && footerCanvas && visualizerContainer) {
             const style = s.footerVisualizerStyle || 'bars';
             const containerRect = visualizerContainer.getBoundingClientRect();
             const containerWidth = containerRect.width;
@@ -1625,14 +1746,14 @@ const musicVisualizer = (function () {
             let count, gap, lineWidth, cubeHeight;
 
             if (style === 'vumeter') {
-                if (progressRow) progressRow.style.marginTop = isMobile ? '24px' : '';
+                if (progressRow) progressRow.style.marginTop = '';
                 visualizerContainer.style.width = '100%';
-                visualizerContainer.style.maxWidth = isMobile ? 'calc(100% - 16px)' : '460px';
-                visualizerContainer.style.left = '50%';
-                visualizerContainer.style.transform = 'translateX(-50%)';
-                visualizerContainer.style.bottom = isMobile ? '16px' : '';
+                visualizerContainer.style.maxWidth = isMobile ? '' : '460px';
+                visualizerContainer.style.left = isMobile ? '0' : '50%';
+                visualizerContainer.style.transform = isMobile ? '' : 'translateX(-50%)';
+                if (isMobile) visualizerContainer.style.bottom = '';
                 visualizerContainer.style.marginBottom = '';
-                visualizerContainer.style.height = isMobile ? '40px' : (window.innerHeight <= 845 ? '58px' : '72px');
+                visualizerContainer.style.height = isMobile ? (window.innerWidth < 380 ? '46px' : '56px') : (window.innerHeight <= 845 ? '58px' : '68px');
                 visualizerContainer.style.zIndex = isMobile ? '1' : '5';
                 footerCanvas.style.width = '100%';
                 footerCanvas.style.height = '100%';
@@ -1645,52 +1766,28 @@ const musicVisualizer = (function () {
                 visualizerContainer.style.maxWidth = '';
                 visualizerContainer.style.left = '0';
                 visualizerContainer.style.transform = '';
-                visualizerContainer.style.bottom = '';
+                if (isMobile) visualizerContainer.style.bottom = '';
                 visualizerContainer.style.marginBottom = '';
-                visualizerContainer.style.height = isMobile ? '62px' : (window.innerHeight <= 845 ? '50px' : '80px');
+                const isShort = window.innerHeight <= 845;
+                visualizerContainer.style.height = isMobile ? (window.innerWidth < 380 ? '42px' : '52px') : (isShort ? '50px' : '70px');
                 visualizerContainer.style.zIndex = '1';
-                if (globalStyle === 'blocks') {
-                    gap = 1;
-                    lineWidth = 0;
-                    cubeHeight = 4;
-                    const targetPitch = 5;
-                    const maxCount = Math.floor(containerWidth / targetPitch);
-                    count = Math.min(maxCount, 1024);
-                    footerCanvas.style.width = '100%';
-                    footerCanvas.style.height = '100%';
-                } else {
-                    gap = 0;
-                    lineWidth = 2;
-                    cubeHeight = undefined;
-                    const targetPitch = 6;
-                    const maxCount = Math.floor(containerWidth / targetPitch);
-                    count = Math.min(maxCount, 1024);
-                    footerCanvas.style.width = '100%';
-                    footerCanvas.style.height = '100%';
-                }
-
+                footerCanvas.style.width = '100%';
+                footerCanvas.style.height = '100%';
                 syncSize();
 
-                const options = {
-                    fillColor: themeColor,
-                    lineColor: themeColor,
-                    lineWidth: lineWidth,
-                    count: count,
-                    rounded: true,
-                    bottom: true,
-                    gap: gap
-                };
-
-                if (cubeHeight !== undefined) {
-                    options.cubeHeight = cubeHeight;
-                }
-
-                let AnimationClass = waveFooter.animations.Cubes;
                 if (style === 'wave') {
-                    AnimationClass = waveFooter.animations.Wave;
+                    waveFooter.addAnimation(new waveFooter.animations.Wave({
+                        fillColor: themeColor,
+                        lineColor: themeColor,
+                        lineWidth: 2,
+                        count: Math.min(Math.floor(containerWidth / 6), 64),
+                        rounded: true,
+                        bottom: true
+                    }));
+                } else {
+                    // 条形阵列模式：使用高振幅、高灵敏度的条形动画
+                    waveFooter.addAnimation(new LXStudioBarsAnimation({ globalStyle, themeColor }));
                 }
-
-                waveFooter.addAnimation(new AnimationClass(options));
                 footerCanvas.style.opacity = opacity;
             }
 
@@ -1700,9 +1797,9 @@ const musicVisualizer = (function () {
             visualizerContainer.style.display = 'flex';
             if (playerFooter) {
                 playerFooter.style.transition = 'height 0.3s ease';
-                if (window.innerWidth >= 768) {
-                    playerFooter.style.height = isShortWindow ? '90px' : (style === 'vumeter' ? '125px' : '150px');
-                    playerFooter.style.justifyContent = 'center';
+                if (window.innerWidth >= 1025) {
+                    playerFooter.style.height = (style === 'vumeter') ? (isShortWindow ? '90px' : '125px') : '';
+                    playerFooter.style.justifyContent = (style === 'vumeter') ? 'center' : '';
                 } else {
                     playerFooter.style.height = '';
                     playerFooter.style.justifyContent = '';
@@ -1723,7 +1820,7 @@ const musicVisualizer = (function () {
                 if (view.id === 'view-player-detail') {
                     const container = view.querySelector('#player-detail-container');
                     if (container) {
-                        const needsTopPadding = !footerIsHidden && window.innerWidth >= 768;
+                        const needsTopPadding = !footerIsHidden && window.innerWidth >= 1025;
                         container.style.marginTop = needsTopPadding ? '60px' : '';
                         const extraPb = pb === '' ? '' : Math.max(0, parseInt(pb) - 96) + 'px';
                         container.style.marginBottom = extraPb;
@@ -1770,7 +1867,7 @@ const musicVisualizer = (function () {
         waveDetail.clearAnimations();
         const isDetailViewVisible = isDetailVisible();
 
-        if (s.showDetailVisualizer && detailCanvas && isDetailViewVisible) {
+        if (shouldShowDetail && detailCanvas && isDetailViewVisible) {
             const style = s.detailVisualizerStyle || 'pulse';
             if (style === 'vumeter') {
                 waveDetail.addAnimation(new LXStudioVUMeterAnimation({ isCompact: false, analyserL, analyserR }));
