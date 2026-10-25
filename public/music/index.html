@@ -42,6 +42,8 @@
     <script src="js/vendor/Sortable.min.js"></script>
     <script src="/js/notification-engine.js"></script>
     <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/dynamic-backgrounds.css">
+
 </head>
 
 <body class="t-bg-main flex flex-col overflow-hidden t-text-main font-sans" style="height: 100dvh;">
@@ -3050,6 +3052,28 @@
                                             <option value="solid">纯色背景</option>
                                             <option value="dark">黑色背景</option>
                                         </select>
+                                        <!-- 动态效果选择器 -->
+                                        <div class="flex flex-col gap-1">
+                                            <label class="text-xs t-text-muted font-medium" for="setting-player-dynamic-effect">
+                                                <i class="fas fa-magic mr-1 text-emerald-500"></i>动态效果
+                                            </label>
+                                            <select id="setting-player-dynamic-effect"
+                                                onchange="updateSetting('playerDynamicEffect', this.value)"
+                                                class="lm-select !w-full !py-2">
+                                                <option value="none">无</option>
+                                                <option value="aurora">极光流光</option>
+                                                <option value="cosmos">宇宙星海</option>
+                                                <option value="icons">SVG 音乐漫游</option>
+                                                <option value="notes">音符升腾</option>
+                                                <option value="bubbles">梦幻泡泡</option>
+                                                <option value="waves">流动波纹</option>
+                                                <option value="fireflies">萤火虫</option>
+                                                <option value="meteors">流星雨</option>
+                                                <option value="snow">冬日飘雪</option>
+                                                <option value="sakura">樱花飘落</option>
+                                                <option value="constellation">粒子星座</option>
+                                            </select>
+                                        </div>
                                     </div>
 
                                     <!-- Footer Visualizer -->
@@ -4012,6 +4036,8 @@
             <img id="detail-bg-cover" src=""
                 class="w-full h-full object-cover filter blur-[60px] opacity-40 scale-125 transition-opacity duration-1000">
             <div id="player-detail-bg-overlay" class="absolute inset-0 t-bg-panel/30 backdrop-blur-3xl"></div>
+            <!-- Dynamic Effect Layer -->
+            <div id="player-dynamic-scene" class="absolute inset-0 pointer-events-none" aria-hidden="true"></div>
             <!-- Detail Visualizer Canvas (Raised to avoid being blocked by footer) -->
             <canvas id="detail-visualizer"
                 class="absolute bottom-24 left-0 w-full h-[calc(100vh-6rem)] pointer-events-none"></canvas>
@@ -6228,6 +6254,7 @@
     <script src="js/player/playback.js"></script>
     <script src="js/library/search_requests.js"></script>
     <script src="js/ui/ui_accessibility.js"></script>
+    <script src="js/ui/dynamic_backgrounds.js"></script>
     <script src="app.js"></script>
     <script src="js/player/chromecast.js"></script>
 </body>

@@ -171,6 +171,7 @@ const DEFAULT_SETTINGS = {
     enableLyricGlow: true, // 歌词荧光效果 (默认开启)
     enablePersistentToken: false, // 启用持久化 Token 验证
     playerBackground: 'blur', // 播放页背景: 'blur', 'solid', 'dark'
+    playerDynamicEffect: 'none', // 播放页动态效果: 'none','aurora','icons','bubbles','cosmos','waves'
     saveAccountSettingsToFile: true, // 同步账号设置到文件 (默认开启)
     autoUpdateNetworkList: false, // 自动更新网络歌单 (默认关闭)
     networkListAutoCheckInterval: '6h', // 网络歌单自动检测间隔
@@ -9057,6 +9058,10 @@ async function updateSetting(key, value) {
         applyPlayerBackground(value);
     }
 
+    if (key === 'playerDynamicEffect') {
+        applyPlayerDynamicEffect(value);
+    }
+
     if (key === 'enablePublicSources') {
         if (typeof updateSourceScopeUI === 'function') updateSourceScopeUI();
         if (typeof renderCustomSources === 'function') renderCustomSources();
@@ -9186,6 +9191,11 @@ const SETTINGS_UI_MAP = {
         id: 'setting-player-background',
         type: 'value',
         action: (v) => applyPlayerBackground(v)
+    },
+    playerDynamicEffect: {
+        id: 'setting-player-dynamic-effect',
+        type: 'value',
+        action: (v) => applyPlayerDynamicEffect(v)
     },
     lyricFontSize: {
         id: 'lyric-font-size-slider',
@@ -9361,6 +9371,15 @@ function playerContrastColor(color, backgrounds) {
     }
     return target ? '#ffffff' : '#000000';
 }
+function isAppThemeLight() {
+    const root = document.documentElement;
+    if (root.classList.contains('theme-light')) return true;
+    const appearance = root.getAttribute('data-appearance');
+    if (appearance === 'light') return true;
+    if (appearance === 'dark') return false;
+    return !root.classList.contains('dark');
+}
+
 function applyPlayerBackground(mode) {
     const detailBg = document.getElementById('view-player-detail');
     const bgCover = document.getElementById('detail-bg-cover');
@@ -9368,43 +9387,107 @@ function applyPlayerBackground(mode) {
     if (!detailBg || !bgCover || !bgOverlay) return;
     if (!['blur', 'solid', 'dark', 'aurora', 'midnight', 'paper'].includes(mode)) mode = 'blur';
     detailBg.dataset.appliedBackground = mode;
-    const rootStyle = getComputedStyle(document.documentElement);
-    const panel = rootStyle.getPropertyValue('--bg-panel').trim() || '#1f2937';
+
+    const isLight = isAppThemeLight();
+    const root = document.documentElement;
+    const rootStyle = getComputedStyle(root);
+    const panel = rootStyle.getPropertyValue('--bg-panel').trim() || (isLight ? '#ffffff' : '#1f2937');
     const parse = hex => hex.replace('#', '').match(/.{2}/g).map(v => parseInt(v, 16));
-    // Conservative bounds include the brightest cover plus the subdued visualizer.
+
+    // 根据明暗主题定制不同背景色谱（黑色背景保持纯黑不变）
     const styles = {
-        solid: [panel, [parse(panel)]],
+        // 1. 黑色背景：无论明亮还是暗黑，始终保持纯黑
         dark: ['#000000', [[0, 0, 0], [31, 31, 31]]],
-        aurora: ['linear-gradient(135deg, #123c42, #24264d, #101827)', [[16, 24, 39], [63, 84, 99]]],
-        midnight: ['linear-gradient(155deg, #253551, #121826 60%, #080c14)', [[8, 12, 20], [64, 78, 102]]],
-        paper: ['linear-gradient(135deg, #f5eee2, #e4e8ef)', [[200, 204, 199], [255, 255, 255]]],
-        blur: ['rgba(12, 18, 28, 0.72)', [[9, 13, 20], [66, 70, 76]]]
+
+        // 2. 封面虚化：明亮模式采用通透纯净白磨砂，暗黑模式采用深邃暗夜磨砂
+        blur: isLight
+            ? ['rgba(255, 255, 255, 0.74)', [[255, 255, 255], [235, 240, 248]]]
+            : ['rgba(12, 18, 28, 0.74)', [[9, 13, 20], [66, 70, 76]]],
+
+        // 3. 极光渐变：明亮模式薄荷晨曦浅色流光，暗黑模式深邃极光流光
+        aurora: isLight
+            ? ['linear-gradient(135deg, #dcfce7 0%, #e0e7ff 50%, #ccfbf1 100%)', [[220, 252, 231], [224, 231, 255]]]
+            : ['linear-gradient(135deg, #123c42 0%, #24264d 50%, #101827 100%)', [[16, 24, 39], [63, 84, 99]]],
+
+        // 4. 午夜渐变：明亮模式晴空蓝灰晨风，暗黑模式午夜深海幽蓝
+        midnight: isLight
+            ? ['linear-gradient(155deg, #e0f2fe 0%, #e2e8f0 55%, #f1f5f9 100%)', [[224, 242, 254], [226, 232, 240]]]
+            : ['linear-gradient(155deg, #253551 0%, #121826 60%, #080c14 100%)', [[8, 12, 20], [64, 78, 102]]],
+
+        // 5. 暖雾纸感：明亮模式温暖素雅羊皮纸，暗黑模式复古暗调古卷
+        paper: isLight
+            ? ['linear-gradient(135deg, #fdfbf7 0%, #f4ece1 100%)', [[253, 251, 247], [244, 236, 225]]]
+            : ['linear-gradient(135deg, #2d2621 0%, #1c1714 100%)', [[45, 38, 33], [28, 23, 20]]],
+
+        // 6. 纯色背景：跟随主题面板色自适应明亮/暗黑
+        solid: [panel, [parse(panel.startsWith('#') ? panel : (isLight ? '#ffffff' : '#1f2937'))]]
     };
+
     const [background, samples] = styles[mode];
     if (mode === 'solid') {
         const base = samples[0];
         samples.push(base.map(v => Math.round(v * 0.88)), base.map(v => Math.round(v * 0.88 + 31)));
     }
+
     bgCover.style.display = mode === 'blur' ? 'block' : 'none';
+    bgCover.style.opacity = isLight ? '0.45' : '0.4';
     bgOverlay.className = 'absolute inset-0';
     bgOverlay.style.background = background;
     bgOverlay.style.backdropFilter = mode === 'blur' ? 'blur(60px)' : 'none';
-    detailBg.style.backgroundColor = '#0c121c';
-    const light = playerLuminance(samples[0]) > 0.4;
-    const normal = playerContrastColor(light ? '#475569' : '#b8c4d4', samples);
+
+    // 浅色模式判断：黑色背景绝不走浅色，其余模式在明亮模式下均自适应为浅色
+    const isLightBg = mode !== 'dark' && (isLight || playerLuminance(samples[0]) > 0.4);
+    
+    // 动态调整底色
+    if (mode === 'dark') {
+        detailBg.style.backgroundColor = '#000000';
+    } else if (isLightBg) {
+        detailBg.style.backgroundColor = mode === 'paper' ? '#fdfbf7' : (mode === 'aurora' ? '#f0fdf4' : '#ffffff');
+    } else {
+        detailBg.style.backgroundColor = mode === 'paper' ? '#1c1714' : '#0c121c';
+    }
+
+    detailBg.classList.toggle('detail-light-mode', isLightBg);
+
+    const normal = playerContrastColor(isLightBg ? '#475569' : '#b8c4d4', samples);
     const active = playerContrastColor(rootStyle.getPropertyValue('--c-500').trim(), samples);
     detailBg.style.setProperty('--player-lyric', normal);
     detailBg.style.setProperty('--player-active', active);
-    detailBg.style.setProperty('--text-main', light ? '#172033' : '#f8fafc');
+    detailBg.style.setProperty('--text-main', isLightBg ? '#0f172a' : '#f8fafc');
     detailBg.style.setProperty('--text-muted', normal);
     detailBg.style.setProperty('--text-dim', normal);
+
     if (!detailBg._backgroundObserver) {
-        detailBg._backgroundObserver = new MutationObserver(() => applyPlayerBackground(detailBg.dataset.appliedBackground));
-        detailBg._backgroundObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-appearance', 'class'] });
+        detailBg._backgroundObserver = new MutationObserver(() => {
+            applyPlayerBackground(detailBg.dataset.appliedBackground);
+            if (_playerDynamicFx) _playerDynamicFx.refresh();
+        });
+        detailBg._backgroundObserver.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['data-theme', 'data-appearance', 'class']
+        });
     }
 }
 // ========== 缓存统计与重置逻辑 ==========
 
+// ========== 播放页动态效果 (引擎见 js/ui/dynamic_backgrounds.js) ==========
+let _playerDynamicFx = null;
+function applyPlayerDynamicEffect(mode) {
+    const host = document.getElementById('player-dynamic-scene');
+    if (!host || !window.DynamicBackground) return;
+    if (!_playerDynamicFx) {
+        const detail = document.getElementById('view-player-detail');
+        _playerDynamicFx = window.DynamicBackground.create(host, {
+            isLight: () => {
+                const bg = detail?.dataset.appliedBackground;
+                if (bg === 'dark') return false;
+                return isAppThemeLight() || bg === 'paper';
+            },
+            watch: detail
+        });
+    }
+    _playerDynamicFx.setMode(mode);
+}
 async function calcStorageUsage() {
     try {
         // 1. 优先使用原生 API 获取包含 IndexedDB 的准确占用

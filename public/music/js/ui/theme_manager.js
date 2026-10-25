@@ -67,6 +67,14 @@ function setAppearance(mode, save = true) {
 
     // Update UI in settings
     updateAppearanceUI(mode);
+
+    // 同步更新播放页背景与动效（若存在）
+    if (typeof applyPlayerBackground === 'function') {
+        const detailBg = document.getElementById('view-player-detail');
+        if (detailBg && detailBg.dataset.appliedBackground) {
+            applyPlayerBackground(detailBg.dataset.appliedBackground);
+        }
+    }
 }
 
 function updateThemeSelectionUI(activeTheme) {
