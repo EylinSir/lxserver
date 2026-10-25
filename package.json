@@ -24,7 +24,7 @@
     "build:files": "node scripts/build-filemanager.mjs"
   },
   "engines": {
-    "node": ">= 20",
+    "node": ">= 22",
     "npm": ">= 8.5.2"
   },
   "repository": {
