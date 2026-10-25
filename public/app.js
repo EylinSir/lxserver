@@ -1230,6 +1230,7 @@ class App {
                     <input type="checkbox" class="user-checkbox" data-index="${index}" onchange="app.updateUserBatchBtn()">
                 </div>
                 <div class="col-name">
+                    <span class="user-online-dot ${user.online ? 'online' : 'offline'}" title="${user.online ? `同步连接：在线 (${user.onlineDevices} 台设备)` : '同步连接：离线'}"></span>
                     <div class="user-avatar" style="background-color: ${stringToColor(user.name)}">
                         <span>${this.escapeHtml(user.name.charAt(0).toUpperCase())}</span>
                     </div>
@@ -1257,7 +1258,7 @@ class App {
                     </button>
                 </div>
                 <div class="col-status">
-                    <span class="status-badge active">活跃</span>
+                    <span class="status-badge ${user.disabled ? 'disabled' : 'active'}">${user.disabled ? '已禁用' : '活跃'}</span>
                 </div>
                 <div class="col-actions">
                     <button class="btn-delete" onclick="app.deleteUser(${index})" title="删除用户">
@@ -1544,12 +1545,14 @@ class App {
         const writeToggle = document.getElementById('user-custom-dir-write-toggle');
         const statusEl = document.getElementById('user-custom-dir-status');
         const autoDownloadToggle = document.getElementById('user-auto-download-toggle');
+        const disabledToggle = document.getElementById('user-disabled-toggle');
 
         if (toggle) toggle.checked = user.enableCustomMusicDir === true;
         if (dirInput) dirInput.value = user.customMusicDir || '';
         if (operateToggle) operateToggle.checked = user.allowOperateCustomMusicDir === true;
         if (writeToggle) writeToggle.checked = user.allowWriteCustomMusicDir === true;
         if (autoDownloadToggle) autoDownloadToggle.checked = user.enableAutoDownload === true;
+        if (disabledToggle) disabledToggle.checked = user.disabled === true;
         if (statusEl) statusEl.textContent = '';
 
         if (user.enableCustomMusicDir) {
@@ -1572,6 +1575,7 @@ class App {
         const allowOperateCustomDir = document.getElementById('user-custom-dir-operate-toggle')?.checked || false;
         const allowWriteCustomDir = document.getElementById('user-custom-dir-write-toggle')?.checked || false;
         const enableAutoDownload = document.getElementById('user-auto-download-toggle')?.checked || false;
+        const disabled = document.getElementById('user-disabled-toggle')?.checked || false;
 
         if (!newName) {
             showInfo('请填写用户名');
@@ -1586,6 +1590,7 @@ class App {
                 allowOperateCustomMusicDir: allowOperateCustomDir,
                 allowWriteCustomMusicDir: allowWriteCustomDir,
                 enableAutoDownload: enableAutoDownload,
+                disabled: disabled,
             };
             if (newName !== this.editingUser) {
                 bodyData.newName = newName;

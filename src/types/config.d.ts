@@ -46,6 +46,11 @@ declare namespace LX {
      * 是否启用此用户自动下载歌曲功能（允许该用户将歌单内容自动同步下载至本地数据目录）
      */
     enableAutoDownload?: boolean
+
+    /**
+     * 是否禁用此用户（禁用后禁止Web登录及同步服务）
+     */
+    disabled?: boolean
   }
 
   interface UserConfig extends User {

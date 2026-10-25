@@ -36,6 +36,7 @@ const config: LX.Config = {
     //   allowOperateCustomMusicDir: false, // 可选，是否允许操作目录歌曲（如删除、洗版）
     //   allowWriteCustomMusicDir: false, // 可选，是否允许写入歌曲文件（如关联、更新元信息、嵌入歌词）
     //   enableAutoDownload: false, // 可选，是否启用此用户自动下载歌曲功能
+    //   disabled: false, // 可选，是否禁用此用户（禁用后禁止Web端和同步服务登录，保留数据）
     // },
   ],
 

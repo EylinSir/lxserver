@@ -20,6 +20,10 @@ const verifyByKey = (encryptMsg: string, userId: string, targetUserName?: string
   const userName = getUserName(userId)
   if (!userName) return null
 
+  // 检查用户是否被禁用
+  const userConfig = global.lx.config.users.find(u => u.name === userName)
+  if (userConfig && userConfig.disabled) return null
+
   // 如果指定了目标用户名（通过URL路径），则必须匹配
   if (global.lx.config['user.enablePath'] && targetUserName && userName !== targetUserName) {
     return null
@@ -49,6 +53,7 @@ const verifyByKey = (encryptMsg: string, userId: string, targetUserName?: string
 const verifyByCode = (encryptMsg: string, users: LX.Config['users'], targetUserName?: string) => {
   for (const userInfo of users) {
     if (targetUserName && userInfo.name !== targetUserName) continue
+    if (userInfo.disabled) continue
     let key = toMD5(userInfo.password).substring(0, 16)
     // const iv = Buffer.from(key.split('').reverse().join('')).toString('base64')
     key = Buffer.from(key).toString('base64')
@@ -113,6 +118,10 @@ const verifyConnection = (encryptMsg: string, userId: string) => {
   const userName = getUserName(userId)
   // console.log(userName)
   if (!userName) return false
+
+  // 检查用户是否被禁用
+  const userConfig = global.lx.config.users.find(u => u.name === userName)
+  if (userConfig && userConfig.disabled) return false
   const userSpace = getUserSpace(userName)
   const keyInfo = userSpace.dataManage.getClientKeyInfo(userId)
   if (!keyInfo) return false

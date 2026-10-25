@@ -736,6 +736,7 @@ const saveUsers = () => {
       allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
       allowWriteCustomMusicDir: u.allowWriteCustomMusicDir,
       enableAutoDownload: u.enableAutoDownload,
+      disabled: u.disabled,
     })), null, 2))
     if (typeof global.lx.saveConfig === 'function') {
       global.lx.saveConfig()
@@ -1516,7 +1517,18 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
         if (req.method === 'GET') {
-          // 修改：返回包含密码及自定义目录配置的用户列表
+          // 统计各个用户的在线同步设备数 (通过 WebSocket 活跃客户端)
+          const onlineUserDeviceCounts: Record<string, number> = {}
+          if (wss) {
+            for (const client of (wss.clients as Set<any>)) {
+              const uName = client.userInfo?.name
+              if (uName && client.readyState === 1) {
+                onlineUserDeviceCounts[uName] = (onlineUserDeviceCounts[uName] || 0) + 1
+              }
+            }
+          }
+
+          // 修改：返回包含在线状态、密码及自定义目录配置的用户列表
           const users = global.lx.config.users.map(u => ({
             name: u.name,
             password: u.password,
@@ -1525,9 +1537,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             allowOperateCustomMusicDir: u.allowOperateCustomMusicDir ?? false,
             allowWriteCustomMusicDir: u.allowWriteCustomMusicDir ?? false,
             enableAutoDownload: u.enableAutoDownload ?? false,
+            disabled: u.disabled ?? false,
+            online: (onlineUserDeviceCounts[u.name] || 0) > 0,
+            onlineDevices: onlineUserDeviceCounts[u.name] || 0,
           }))
           if (global.lx.config['user.enablePublicFavorites']) {
-            users.unshift({ name: '_open', password: '', enableCustomMusicDir: false, customMusicDir: '', allowOperateCustomMusicDir: false, allowWriteCustomMusicDir: false, enableAutoDownload: false })
+            users.unshift({ name: '_open', password: '', enableCustomMusicDir: false, customMusicDir: '', allowOperateCustomMusicDir: false, allowWriteCustomMusicDir: false, enableAutoDownload: false, disabled: false, online: false, onlineDevices: 0 })
           }
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -1575,7 +1590,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (req.method === 'PUT') {
           void readBody(req).then(body => {
             try {
-              const { name, newName, password, enableCustomMusicDir, customMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir, enableAutoDownload } = JSON.parse(body)
+              const { name, newName, password, enableCustomMusicDir, customMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir, enableAutoDownload, disabled } = JSON.parse(body)
               if (!name) {
                 res.writeHead(400)
                 res.end('Missing required fields')
@@ -1621,6 +1636,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 if (allowOperateCustomMusicDir !== undefined) user.allowOperateCustomMusicDir = !!allowOperateCustomMusicDir
                 if (allowWriteCustomMusicDir !== undefined) user.allowWriteCustomMusicDir = !!allowWriteCustomMusicDir
                 if (enableAutoDownload !== undefined) user.enableAutoDownload = !!enableAutoDownload
+                if (disabled !== undefined) user.disabled = !!disabled
                 saveUsers()
 
                 // 检测是否需要自动迁移该用户的同步下载歌曲
@@ -2273,7 +2289,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               return
             }
             const user = global.lx.config.users.find(u => u.name === username && u.password === password)
-            if (user) {
+            if (user && user.disabled) {
+              loginLog.warn(`User login blocked (disabled): ${username} from ${ip}`)
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '该用户已被禁用' }))
+            } else if (user) {
               loginLog.info(`User login success: ${username} from ${ip}`)
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: true }))
@@ -2301,7 +2321,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               return
             }
             const user = global.lx.config.users.find((u: any) => u.name === username && u.password === password)
-            if (user) {
+            if (user && user.disabled) {
+              loginLog.warn(`User login blocked (disabled): ${username} from ${ip}`)
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '该用户已被禁用' }))
+            } else if (user) {
               const token = generateSessionId()
               userSessions.set(token, { username, createdAt: Date.now() })
               loginLog.info(`User token issued: ${username} from ${ip}`)
@@ -6101,7 +6125,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
             // 2. 用户账号登录模式
             const matchedUser = (global.lx.config.users || []).find((u: any) => u.name === username && u.password === password)
-            if (matchedUser) {
+            if (matchedUser && matchedUser.disabled) {
+              loginLog.warn(`Player login blocked (disabled): ${username} from ${ip}`)
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '该用户已被禁用' }))
+            } else if (matchedUser) {
               const sessionId = generateSessionId()
               playerSessions.set(sessionId, { createdAt: Date.now(), user: matchedUser.name })
               loginLog.info(`Player login success (${matchedUser.name}) from ${ip}`)
