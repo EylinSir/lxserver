@@ -349,22 +349,23 @@
             </header>
 
             <!-- Views Container -->
-            <div class="flex-1 overflow-hidden relative">
+            <div id="main-views" class="flex-1 overflow-hidden relative">
 
                 <!-- Search View -->
                 <div id="view-search"
                     class="absolute inset-0 flex flex-col px-2 pt-2 md:px-6 md:pt-6 pb-44 md:pb-32 overflow-hidden transition-all duration-300">
-                    <div id="search-status" class="hidden text-sm t-text-muted flex items-center justify-between gap-2 mb-2" role="status" aria-live="polite"><span id="search-status-text"></span><button id="search-cancel" type="button" onclick="cancelMusicSearch()" hidden>取消搜索</button></div>
                     <!-- Search Input Area -->
-                    <div class="flex flex-col md:flex-row gap-2 md:gap-4 mb-4 md:mb-6">
+                    <div id="music-search-toolbar" class="flex flex-col md:flex-row gap-2 md:gap-4 mb-2">
                         <!-- Search Input -->
-                        <div class="flex-1 relative">
-                            <i class="fas fa-search absolute left-4 top-3.5 t-text-muted"></i>
+                        <div class="flex-1 relative rounded-xl" id="search-input-wrapper">
+                            <i class="fas fa-search absolute left-4 top-3.5 t-text-muted pointer-events-none"></i>
                             <input type="text" id="search-input" name="lx_music_search_query"
                                 class="w-full pl-10 pr-4 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all shadow-sm text-sm md:text-base"
                                 placeholder="搜索歌曲、歌手..." onkeypress="handleSearchKeyPress(event)"
                                 autocomplete="one-time-code" readonly onfocus="this.removeAttribute('readonly');"
                                 spellcheck="false">
+                            <!-- 搜索波浪流光动效条（搜索中从头到尾波动） -->
+                            <div id="search-progress-wave" class="search-wave-bar"></div>
                             <!-- Search Suggestions Dropdown -->
                             <div id="search-suggestions"
                                 class="absolute top-full left-0 w-full mt-2 t-bg-panel border t-border-main rounded-xl shadow-xl z-50 hidden overflow-hidden animate-fade-in">
@@ -408,10 +409,23 @@
                         </div>
                     </div>
 
-
-
-
-                    <!-- Search Results Container -->
+                    <!-- Search Status Below Input (配合主题色与平滑动画) -->
+                    <div id="search-status" class="hidden text-xs md:text-sm flex items-center justify-between gap-3 px-1 py-1 mb-3 transition-all duration-300" role="status" aria-live="polite">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span id="search-status-spinner" class="search-status-spinner text-emerald-500 animate-spin" style="display: none;"><i class="fas fa-circle-notch text-xs"></i></span>
+                            <span id="search-status-text" class="search-status-text font-medium truncate"></span>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button id="search-cancel" type="button" onclick="cancelMusicSearch()" hidden
+                                class="search-cancel-btn text-xs px-2.5 py-0.5 rounded-full border transition-all">
+                                取消搜索
+                            </button>
+                            <button id="search-home-btn" type="button" onclick="returnSearchHome()" hidden
+                                class="search-home-btn text-xs px-2.5 py-0.5 rounded-full border transition-all flex items-center gap-1">
+                                <i class="fas fa-home text-[10px]"></i><span>返回主页</span>
+                            </button>
+                        </div>
+                    </div>
                     <div
                         class="flex-1 t-bg-panel rounded-2xl shadow-sm border t-border-main overflow-hidden flex flex-col">
                         <!-- Batch Toolbar (Hidden by default) 搜索/我的收藏批量操作 -->
@@ -632,7 +646,7 @@
                     class="absolute inset-0 flex flex-col px-2 pt-2 md:px-6 md:pt-6 pb-44 md:pb-32 hidden opacity-0 transition-all duration-300 overflow-hidden">
 
                     <!-- Song List Toolbar -->
-                    <div class="flex flex-col md:flex-row gap-3 mb-4 md:mb-6">
+                    <div id="songlist-toolbar" class="flex flex-col md:flex-row gap-3 mb-4 md:mb-6">
                         <!-- Search & Categories -->
                         <div class="flex flex-[2] gap-2 items-center">
                             <div class="relative flex-1 group">
@@ -641,6 +655,7 @@
                                 <input type="text" id="songlist-search-input"
                                     class="w-full pl-10 pr-12 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm text-sm md:text-base"
                                     placeholder="搜索歌单..." onkeypress="handleSongListSearchKeyPress(event)">
+                                <div id="songlist-search-progress-wave" class="search-wave-bar pointer-events-none" aria-hidden="true"></div>
                                 <button onclick="window.SongListManager.search()"
                                     class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all"
                                     title="开始搜索">
@@ -684,6 +699,18 @@
                                 title="打开外部歌单">
                                 <i class="fas fa-link"></i>
                             </button>
+                        </div>
+                    </div>
+
+                    <!-- Songlist Search Status Below Input (配合主题色与平滑动画) -->
+                    <div id="songlist-search-status" class="hidden text-xs md:text-sm flex items-center justify-between gap-3 px-1 py-1 -mt-2 mb-3 transition-all duration-300" role="status" aria-live="polite">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span id="songlist-search-status-spinner" class="search-status-spinner text-emerald-500 animate-spin" style="display: none;"><i class="fas fa-circle-notch text-xs"></i></span>
+                            <span id="songlist-search-status-text" class="truncate text-emerald-600 dark:text-emerald-400 font-medium"></span>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button id="songlist-search-cancel" type="button" onclick="window.SongListManager.cancelSearch()" class="search-cancel-btn hidden px-2.5 py-0.5 text-xs rounded-full border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors">取消搜索</button>
+                            <button id="songlist-search-home-btn" type="button" onclick="window.SongListManager.returnHome()" class="search-home-btn hidden px-2.5 py-0.5 text-xs rounded-full border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-500/50 transition-colors"><i class="fas fa-home text-[10px] mr-1"></i>返回歌单主页</button>
                         </div>
                     </div>
 
@@ -3030,7 +3057,7 @@
                                                 <i class="fas fa-wave-square mr-2 text-emerald-500"></i> 底部播放栏
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
-                                                    <span class="setting-tooltip-content">控制播放栏上方的实时波形显示。<br><span class="text-amber-500 font-semibold">注：iOS 设备受系统限制，开启波形将导致锁屏或退至后台时暂停播放。</span></span>
+                                                    <span class="setting-tooltip-content">控制播放栏上方的实时波形显示。<br><span class="text-amber-500 font-semibold">注：苹果 (iOS) 手机开启后会显示真实音频波形；但因 iOS 系统限制，接管音频将导致锁屏或退至后台时暂停播放且可能影响 AirPlay。建议配合开启下方的【iOS 设备自适应】。</span></span>
                                                 </span>
                                             </h4>
                                             <label class="relative inline-flex items-center cursor-pointer">
@@ -3044,7 +3071,7 @@
                                         </div>
                                         <p class="text-[11px] text-amber-500 dark:text-amber-400 leading-tight flex items-start gap-1">
                                             <i class="fas fa-info-circle mt-0.5 flex-shrink-0 text-[10px]"></i>
-                                            <span>提示：iOS 设备因系统后台限制，开启波形将导致锁屏或退至后台时暂停播放。</span>
+                                            <span>提示：苹果手机开启后会显示正确波形。但受系统限制可能导致锁屏/后台暂停或 AirPlay 异常；建议开启【iOS 设备自适应】。</span>
                                         </p>
                                         <select id="setting-footer-visualizer-style"
                                             onchange="updateSetting('footerVisualizerStyle', this.value)"
@@ -3128,6 +3155,34 @@
                                             <option value="champagne-gold">香槟金典</option>
                                             <option value="studio-monochrome">黑白监听</option>
                                         </select>
+                                    </div>
+
+                                    <!-- iOS Adaptive Visualizer -->
+                                    <div
+                                        class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow flex flex-col gap-3">
+                                        <div class="flex items-center justify-between">
+                                            <h4 class="text-sm font-bold t-text-main flex items-center">
+                                                <i class="fab fa-apple mr-2 text-emerald-500"></i> iOS 设备自适应
+                                                <span class="setting-tooltip-trigger ml-1">
+                                                    <i class="fas fa-question-circle text-[10px]"></i>
+                                                    <span class="setting-tooltip-content">
+                                                        开启后，当检测到访问设备为 iOS (iPhone/iPad) 时自动停用波形显示（底部播放栏设置失效），以保证原生音频直出、锁屏后台播放及 AirPlay 投送完全正常。
+                                                    </span>
+                                                </span>
+                                            </h4>
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" id="setting-ios-adaptive-visualizer"
+                                                    class="sr-only peer"
+                                                    onchange="updateSetting('iosAdaptiveVisualizer', this.checked)">
+                                                <div
+                                                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <p class="text-[11px] text-amber-500 dark:text-amber-400 leading-tight flex items-start gap-1">
+                                            <i class="fas fa-info-circle mt-0.5 flex-shrink-0 text-[10px]"></i>
+                                            <span>默认开启。检测到访问设备为 iOS 时不显示波形（底部播放栏设置失效），保持原生音频直出、锁屏后台播放及 AirPlay 正常。若关闭此项，iOS 设备将强制启用真实音频管线展示波形。</span>
+                                        </p>
                                     </div>
 
                                     <!-- Global Opacity -->
@@ -4070,43 +4125,45 @@
                     <div id="player-status" class="text-xs text-emerald-600 font-medium whitespace-nowrap"></div>
                 </div>
             </div>
-            <!-- Action Buttons (Mobile Compact) -->
+            <!-- Action Buttons (Mobile Compact / Responsive Overflow) -->
             <div id="player-mobile-actions"
-                class="flex flex-wrap items-center justify-end max-[440px]:justify-center gap-1.5 ml-auto flex-shrink-0 max-[440px]:max-w-[80px] max-w-[200px] md:max-w-none">
-                <details class="mobile-player-menu"><summary aria-label="歌曲操作" title="歌曲操作"><i class="fas fa-ellipsis-h" aria-hidden="true"></i></summary><div class="mobile-player-menu-content t-bg-panel">
+                class="flex items-center justify-end gap-1.5 ml-auto flex-shrink-0">
                 <!-- Like button -->
-                <button aria-label="添加到歌单" id="player-like-btn" class="text-gray-300 hover:text-red-500 transition-colors">
+                <button aria-label="添加到歌单" id="player-like-btn" class="text-gray-300 hover:text-red-500 transition-colors p-1" data-action="like">
                     <i class="fas fa-heart text-base md:text-lg"></i>
                 </button>
-                <!-- Download Button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
-                    onclick="handleDownloadClick(event)" title="下载/缓存">
-                    <i class="fas fa-download text-[10px]"></i>
-                </button>
-                <!-- Sound Effects Button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
-                    onclick="window.soundEffects && window.soundEffects.toggle()" title="均衡器 & 音效">
-                    <i class="fas fa-sliders-h text-[10px]"></i>
-                </button>
-                <!-- Comment button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
-                    onclick="toggleCommentModal()">评</button>
-                <!-- Share Card button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
-                    onclick="window.lyricCard && window.lyricCard.open()" title="分享歌词卡片">
-                    <i class="fas fa-image text-[10px]"></i>
-                </button>
-                <!-- Queue Button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
+                <!-- Mobile Action Buttons (Visible when space permits) -->
+                <button aria-label="播放队列" data-mobile-btn="queue"
+                    class="mobile-action-btn md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1.5 py-0.5 transition-colors"
                     onclick="toggleQueueDrawer()" title="播放队列">
                     <i class="fas fa-list text-[10px]"></i>
                 </button>
-                </div></details>
+                <button aria-label="音效与均衡器" data-mobile-btn="effects"
+                    class="mobile-action-btn md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1.5 py-0.5 transition-colors"
+                    onclick="window.soundEffects && window.soundEffects.toggle()" title="均衡器 & 音效">
+                    <i class="fas fa-sliders-h text-[10px]"></i>
+                </button>
+                <button aria-label="下载/缓存" data-mobile-btn="download"
+                    class="mobile-action-btn md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1.5 py-0.5 transition-colors"
+                    onclick="handleDownloadClick(event)" title="下载/缓存">
+                    <i class="fas fa-download text-[10px]"></i>
+                </button>
+                <button aria-label="歌曲评论" data-mobile-btn="comment"
+                    class="mobile-action-btn md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1.5 py-0.5 transition-colors"
+                    onclick="toggleCommentModal()" title="歌曲评论">评</button>
+                <button aria-label="分享歌词卡片" data-mobile-btn="share"
+                    class="mobile-action-btn md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1.5 py-0.5 transition-colors"
+                    onclick="window.lyricCard && window.lyricCard.open()" title="分享歌词卡片">
+                    <i class="fas fa-image text-[10px]"></i>
+                </button>
+
+                <!-- Three dots fold panel for items that don't fit -->
+                <details class="mobile-player-menu" id="player-mobile-overflow-menu">
+                    <summary aria-label="更多操作" title="更多操作">
+                        <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
+                    </summary>
+                    <div class="mobile-player-menu-content t-bg-panel" id="player-mobile-overflow-content"></div>
+                </details>
             </div>
         </div>
 

@@ -91,7 +91,7 @@ test('a local stall timer cannot restart recovery after handing off to Cast', as
     await tick();
     assert.equal(probes, 0); assert.equal(recoveries, 0);
 });
-function visualizerFixture({ touch = false, hidden = false, footer = true } = {}) {
+function visualizerFixture({ touch = false, hidden = false, footer = true, ios = undefined } = {}) {
     let captures = 0, frames = 0;
     const detailView = { classList: { contains: name => hidden && name === 'hidden' } };
     const canvas = { style: {}, width: 100, height: 50, getBoundingClientRect: () => ({ width: 100, height: 50 }) };
@@ -103,16 +103,21 @@ function visualizerFixture({ touch = false, hidden = false, footer = true } = {}
         settings: { showFooterVisualizer: footer, footerVisualizerStyle: 'vumeter', showDetailVisualizer: true, detailVisualizerStyle: 'vumeter' },
         AudioContext: class { constructor() { captures++; throw new Error('native output was captured'); } }, Wave: class {} };
     if (touch) window.ontouchstart = null;
+    const isIOS = ios ?? (!touch);
     vm.runInNewContext(read('public/music/js/visualizer.js'), { window,
         document: { getElementById: id => elements[id], documentElement: {} },
-        navigator: { userAgent: touch ? 'Windows Chrome' : 'Safari', maxTouchPoints: touch ? 10 : 0 },
+        navigator: { userAgent: isIOS ? 'iPhone' : (touch ? 'Android Mobile' : 'Chrome'), maxTouchPoints: touch ? 10 : 0 },
         console: quiet, requestAnimationFrame: () => ++frames, cancelAnimationFrame() {},
         getComputedStyle: () => ({ getPropertyValue: () => '' }) });
     return { window, captures: () => captures, frames: () => frames };
 }
-test('the custom visualizer shares native-output protection on narrow touchscreen devices', () => {
-    const f = visualizerFixture({ touch: true }); f.window.musicVisualizer.init();
+test('the custom visualizer shares native-output protection on iOS devices when adaptive setting is on', () => {
+    const f = visualizerFixture({ ios: true }); f.window.musicVisualizer.init();
     assert.equal(f.captures(), 0);
+});
+test('non-iOS touchscreen devices capture live audio for real visualizer rendering', () => {
+    const f = visualizerFixture({ touch: true, ios: false }); f.window.musicVisualizer.init();
+    assert.equal(f.captures(), 1);
 });
 test('a hidden detail-only VU meter does not keep a standalone animation loop running', () => {
     const f = visualizerFixture({ hidden: true, footer: false }); f.window.musicVisualizer.init();

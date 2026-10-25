@@ -7,6 +7,19 @@
 
 /* iOS zooms focused controls whose computed font size is below 16px. */
 @media (max-width: 1024px) {
+    /* Hide mobile scrollbars while keeping swipe and wheel scrolling available. */
+    #main-sidebar > nav,
+    #search-results {
+        scrollbar-width: none;
+    }
+
+    #main-sidebar > nav::-webkit-scrollbar,
+    #search-results::-webkit-scrollbar {
+        display: none;
+        width: 0;
+        height: 0;
+    }
+
     /* Leave a usable song list below artist and album headers on short screens. */
     #artist-detail-header:not(.artist-hero-collapsed),
     #album-detail-header:not(.album-hero-collapsed) {
@@ -26,7 +39,7 @@
         transform: none;
     }
 
-    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+    input:not([type="range"], [type="checkbox"], [type="radio"]),
     textarea,
     select {
         font-size: 16px !important;
@@ -50,16 +63,6 @@
         display: none !important;
     }
 
-    .playlist-sidebar-item .sidebar-item-actions {
-        max-width: none !important;
-        opacity: 1 !important;
-        pointer-events: auto;
-    }
-
-    .playlist-sidebar-item .sidebar-item-actions .action-btn {
-        width: 30px !important;
-        height: 40px !important;
-    }
 }
 
 /* Custom scrollbar */
@@ -299,10 +302,16 @@
 /* ==========================================================================
    移动端专属紧凑布局：图标更靠近、间距缩小，充分留出歌单名称空间
    ========================================================================== */
-@media (max-width: 767px) {
+@media (max-width: 1024px), (hover: none) {
     .playlist-sidebar-item {
         margin: 2px !important;
         padding: 5px 6px !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+
+    .playlist-sidebar-item:hover .sidebar-item-icon {
+        transform: none;
     }
 
     /* 左侧手柄与图标更靠近 */
@@ -329,16 +338,21 @@
     }
 
     /* 右侧操作按钮间距极大缩小、彼此紧密靠近 */
-    .playlist-sidebar-item .sidebar-item-actions {
+    .playlist-sidebar-item .sidebar-item-actions,
+    .playlist-sidebar-item:hover .sidebar-item-actions {
+        display: none;
         gap: 1px !important;
         max-width: 0;
         opacity: 0;
+        pointer-events: none;
     }
 
-    .playlist-sidebar-item:hover .sidebar-item-actions,
+    /* Touch hover can stick: only the currently viewed list exposes actions. */
     .playlist-sidebar-item.active-sub-item .sidebar-item-actions {
+        display: flex;
         max-width: 150px !important;
         opacity: 1 !important;
+        pointer-events: auto;
     }
 
     .playlist-sidebar-item .action-btn {
@@ -900,7 +914,111 @@ aside {
 .queue-actions-menu button { display: block; width: 100%; min-height: 44px; text-align: left; padding: .5rem 1rem; }
 .song-row-actions:focus-within { opacity: 1; }
 button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--c-500); outline-offset: 3px; }
+
 @media (max-width: 1024px) {
+    /* Compact mobile browsing controls to leave more height for song lists. */
+    main > header {
+        height: 48px;
+        flex-shrink: 0;
+    }
+    #music-search-toolbar,
+    #songlist-toolbar {
+        gap: 4px;
+        margin-bottom: 6px;
+        flex-shrink: 0;
+    }
+    #music-search-toolbar input,
+    #music-search-toolbar select,
+    #music-search-toolbar > div > button,
+    #songlist-toolbar input,
+    #songlist-toolbar select,
+    #songlist-toolbar > div > button {
+        height: 36px;
+        min-height: 36px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        font-size: 12px;
+        line-height: 18px;
+        border-radius: 10px;
+    }
+    #music-search-toolbar button,
+    #songlist-toolbar button {
+        min-width: 36px;
+        font-size: 12px;
+        line-height: 18px;
+    }
+    #search-type,
+    #search-source,
+    #cs-w-search-type,
+    #cs-w-search-source,
+    #cs-w-songlist-source {
+        flex: 0 0 auto;
+        width: 84px;
+    }
+    #search-type,
+    #search-source {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+    /* CustomSelectManager hides the select and clones its Tailwind spacing
+       into inline styles on this visible trigger. Override those on mobile. */
+    #music-search-toolbar .cs-trigger,
+    #songlist-toolbar .cs-trigger {
+        height: 36px;
+        min-height: 36px;
+        padding: 4px 8px !important;
+        font-size: 12px !important;
+        line-height: 18px;
+        border-radius: 10px !important;
+    }
+    #music-search-toolbar .cs-trigger-text,
+    #songlist-toolbar .cs-trigger-text {
+        margin-right: 4px;
+    }
+    #music-search-toolbar .cs-trigger-icon,
+    #songlist-toolbar .cs-trigger-icon {
+        margin-left: 0;
+        font-size: 8px;
+    }
+    #music-search-toolbar i,
+    #songlist-toolbar i {
+        font-size: 12px;
+    }
+    #search-input,
+    #songlist-search-input {
+        padding-left: 32px;
+    }
+    #search-input-wrapper > .fa-search,
+    #songlist-toolbar .relative > .fa-search {
+        left: 12px;
+    }
+    #search-input-wrapper > .fa-search {
+        top: 50%;
+        transform: translateY(-50%);
+    }
+    #songlist-sort-container { padding: 2px; border-radius: 10px; }
+    #songlist-sort-container button {
+        min-height: 30px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+    }
+    #search-status,
+    #songlist-search-status {
+        margin-top: 0;
+        margin-bottom: 6px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+    }
+    /* The footer includes the visualizer, wrapped metadata and safe-area padding.
+       Override legacy fixed/inline reservations with its measured border box. */
+    #main-views > [id^="view-"],
+    #songlist-detail-view {
+        padding-bottom: var(--player-footer-inset, 11rem) !important;
+    }
+    #main-sidebar {
+        padding-bottom: var(--player-footer-inset, 11rem) !important;
+    }
+    #main-sidebar > nav { min-height: 0; }
     #player-footer { height: auto !important; flex-shrink: 0; }
     #player-transport { flex: none; }
     #visualizer-container { position: static !important; width: 100% !important; margin: 0; flex: none; }
@@ -909,17 +1027,22 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     #player-title { width: 100%; max-width: 100%; }
     #player-mobile-actions { max-width: none; flex-wrap: nowrap; }
     .mobile-player-menu { position: relative; }
-    .mobile-player-menu > summary { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; list-style: none; cursor: pointer; }
-    .mobile-player-menu-content { display: none; position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 80; grid-template-columns: repeat(3, 44px); gap: 8px; padding: 12px; border: 1px solid var(--c-200); border-radius: 12px; box-shadow: 0 8px 24px #0003; }
-    .mobile-player-menu[open] .mobile-player-menu-content { display: grid; }
-    .mobile-player-menu-content button { min-width: 44px; min-height: 44px; margin: 0; font-size: 14px; }
+    .mobile-player-menu > summary { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; list-style: none; cursor: pointer; color: var(--text-muted, #9ca3af); border-radius: 6px; }
+    .mobile-player-menu > summary:hover { color: var(--c-500, #10b981); }
+    .mobile-player-menu-content { display: none; position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 80; min-width: 110px; background: var(--bg-panel, #fff); border: 1px solid var(--c-200, #e5e7eb); border-radius: 12px; box-shadow: 0 8px 24px #0003; padding: 6px; flex-direction: column; gap: 4px; }
+    .mobile-player-menu[open] .mobile-player-menu-content { display: flex; }
+    .mobile-player-menu-content .mobile-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--text-main, #374151); text-align: left; background: transparent; border: none; }
+    .mobile-player-menu-content .mobile-menu-item:hover { background: var(--bg-item-hover, rgba(0, 0, 0, 0.05)); color: var(--c-500, #10b981); }
+    .mobile-player-menu-content .mobile-menu-item i { width: 14px; text-align: center; }
     #player-controls button { min-height: 44px; }
+    /* Match the touch minimum height so the play button stays circular. */
+    #player-controls #btn-play { min-width: 44px; flex-shrink: 0; }
     .song-row-actions button, .queue-actions > summary { min-width: 28px; min-height: 32px; }
     #player-progress-row { margin: 0; padding: 0; }
 }
+
 @media (min-width: 1025px) {
-    .mobile-player-menu-content { background: transparent; }
-    #visualizer-container { left: 3rem; width: calc(100% - 6rem); bottom: calc(100% - 1rem); }
+    .mobile-player-menu { display: none !important; }
 }
 
 /* Buffering status dots animation */
@@ -1819,6 +1942,129 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     display: flex;
     flex-direction: column;
     gap: 1px;
+}
+
+/* 搜索框波浪流光动效条（从左到右淡入淡出） */
+.search-wave-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-bottom-left-radius: 0.75rem;
+    border-bottom-right-radius: 0.75rem;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 5;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, black 15%, black 85%, transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0%, black 15%, black 85%, transparent 100%);
+}
+
+.search-wave-bar.is-active {
+    opacity: 1;
+}
+
+.search-wave-bar.is-active::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 45%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        color-mix(in srgb, var(--c-400, #34d399) 35%, transparent) 25%,
+        var(--c-500, #10b981) 50%,
+        color-mix(in srgb, var(--c-300, #6ee7b7) 35%, transparent) 75%,
+        transparent 100%
+    );
+    filter: drop-shadow(0 0 4px var(--c-500, #10b981));
+    animation: search-wave-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes search-wave-sweep {
+    0% {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+
+    25% {
+        opacity: 1;
+    }
+
+    75% {
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateX(230%);
+        opacity: 0;
+    }
+}
+
+/* 搜索状态条与主题色匹配 */
+.search-status-text {
+    color: var(--c-600, #059669);
+    letter-spacing: 0.01em;
+}
+
+:root[data-appearance="dark"] .search-status-text,
+.dark .search-status-text {
+    color: var(--c-400, #34d399);
+}
+
+.search-cancel-btn {
+    color: var(--c-600, #059669);
+    border-color: var(--c-300, #a7f3d0);
+    background-color: var(--c-50, #ecfdf5);
+}
+
+.search-cancel-btn:hover {
+    color: #fff;
+    background-color: var(--c-500, #10b981);
+    border-color: var(--c-500, #10b981);
+}
+
+:root[data-appearance="dark"] .search-cancel-btn,
+.dark .search-cancel-btn {
+    color: var(--c-300, #6ee7b7);
+    border-color: var(--c-800, #065f46);
+    background-color: rgba(16, 185, 129, 0.1);
+}
+
+:root[data-appearance="dark"] .search-cancel-btn:hover,
+.dark .search-cancel-btn:hover {
+    color: #fff;
+    background-color: var(--c-600, #059669);
+    border-color: var(--c-500, #10b981);
+}
+
+.search-home-btn {
+    color: var(--text-muted, #9ca3af);
+    border-color: var(--c-200, #e5e7eb);
+    background-color: transparent;
+}
+
+.search-home-btn:hover {
+    color: var(--c-600, #059669);
+    border-color: var(--c-400, #34d399);
+    background-color: var(--c-50, #ecfdf5);
+}
+
+:root[data-appearance="dark"] .search-home-btn,
+.dark .search-home-btn {
+    color: var(--text-muted, #9ca3af);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+:root[data-appearance="dark"] .search-home-btn:hover,
+.dark .search-home-btn:hover {
+    color: var(--c-300, #6ee7b7);
+    border-color: var(--c-600, #059669);
+    background-color: rgba(16, 185, 129, 0.15);
 }
 
 

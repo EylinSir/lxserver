@@ -152,6 +152,7 @@ const DEFAULT_SETTINGS = {
     enableSmtcLyric: true, // SMTC 歌词显示 (默认开启)
     // Visualizer Settings (Refactored)
     showFooterVisualizer: true,
+    iosAdaptiveVisualizer: true, // iOS 设备自适应 (默认开启)
     footerVisualizerStyle: 'bars',
     showDetailVisualizer: false,
     detailVisualizerStyle: 'pulse',
@@ -2388,6 +2389,11 @@ const SOURCES = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
 //搜索歌曲
 async function doSearch(page = 1, append = false) {
+    const input = document.getElementById('search-input')?.value.trim() || '';
+    if (!input) {
+        // 搜索框为空时不进行任何操作，不回到主页
+        return;
+    }
     const request = window.SearchRequests.begin();
     window.setSearchStatus();
     const typeEl = document.getElementById('search-type');
@@ -2405,7 +2411,6 @@ async function doSearch(page = 1, append = false) {
     // 只有在开启全新搜索（第一页且非追加模式）时才重置局部过滤状态
     if (window.ListSearch && page === 1 && !append) window.ListSearch.resetState();
 
-    const input = document.getElementById('search-input').value.trim();
     const resultsContainer = document.getElementById('search-results');
 
     // Local Search Logic
@@ -2483,7 +2488,12 @@ async function doSearch(page = 1, append = false) {
         window.currentNetworkPage = page;
     }
 
-    window.setSearchStatus('正在搜索…', true);
+    const sourceName = typeof getSourceName === 'function' ? getSourceName(source) : source;
+    if (source === 'all') {
+        window.setSearchStatus(`已完成 0/${SOURCES.length} 个音源，找到 0 条结果`, true);
+    } else {
+        window.setSearchStatus(`正在搜索 ${sourceName}...`, true);
+    }
     const failures = [];
     try {
         const headers = {};
@@ -2515,7 +2525,9 @@ async function doSearch(page = 1, append = false) {
                     return [];
                 } finally {
                     completed++;
-                    if (request.current()) window.setSearchStatus(`已完成 ${completed}/${SOURCES.length} 个音源，找到 ${partial.length} 条结果`, true);
+                    if (request.current()) {
+                        window.setSearchStatus(`已完成 ${completed}/${SOURCES.length} 个音源，找到 ${partial.length} 条结果`, true);
+                    }
                 }
             });
             const results = await Promise.all(promises);
@@ -2528,7 +2540,7 @@ async function doSearch(page = 1, append = false) {
                 list = flatList;
             }
         } else {
-            if (pageInfoEl && type === 'song') pageInfoEl.innerText = '正在取该平台全部结果...';
+            if (pageInfoEl && type === 'song') pageInfoEl.innerText = `正在取${sourceName}全部结果...`;
             const data = await request.json(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${source}&type=${type}&page=${page}`, headers);
             if (!request.current()) return;
 
@@ -2551,7 +2563,20 @@ async function doSearch(page = 1, append = false) {
         }
 
         if (!request.current()) return;
-        window.setSearchStatus(failures.length ? `部分音源失败或超时 (${failures.join('、')})，已显示可用结果；可重新搜索重试` : '');
+        const totalCount = list ? list.length : 0;
+        let completionMsg = '';
+        if (source === 'all') {
+            const successCount = SOURCES.length - failures.length;
+            if (failures.length === 0) {
+                completionMsg = `全部 ${SOURCES.length}/${SOURCES.length} 个音源成功，找到 ${totalCount} 条结果`;
+            } else {
+                const failedNames = failures.map(s => (typeof getSourceName === 'function' ? getSourceName(s) : s)).join('、');
+                completionMsg = `已完成 ${successCount}/${SOURCES.length} 个音源，找到 ${totalCount} 条结果，${failedNames}源失败`;
+            }
+        } else {
+            completionMsg = `找到 ${totalCount} 条结果`;
+        }
+        window.setSearchStatus(completionMsg, false);
         // 歌手/专辑/歌单仍支持 append 追加翻页
         if (append && appendableServerSearch && (type === 'singer' || type === 'album')) {
             if (list && list.length > 0) {
@@ -2601,7 +2626,7 @@ async function doSearch(page = 1, append = false) {
         }
     } catch (e) {
         if (!request.current()) return;
-        window.setSearchStatus('搜索失败，请重试或切换音源');
+        window.setSearchStatus(e.message || '搜索失败，请重试或切换音源', false);
         console.error('[Search] 搜索失败:', e);
         if (append) {
             try {
@@ -2610,7 +2635,10 @@ async function doSearch(page = 1, append = false) {
                 showError(`搜索追加出错: ${e.message}`);
             }
         } else {
-            resultsContainer.innerHTML = `<div class="text-center text-red-500 p-8">搜索出错: ${escapeHtmlText(e.message)}</div>`;
+            const hasExistingRows = resultsContainer.querySelector('table, tbody tr, .grid');
+            if (!hasExistingRows) {
+                resultsContainer.innerHTML = `<div class="text-center text-red-500 p-8">搜索出错: ${escapeHtmlText(e.message)}</div>`;
+            }
         }
     }
 }
@@ -2810,6 +2838,7 @@ function handleHotSearchClick(keyword) {
 }
 
 function showInitialSearchState() {
+    window.showInitialSearchState = showInitialSearchState;
     const initialRequest = window.SearchRequests?.begin();
     window.setSearchStatus?.();
     document.getElementById('search-pagination-bar')?.classList.add('hidden');
@@ -7704,6 +7733,9 @@ function updatePlayerInfo(song, actualQuality) {
 
     // 触发滚动检测
     applyMarqueeChecks();
+    if (window.adjustMobilePlayerActions) {
+        window.adjustMobilePlayerActions();
+    }
 
     const imgUrl = getImgUrl(song);
 
@@ -9118,6 +9150,7 @@ const SETTINGS_UI_MAP = {
 
     // 视觉效果 (Visualizer)
     showFooterVisualizer: { id: 'setting-show-footer-visualizer', type: 'checkbox' },
+    iosAdaptiveVisualizer: { id: 'setting-ios-adaptive-visualizer', type: 'checkbox' },
     footerVisualizerStyle: { id: 'setting-footer-visualizer-style', type: 'value' },
     showDetailVisualizer: { id: 'setting-show-detail-visualizer', type: 'checkbox' },
     detailVisualizerStyle: { id: 'setting-detail-visualizer-style', type: 'value' },
