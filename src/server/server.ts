@@ -20,7 +20,7 @@ import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
 import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
 import { createMsg2call } from 'message2call'
-import { ElFinderConnector, getSystemRoot } from './integrations/elfinderConnector'
+import { handleFileManager } from './integrations/fileManager'
 import formidable from 'formidable'
 // @ts-ignore
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
@@ -7106,165 +7106,14 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return customSourceHandlers.handleUpdatePlatforms(req, res)
       }
 
-      // elFinder 文件管理器连接器
-      if (pathname === '/api/elfinder/connector') {
-        // [修改] 优先从 Header 获取，如果没有则尝试从 URL 参数获取 (用于支持下载和预览)
-        const auth = req.headers['x-frontend-auth'] || urlObj.searchParams.get('auth')
-
-        if (auth !== global.lx.config['admin.password']) {
-          res.writeHead(401)
-          res.end('Unauthorized')
-          return
-        }
-
-        // 处理GET请求
-        if (req.method === 'GET') {
-          void (async () => {
-            try {
-              const params: any = {}
-              const url = new URL(req.url || '', `http://${req.headers.host}`)
-              url.searchParams.forEach((value, key) => {
-                params[key] = value
-              })
-
-              const connector = new ElFinderConnector(getSystemRoot())
-              const cmd = params.cmd || 'open'
-              const result = await connector.handle(cmd, params)
-
-              // [新增] 处理文件下载 (file) 和 打包下载 (zipdl)
-              if ((cmd === 'file' || cmd === 'zipdl') && result.path && !result.error) {
-                if (fs.existsSync(result.path)) {
-                  const mime = getMime(result.path)
-                  const headers: any = { 'Content-Type': mime }
-
-                  // 如果是下载请求，或者是打包下载，强制添加附件头
-                  if (params.download === '1' || cmd === 'zipdl') {
-                    headers['Content-Disposition'] = `attachment; filename="${encodeURIComponent(path.basename(result.path))}"`
-                  }
-
-                  res.writeHead(200, headers)
-                  fs.createReadStream(result.path).pipe(res)
-                  return
-                } else {
-                  res.writeHead(404)
-                  res.end('Not Found')
-                  return
-                }
-              }
-
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify(result))
-            } catch (err: any) {
-              res.writeHead(500)
-              res.end(JSON.stringify({ error: [err.message] }))
-            }
-          })()
-          return
-        }
-
-        // 处理POST请求
-        if (req.method === 'POST') {
-          const contentType = req.headers['content-type'] || ''
-
-          // 处理文件上传
-          if (contentType.includes('multipart/form-data')) {
-            const form = formidable({ multiples: true, uploadDir: require('os').tmpdir() })
-
-            form.parse(req, async (err: any, fields: any, files: any) => {
-              if (err) {
-                res.writeHead(500)
-                res.end(JSON.stringify({ error: ['Upload error'] }))
-                return
-              }
-
-              const params = { ...fields }
-              // formidable v3 返回的值可能是数组，需要转换
-              for (const key in params) {
-                if (Array.isArray(params[key]) && params[key].length === 1) {
-                  params[key] = params[key][0]
-                }
-              }
-              console.log('[文件管理] 接收到上传文件列表:', Object.keys(files))
-              console.log('[文件管理] 接收到文件详情:', files)
-              try {
-                // 获取上传的文件（字段名可能是 upload, upload[] 等）
-                const uploadedFiles = files.upload || files['upload[]'] || Object.values(files)[0]
-
-                if (params.cmd === 'upload' && uploadedFiles) {
-                  const connector = new ElFinderConnector(getSystemRoot())
-                  const uploadFiles = Array.isArray(uploadedFiles) ? uploadedFiles : [uploadedFiles]
-                  const added: any[] = []
-
-                  for (const file of uploadFiles) {
-                    const target = (connector as any).decode(params.target)
-                    const destPath = require('path').join(target, file.originalFilename || file.newFilename)
-                    await require('fs').promises.copyFile(file.filepath, destPath)
-                    await require('fs').promises.unlink(file.filepath)
-
-                    const fileInfo = await (connector as any).getFileInfo(destPath)
-                    if (fileInfo) added.push(fileInfo)
-                  }
-
-                  res.writeHead(200, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify({ added }))
-                } else {
-                  const connector = new ElFinderConnector(getSystemRoot())
-                  const cmd = params.cmd || 'open'
-                  const result = await connector.handle(cmd, params)
-
-                  res.writeHead(200, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify(result))
-                }
-              } catch (err: any) {
-                res.writeHead(500)
-                res.end(JSON.stringify({ error: [err.message] }))
-              }
-            })
-            return
-          } else {
-            // 普通POST数据
-            void readBody(req).then(async body => {
-              try {
-                // 修改开始：兼容 JSON 和 x-www-form-urlencoded
-                let params: any = {}
-                try {
-                  params = JSON.parse(body || '{}')
-                } catch (e) {
-                  // 如果 JSON 解析失败，尝试解析为 URL 查询参数格式
-                  const urlParams = new URLSearchParams(body)
-                  urlParams.forEach((value, key) => {
-                    // 处理数组情况 (例如 targets[])
-                    if (params[key]) {
-                      if (Array.isArray(params[key])) {
-                        params[key].push(value)
-                      } else {
-                        params[key] = [params[key], value]
-                      }
-                    } else {
-                      params[key] = value
-                    }
-                  })
-                }
-                // 修改结束
-
-                const connector = new ElFinderConnector(getSystemRoot())
-                const cmd = params.cmd || 'open'
-                const result = await connector.handle(cmd, params)
-
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify(result))
-              } catch (err: any) {
-                res.writeHead(500)
-                res.end(JSON.stringify({ error: [err.message] }))
-              }
-            })
-            return
-          }
-        }
-
+      // VueFinder: scoped storage roots, header auth and media sessions.
+      if (pathname === '/api/files' || pathname.startsWith('/api/files/')) {
+        await handleFileManager(req, res, {
+          root: process.cwd(),
+          data: global.lx.dataPath,
+        }, global.lx.config['admin.password'])
         return
       }
-
 
       // Configuration API
       if (pathname === '/api/config') {
