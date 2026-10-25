@@ -2,8 +2,8 @@ import http from 'http'
 import crypto from 'crypto'
 import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
-import { callUserApiGetMusicUrl } from '@/server/userApi'
-import { downloadAndCache, checkCache, serveCacheFile } from '@/server/fileCache'
+import { callUserApiGetMusicUrl } from '@/server/sources/userApi'
+import { downloadAndCache, checkCache, serveCacheFile } from '@/server/music/fileCache'
 import {
     getSingerPic, getSingerDetail, getSingerMid, nameSimilarity,
     resolveSingerSources, getOrderedSingerSources, normalizeName as normalizeSingerName,
@@ -15,10 +15,10 @@ import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
 import { buildQueryVariants, toSimplified } from '@/server/utils/zhConvert'
 import { getCachedDislikeRuleSet, invalidateDislikeCache } from '@/server/utils/dislikeCache'
-import { proxyCoverImage } from '@/server/coverProxy'
+import { proxyCoverImage } from '@/server/media/coverProxy'
 import { subsonicLog } from '@/utils/log4js'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
-import { listRadioStations, getRadioStation, addRadioStation, updateRadioStation, removeRadioStation } from '@/server/radioStations'
+import { listRadioStations, getRadioStation, addRadioStation, updateRadioStation, removeRadioStation } from '@/server/music/radioStations'
 
 // 音乐源歌单 → 电台 列表缓存（避免每次 getInternetRadioStations 都枚举全部音源实拉）
 let playlistRadioCache: { ts: number; stations: any[] } | null = null

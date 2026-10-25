@@ -194,8 +194,8 @@ window.soundEffects = (function () {
 
         pitchShifterInitPromise = (async () => {
             try {
-                console.log('[SoundEffects] Loading Pitch Shifter Module from /music/js/pitch-shifter/phase-vocoder.js');
-                await audioContext.audioWorklet.addModule('/music/js/pitch-shifter/phase-vocoder.js');
+                console.log('[SoundEffects] Loading Pitch Shifter Module from /music/js/player/pitch-shifter/phase-vocoder.js');
+                await audioContext.audioWorklet.addModule('/music/js/player/pitch-shifter/phase-vocoder.js');
                 if (!canProcessLocally()) {
                     pitchShifterInitPromise = null;
                     return null;

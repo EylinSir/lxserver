@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
-import * as fileCache from './fileCache'
-import * as customMusicManager from './customMusicManager'
+import * as fileCache from '../music/fileCache'
+import * as customMusicManager from '../music/customMusicManager'
 
 const MAX_REMASTER_ATTEMPTS = 3
 const QUALITY_ORDER = ['128k', '192k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master'] as const

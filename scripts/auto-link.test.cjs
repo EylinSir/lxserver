@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { AutoLinkQueue, itemKey, seconds } = require('../src/server/autoLinkQueue.ts');
-const { withCacheBrowseLocation, getCacheBrowseLocation } = require('../src/server/cacheBrowseLocation.ts');
+const { AutoLinkQueue, itemKey, seconds } = require('../src/server/task/autoLinkQueue.ts');
+const { withCacheBrowseLocation, getCacheBrowseLocation } = require('../src/server/music/cacheBrowseLocation.ts');
 
 function fixture(t, overrides = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lx-auto-link-'));

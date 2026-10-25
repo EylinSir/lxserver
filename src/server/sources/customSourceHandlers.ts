@@ -3,9 +3,9 @@ import * as path from 'path'
 import { extractMetadata, loadUserApi, initUserApis, getApiStatus, clearApiStatus } from './userApi'
 import type { IncomingMessage, ServerResponse } from 'http'
 import needle from 'needle'
-import { verifyUserAuth } from './server'
-import { normalizeSourceOwner } from './security'
-import { getProxyAgent } from '../modules/utils/proxy.js'
+import { verifyUserAuth } from '../server'
+import { normalizeSourceOwner } from '../auth/security'
+import { getProxyAgent } from '../../modules/utils/proxy.js'
 
 // Authenticate the requested owner before parsing or executing source scripts.
 function authorizeOwner(req: IncomingMessage, res: ServerResponse, username?: string, unsafe = false, readOnly = false): boolean {

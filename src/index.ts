@@ -828,7 +828,7 @@ if (webdavSync.isConfigured()) {
 
       // 3. 重新加载所有自定义源 (解决前端显示加载中/旧源问题)
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { initUserApis } = require('@/server/userApi')
+      const { initUserApis } = require('@/server/sources/userApi')
       console.log('[WebDAV] 正在重新初始化自定义源...')
       await initUserApis()
     }

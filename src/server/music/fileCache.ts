@@ -1,7 +1,7 @@
-import { resolveContainedPath } from './security'
-import { serveFile } from './serveFile'
+import { resolveContainedPath } from '../auth/security'
+import { serveFile } from '../http/serveFile'
 import { getCacheBrowseLocation } from './cacheBrowseLocation'
-import { isRemasterStage, remasterStaging } from './remasterStaging'
+import { isRemasterStage, remasterStaging } from '../task/remasterStaging'
 
 
 import fs from 'fs'
@@ -12,9 +12,9 @@ import https from 'https'
 import crypto from 'crypto'
 import { PassThrough } from 'stream'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
-import { buildLyrics, parseLyrics } from '../utils/lrcTool'
-import { formatPlayTime } from '../utils/common'
-import { getUserSpace } from '../user'
+import { buildLyrics, parseLyrics } from '../../utils/lrcTool'
+import { formatPlayTime } from '../../utils/common'
+import { getUserSpace } from '../../user'
 
 // --- Cache Naming Patterns ---
 export const CACHE_NAMING_PATTERNS = {

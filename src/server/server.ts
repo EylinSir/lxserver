@@ -1,12 +1,12 @@
 import http, { type IncomingMessage } from 'node:http'
-import { resolveCollectionUser } from './collectionAccess'
+import { resolveCollectionUser } from './auth/collectionAccess'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import url from 'node:url'
 import { WebSocketServer, WebSocket } from 'ws'
 import { registerLocalSyncEvent, callObj, sync } from './sync'
-import { authCode, authConnect } from './auth'
+import { authCode, authConnect } from './auth/auth'
 import { getAddress, sendStatus, decryptMsg, encryptMsg, getIP } from '@/utils/tools'
 import { accessLog, startupLog, syncLog, loginLog, tokenLog } from '@/utils/log4js'
 import {
@@ -20,20 +20,20 @@ import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
 import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
 import { createMsg2call } from 'message2call'
-import { ElFinderConnector, getSystemRoot } from './elfinderConnector'
+import { ElFinderConnector, getSystemRoot } from './integrations/elfinderConnector'
 import formidable from 'formidable'
 // @ts-ignore
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
-import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './userApi'
-import * as customSourceHandlers from './customSourceHandlers'
-import * as fileCache from './fileCache'
-import { withCacheBrowseLocation } from './cacheBrowseLocation'
-import { remasterStaging } from './remasterStaging'
-import * as customMusicManager from './customMusicManager'
-import * as serverDownloadQueue from './serverDownloadQueue'
-import * as remasterQueue from './remasterQueue'
-import { AutoLinkQueue } from './autoLinkQueue'
+import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './sources/userApi'
+import * as customSourceHandlers from './sources/customSourceHandlers'
+import * as fileCache from './music/fileCache'
+import { withCacheBrowseLocation } from './music/cacheBrowseLocation'
+import { remasterStaging } from './task/remasterStaging'
+import * as customMusicManager from './music/customMusicManager'
+import * as serverDownloadQueue from './task/serverDownloadQueue'
+import * as remasterQueue from './task/remasterQueue'
+import { AutoLinkQueue } from './task/autoLinkQueue'
 import { identifyLocalSong } from './utils/identify'
 
 const autoLinkQueue = new AutoLinkQueue(() => path.join(global.lx.dataPath, 'runtime'), {
@@ -61,15 +61,15 @@ const autoLinkQueue = new AutoLinkQueue(() => path.join(global.lx.dataPath, 'run
     return await fileCache.linkLocalFile(item.filename, match, username, item.folder)
   },
 })
-import * as scheduler from './scheduler'
+import * as scheduler from './task/scheduler'
 import { getUpdatedListIds, removeUpdatedListId } from './task/networkListTask'
 import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSyncProgress, triggerUserSync, cancelUserSync, getUserSyncStorageLocation, isUserSyncRunning, migrateSyncStorage } from './task/syncDownloadTask'
-import { getDownloadQualityCandidates } from './downloadQuality'
+import { getDownloadQualityCandidates } from './music/downloadQuality'
 import crypto from 'node:crypto'
-import { parseCookies, resolveContainedPath, resolvePublicUrl, fetchPublicBuffer } from './security'
-import { createCastHandler } from './castAccess'
-import { getBuildInfo } from './buildInfo'
-import { coverThumbnail } from './coverThumbnail'
+import { parseCookies, resolveContainedPath, resolvePublicUrl, fetchPublicBuffer } from './auth/security'
+import { createCastHandler } from './integrations/castAccess'
+import { getBuildInfo } from './utils/buildInfo'
+import { coverThumbnail } from './media/coverThumbnail'
 import needle from 'needle'
 import { getProxyAgent } from '../modules/utils/proxy.js'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
@@ -1404,7 +1404,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
     // [Subsonic API]
     const subsonicEnable = global.lx.config['subsonic.enable']
     if (subsonicEnable && isSubsonicRequest) {
-      const { subsonicHandler } = require('./subsonic')
+      const { subsonicHandler } = require('./integrations/subsonic')
       return subsonicHandler.handleRequest(req, res, urlObj)
     }
 
@@ -2519,7 +2519,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
 
             try {
-              const { syncNativeLibraryToSubsonic } = require('./subsonic')
+              const { syncNativeLibraryToSubsonic } = require('./integrations/subsonic')
               syncNativeLibraryToSubsonic(username, 'artists',
                 added.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })),
                 removed.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })))
@@ -2605,7 +2605,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
 
             try {
-              const { syncNativeLibraryToSubsonic } = require('./subsonic')
+              const { syncNativeLibraryToSubsonic } = require('./integrations/subsonic')
               syncNativeLibraryToSubsonic(username, 'albums',
                 added.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })),
                 removed.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })))
@@ -6991,7 +6991,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (global.lx.config['subsonic.linkDislikeToRating'] && dislikeRatingThreshold > 0 && id && source) {
               const subId = id.startsWith(`${source}_`) ? id : `${source}_${id}`
               try {
-                const { syncDislikeToRating } = require('./subsonic')
+                const { syncDislikeToRating } = require('./integrations/subsonic')
                 await syncDislikeToRating(verified, subId, isAdd ? 1 : 0)
               } catch (e) {
                 console.error('[黑名单 API] 评分回写失败:', e)
@@ -8955,7 +8955,7 @@ const startSubsonicStandaloneServer = () => {
     }
 
     try {
-      const { subsonicHandler } = require('./subsonic')
+      const { subsonicHandler } = require('./integrations/subsonic')
       const urlObj = new URL(req.url ?? '', `http://${req.headers.host}`)
 
       // [路由守卫] 仅允许 /rest/{method} 形式的 Subsonic API 调用，其余路径一律 404。

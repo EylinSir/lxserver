@@ -266,7 +266,7 @@
             try {
                 lyricModule ||= new Promise((resolve, reject) => {
                     const script = document.createElement('script');
-                    script.src = new URL('js/lyric-card.js', document.baseURI).href;
+                    script.src = new URL('js/lyrics/lyric-card.js', document.baseURI).href;
                     script.onload = resolve;
                     script.onerror = () => { script.remove(); reject(new Error('歌词卡片加载失败，请重试')); };
                     document.head.appendChild(script);

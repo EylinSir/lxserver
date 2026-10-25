@@ -337,55 +337,54 @@
       企业级私有化音乐数据同步中枢与流媒体服务网关。深度整合 Web 可视化运维控制台、全自动时间胶囊快照回滚、WebDAV 云端灾备、Subsonic 开放流媒体协议以及内置现代 Web 播放器。
     </p>
 
-    `<!-- Dynamic Status Badges -->`
-    `<div class="about-badges">`
-      `<span class="about-badge accent">`
-        `<i class="fas fa-check-circle"></i>`
-        `<span>`Release: {{version}}
-    
-      `<span class="about-badge primary">`
-        `<i class="fas fa-code-commit"></i>`
-        `<span>`Build: {{buildHash}}
-    
-      `<span class="about-badge purple">`
-        `<i class="fab fa-node-js"></i>`
-        `<span>`Node >= 20
-    
-      `<span class="about-badge">`
-        `<i class="fas fa-certificate"></i>`
-        `<span>`Apache 2.0
-    
-      `<span class="about-badge">`
-        `<i class="fab fa-docker"></i>`
-        `<span>`Docker Ready
-    
-      `<span class="about-badge accent">`
-        `<i class="fas fa-satellite-dish"></i>`
-        `<span>`Subsonic 1.16+
-    
-    `</div>`
+    <!-- Dynamic Status Badges -->
+    <div class="about-badges">
+      <span class="about-badge accent">
+        <i class="fas fa-check-circle"></i>
+        <span>Release: {{version}}</span>
+      </span>
+      <span class="about-badge primary">
+        <i class="fas fa-code-commit"></i>
+        <span>Build: {{buildHash}}</span>
+      </span>
+      <span class="about-badge purple">
+        <i class="fab fa-node-js"></i>
+        <span>Node &gt;= 20</span>
+      </span>
+      <span class="about-badge">
+        <i class="fas fa-certificate"></i>
+        <span>Apache 2.0</span>
+      </span>
+      <span class="about-badge">
+        <i class="fab fa-docker"></i>
+        <span>Docker Ready</span>
+      </span>
+      <span class="about-badge accent">
+        <i class="fas fa-satellite-dish"></i>
+        <span>Subsonic 1.16+</span>
+      </span>
+    </div>
 
-    `<!-- Quick Action Links -->`
-    `<div class="about-actions">`
-      `<a href="/music" target="_blank" class="about-btn about-btn-primary">`
-        `<i class="fas fa-play"></i>`
-        `<span>`打开 Web 播放器
-      `</a>`
-      `<a href="https://xcq0607.github.io/lxserver/" target="_blank" class="about-btn about-btn-secondary">`
-        `<i class="fas fa-book"></i>`
-        `<span>`帮助与使用文档
-      `</a>`
-      `<a href="https://github.com/XCQ0607/lxserver" target="_blank" class="about-btn about-btn-secondary">`
-        `<i class="fab fa-github"></i>`
-        `<span>`GitHub 源码仓库
-      `</a>`
-      `<a href="https://github.com/XCQ0607/lxserver/issues" target="_blank" class="about-btn about-btn-secondary">`
-        `<i class="fas fa-circle-exclamation"></i>`
-        `<span>`提交问题与建议
-      `</a>`
-    `</div>`
-
-</div>
+    <!-- Quick Action Links -->
+    <div class="about-actions">
+      <a href="/music" target="_blank" class="about-btn about-btn-primary">
+        <i class="fas fa-play"></i>
+        <span>打开 Web 播放器</span>
+      </a>
+      <a href="https://xcq0607.github.io/lxserver/" target="_blank" class="about-btn about-btn-secondary">
+        <i class="fas fa-book"></i>
+        <span>帮助与使用文档</span>
+      </a>
+      <a href="https://github.com/XCQ0607/lxserver" target="_blank" class="about-btn about-btn-secondary">
+        <i class="fab fa-github"></i>
+        <span>GitHub 源码仓库</span>
+      </a>
+      <a href="https://github.com/XCQ0607/lxserver/issues" target="_blank" class="about-btn about-btn-secondary">
+        <i class="fas fa-circle-exclamation"></i>
+        <span>提交问题与建议</span>
+      </a>
+    </div>
+  </div>
 
 <!-- Architecture Metrics -->
 
@@ -443,125 +442,125 @@
       </ul>
     </div>
 
-    `<!-- Card 2 -->`
-    `<div class="about-card">`
-      `<div class="about-card-top">`
-        `<div class="about-card-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">`
-          `<i class="fas fa-database"></i>`
-        `</div>`
-        `<h3 class="about-card-title">`歌单全景运维与颗粒度数据治理`</h3>`
-      `</div>`
-      `<ul class="about-card-list">`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`全景透视浏览`</strong>`：实时检索并查看各用户的歌单分类、单曲明细与关联元数据结构。
-        `</li>`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`歌单深度治理`</strong>`：支持歌单全文检索、条件筛选、批量删除异常曲目与歌单结构优化。
-        `</li>`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`公共收藏协作`</strong>`：一键开启全站公共收藏夹与共享歌曲，方便家庭与团队协同共建曲库。
-        `</li>`
-      `</ul>`
-    `</div>`
+    <!-- Card 2 -->
+    <div class="about-card">
+      <div class="about-card-top">
+        <div class="about-card-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+          <i class="fas fa-database"></i>
+        </div>
+        <h3 class="about-card-title">歌单全景运维与颗粒度数据治理</h3>
+      </div>
+      <ul class="about-card-list">
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>全景透视浏览</strong>：实时检索并查看各用户的歌单分类、单曲明细与关联元数据结构。</span>
+        </li>
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>歌单深度治理</strong>：支持歌单全文检索、条件筛选、批量删除异常曲目与歌单结构优化。</span>
+        </li>
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>公共收藏协作</strong>：一键开启全站公共收藏夹与共享歌曲，方便家庭与团队协同共建曲库。</span>
+        </li>
+      </ul>
+    </div>
 
-    `<!-- Card 3 -->`
-    `<div class="about-card">`
-      `<div class="about-card-top">`
-        `<div class="about-card-icon" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">`
-          `<i class="fas fa-clock-rotate-left"></i>`
-        `</div>`
-        `<h3 class="about-card-title">`时间胶囊快照与全时态灾备回滚`</h3>`
-      `</div>`
-      `<ul class="about-card-list">`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`事件驱动快照`</strong>`：数据变更自动触发生成版本快照，建立可靠的多版本历史时间胶囊。
-        `</li>`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`标准数据导出`</strong>`：一键下载 `<code>`lx_backup.json`</code>` 标准归档，与全平台官方客户端无缝互导。
-        `</li>`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`一键平滑回滚`</strong>`：支持秒级将指定租户数据恢复至历史任意时刻，从容抵御操作失误。
-        `</li>`
-      `</ul>`
-    `</div>`
+    <!-- Card 3 -->
+    <div class="about-card">
+      <div class="about-card-top">
+        <div class="about-card-icon" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
+          <i class="fas fa-clock-rotate-left"></i>
+        </div>
+        <h3 class="about-card-title">时间胶囊快照与全时态灾备回滚</h3>
+      </div>
+      <ul class="about-card-list">
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>事件驱动快照</strong>：数据变更自动触发生成版本快照，建立可靠的多版本历史时间胶囊。</span>
+        </li>
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>标准数据导出</strong>：一键下载 <code>lx_backup.json</code> 标准归档，与全平台官方客户端无缝互导。</span>
+        </li>
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>一键平滑回滚</strong>：支持秒级将指定租户数据恢复至历史任意时刻，从容抵御操作失误。</span>
+        </li>
+      </ul>
+    </div>
 
-    `<!-- Card 4 -->`
-    `<div class="about-card">`
-      `<div class="about-card-top">`
-        `<div class="about-card-icon" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8;">`
-          `<i class="fas fa-cloud-arrow-up"></i>`
-        `</div>`
-        `<h3 class="about-card-title">`WebDAV 自动化云端双向同步`</h3>`
-      `</div>`
-      `<ul class="about-card-list">`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`生态广泛兼容`</strong>`：无缝对接坚果云、Nextcloud、Alist、Synology NAS 等标准 WebDAV 网盘。
-        `</li>`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`智能增量灾备`</strong>`：自动排除大容量媒体缓存，极速同步核心歌单数据与全量定时轮转打包。
-        `</li>`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`异地灾难恢复`</strong>`：宿主机硬件故障时，支持直接从 WebDAV 云端一键拉取并重建完整服务。
-        `</li>`
-      `</ul>`
-    `</div>`
+    <!-- Card 4 -->
+    <div class="about-card">
+      <div class="about-card-top">
+        <div class="about-card-icon" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8;">
+          <i class="fas fa-cloud-arrow-up"></i>
+        </div>
+        <h3 class="about-card-title">WebDAV 自动化云端双向同步</h3>
+      </div>
+      <ul class="about-card-list">
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>生态广泛兼容</strong>：无缝对接坚果云、Nextcloud、Alist、Synology NAS 等标准 WebDAV 网盘。</span>
+        </li>
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>智能增量灾备</strong>：自动排除大容量媒体缓存，极速同步核心歌单数据与全量定时轮转打包。</span>
+        </li>
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>异地灾难恢复</strong>：宿主机硬件故障时，支持直接从 WebDAV 云端一键拉取并重建完整服务。</span>
+        </li>
+      </ul>
+    </div>
 
-    `<!-- Card 5 -->`
-    `<div class="about-card">`
-      `<div class="about-card-top">`
-        `<div class="about-card-icon" style="background: rgba(168, 85, 247, 0.15); color: #c084fc;">`
-          `<i class="fas fa-satellite-dish"></i>`
-        `</div>`
-        `<h3 class="about-card-title">`Subsonic 开放流媒体服务网关`</h3>`
-      `</div>`
-      `<ul class="about-card-list">`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`标准协议兼容`</strong>`：实现 Subsonic API 1.16+ 规范，支持独立监听端口或单端口复用模式。
-        `</li>`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`全网在线检索代理`</strong>`：支持第三方客户端直连并在关键词前使用 `<code>`wy:`</code>`、`<code>`tx:`</code>` 等前缀在线全网检索。
-        `</li>`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`服务端音质优选`</strong>`：服务端支持 FLAC/320k 音质自适应调度与 LRU 自动缓存落盘加速。
-        `</li>`
-      `</ul>`
-    `</div>`
+    <!-- Card 5 -->
+    <div class="about-card">
+      <div class="about-card-top">
+        <div class="about-card-icon" style="background: rgba(168, 85, 247, 0.15); color: #c084fc;">
+          <i class="fas fa-satellite-dish"></i>
+        </div>
+        <h3 class="about-card-title">Subsonic 开放流媒体服务网关</h3>
+      </div>
+      <ul class="about-card-list">
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>标准协议兼容</strong>：实现 Subsonic API 1.16+ 规范，支持独立监听端口或单端口复用模式。</span>
+        </li>
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>全网在线检索代理</strong>：支持第三方客户端直连并在关键词前使用 <code>wy:</code>、<code>tx:</code> 等前缀在线全网检索。</span>
+        </li>
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>服务端音质优选</strong>：服务端支持 FLAC/320k 音质自适应调度与 LRU 自动缓存落盘加速。</span>
+        </li>
+      </ul>
+    </div>
 
-    `<!-- Card 6 -->`
-    `<div class="about-card">`
-      `<div class="about-card-top">`
-        `<div class="about-card-icon" style="background: rgba(236, 72, 153, 0.15); color: #f472b6;">`
-          `<i class="fas fa-sliders"></i>`
-        `</div>`
-        `<h3 class="about-card-title">`动态热更新配置与全局可观测性`</h3>`
-      `</div>`
-      `<ul class="about-card-list">`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`全量 Web 热配置`</strong>`：系统端口、鉴权策略、代理分流等全维度配置即改即生效，无需手动改写配置文件。
-        `</li>`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`配置自动轮转备份`</strong>`：每日自动生成配置文件历史副本并自动清理过期备份，保障配置变更安全。
-        `</li>`
-        `<li>`
-          `<i class="fas fa-check"></i>`
-          `<span><strong>`一体化日志浏览器`</strong>`：内置在线文件管理器与实时日志追踪器，随时掌控服务器运行态势。
-        `</li>`
-      `</ul>`
-    `</div>`
+    <!-- Card 6 -->
+    <div class="about-card">
+      <div class="about-card-top">
+        <div class="about-card-icon" style="background: rgba(236, 72, 153, 0.15); color: #f472b6;">
+          <i class="fas fa-sliders"></i>
+        </div>
+        <h3 class="about-card-title">动态热更新配置与全局可观测性</h3>
+      </div>
+      <ul class="about-card-list">
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>全量 Web 热配置</strong>：系统端口、鉴权策略、代理分流等全维度配置即改即生效，无需手动改写配置文件。</span>
+        </li>
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>配置自动轮转备份</strong>：每日自动生成配置文件历史副本并自动清理过期备份，保障配置变更安全。</span>
+        </li>
+        <li>
+          <i class="fas fa-check"></i>
+          <span><strong>一体化日志浏览器</strong>：内置在线文件管理器与实时日志追踪器，随时掌控服务器运行态势。</span>
+        </li>
+      </ul>
+    </div>
 
 </div>
 

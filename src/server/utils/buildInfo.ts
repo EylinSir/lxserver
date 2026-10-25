@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 /** Package version is authoritative; the generated public config identifies the source build. */
-export const getBuildInfo = (staticPath: string, packagePath = path.resolve(__dirname, '../../package.json')) => {
+export const getBuildInfo = (staticPath: string, packagePath = path.resolve(__dirname, '../../../package.json')) => {
   let version = 'unknown'
   let buildHash = 'unknown'
   let staticVersion = ''

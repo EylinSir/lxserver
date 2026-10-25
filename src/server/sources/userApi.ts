@@ -8,7 +8,7 @@ import * as zlib from 'zlib'
 import { promisify } from 'util'
 
 import * as tunnel from 'tunnel'
-import { getProxyAgent } from '../modules/utils/proxy.js'
+import { getProxyAgent } from '../../modules/utils/proxy.js'
 const inflate = promisify(zlib.inflate)
 const deflate = promisify(zlib.deflate)
 

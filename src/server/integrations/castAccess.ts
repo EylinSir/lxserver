@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { resolvePublicUrl } from './security'
+import { resolvePublicUrl } from '../auth/security'
 
 export interface CastIdentity {
   owner: string

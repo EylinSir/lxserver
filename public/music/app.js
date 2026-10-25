@@ -2011,8 +2011,7 @@ function getPlayerBuildInfo() {
         ? config.version.trim() : 'unknown';
     const buildHash = typeof config.buildHash === 'string' && /^[a-f0-9]{7,64}$/i.test(config.buildHash)
         ? config.buildHash : 'unknown';
-    const label = version === 'unknown' ? '版本信息不可用'
-        : version + (buildHash === 'unknown' ? '' : ' · build ' + buildHash);
+    const label = version === 'unknown' ? '版本信息不可用' : version;
     return { version, buildHash, label };
 }
 
@@ -2049,7 +2048,11 @@ async function loadAboutContent() {
 document.addEventListener('DOMContentLoaded', () => {
     const versionEl = document.getElementById('app-version');
     if (versionEl) {
-        versionEl.innerText = getPlayerBuildInfo().label + ' Web';
+        const { version, buildHash } = getPlayerBuildInfo();
+        versionEl.innerText = version === 'unknown' ? '版本信息不可用' : `${version} Web`;
+        if (buildHash !== 'unknown') {
+            versionEl.title = `build ${buildHash}`;
+        }
     }
 
     // 恢复搜索来源缓存

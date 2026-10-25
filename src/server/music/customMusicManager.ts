@@ -9,7 +9,7 @@ import { formatPlayTime } from '@/utils/common'
 import { buildLyrics } from '@/utils/lrcTool'
 import { getLyricFetcher, embedLyricsIntoFile, getAudioMetadataUnsupportedStatus } from './fileCache'
 import * as fileCache from './fileCache'
-import { remasterStaging } from './remasterStaging'
+import { remasterStaging } from '../task/remasterStaging'
 
 export interface CustomCacheItem {
     id: string

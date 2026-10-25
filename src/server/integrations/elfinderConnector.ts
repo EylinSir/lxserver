@@ -3,7 +3,7 @@ import * as fs from 'fs'
 import * as crypto from 'crypto'
 import { ZipArchive } from 'archiver'
 import unzipper from 'unzipper'
-import { resolveContainedPath } from './security'
+import { resolveContainedPath } from '../auth/security'
 
 const temporaryArchives = new Set<string>()
 

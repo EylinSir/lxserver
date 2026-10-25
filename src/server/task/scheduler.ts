@@ -1,12 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { syncLog } from '@/utils/log4js'
-import { ScheduledTask, TaskExecutionResult } from './task/types'
-import { createNetworkListTask } from './task/networkListTask'
-import { createSyncDownloadTask, syncDownloadForAllUsers } from './task/syncDownloadTask'
+import { ScheduledTask, TaskExecutionResult } from './types'
+import { createNetworkListTask } from './networkListTask'
+import { createSyncDownloadTask, syncDownloadForAllUsers } from './syncDownloadTask'
 
-export * from './task/types'
-export { parseIntervalMs, checkAllUsersNetworkLists } from './task/networkListTask'
+export * from './types'
+export { parseIntervalMs, checkAllUsersNetworkLists } from './networkListTask'
 export { createSyncDownloadTask, syncDownloadForAllUsers }
 
 // 调度器内部状态
