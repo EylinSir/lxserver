@@ -104,6 +104,11 @@ const LEADERBOARD_COVER_TTL = 30 * 60 * 1000
 // 共享歌单(各音源歌单)封面缓存：getList 返回的歌单项含 img，列表阶段直接记录，getCoverArt 命中即用
 const sharedPlaylistCoverCache = new Map<string, string>()
 
+// 歌单歌曲数缓存：列表接口直接读取（即时返回，避免逐歌单拉全量列表导致响应过长）；
+// 真实条数由详情接口 / 后台刷新填充，TTL 内有效。
+const playlistSongCountCache = new Map<string, { count: number; ts: number }>()
+const PLAYLIST_SONGCOUNT_TTL = 10 * 60 * 1000
+
 /** 给 Promise 加超时（超时即 reject 并清理定时器），避免单个音源挂住整个搜索请求 */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -2296,15 +2301,22 @@ class SubsonicHandler {
             const result = await lb.getBoards()
             const list = Array.isArray(result?.list) ? result.list : []
             // [修复] 列表 songCount 需等于真实条目数（此前恒为 0，导致客户端计数/变更检测失配）。
-            // 逐榜单取一次列表以拿到真实条数；任一失败则回退 0，不影响列表本身返回。
-            return await Promise.all(list.map(async (board: any) => {
+            // 采用缓存：列表直接读缓存即时返回（避免逐榜单拉全量列表导致响应过长）；
+            // 真实条数由详情接口 / 后台刷新填充，TTL 内有效。
+            return list.map((board: any) => {
                 const bangid = String(board.bangid)
                 const id = `lb_${source}_${bangid}`
-                let songCount = 0
-                try {
-                    const data: any = await lb.getList(bangid, 1)
-                    songCount = (data?.list || []).length
-                } catch { /* 计数失败不阻断列表 */ }
+                const cached = playlistSongCountCache.get(id)
+                const songCount = cached && (Date.now() - cached.ts) < PLAYLIST_SONGCOUNT_TTL ? cached.count : 0
+                // 冷缓存：后台补拉真实条数，不阻塞当前响应，下一次列表即生效
+                if (!cached) {
+                    void (async () => {
+                        try {
+                            const data: any = await lb.getList(bangid, 1)
+                            playlistSongCountCache.set(id, { count: data?.total ?? (data?.list || []).length, ts: Date.now() })
+                        } catch { /* 失败不阻断 */ }
+                    })()
+                }
                 return {
                     id,
                     name: `榜单·${board.name}`,
@@ -2319,7 +2331,7 @@ class SubsonicHandler {
                     // 由 getCoverArt 按需拉取该榜单首歌封面并代理返回；不再统一用 'logo'（SVG 部分客户端不渲染）
                     coverArt: id,
                 }
-            }))
+            })
         } catch (err) {
             subsonicLog.error('[Subsonic] getLeaderboardPlaylists error:', err)
             return []
@@ -2388,6 +2400,8 @@ class SubsonicHandler {
             }
 
             const coverArt = (musics[0] as any)?.img || 'logo'
+            // 详情已算出真实条数，写入缓存供列表接口直接读取（即时返回）
+            playlistSongCountCache.set(id, { count: musics.length, ts: Date.now() })
 
             const playlistMeta = {
                 id,
@@ -2444,8 +2458,9 @@ class SubsonicHandler {
             if (!sl || typeof sl.getList !== 'function') return []
             const res: any = await sl.getList(sort, '', 1)
             const list: any[] = res?.list || []
-            // [修复] 列表 songCount 需等于真实条目数（此前恒为 0）。逐歌单取一次详情以拿到真实条数；失败回退 0。
-            return await Promise.all(list.map(async (item: any) => {
+            // [修复] 列表 songCount 需等于真实条目数（此前恒为 0）。采用缓存：列表直接读缓存即时返回，
+            // 真实条数由详情接口 / 后台刷新填充，TTL 内有效，避免逐歌单全量拉取导致响应过长。
+            return list.map((item: any) => {
                 const plId = String(item.id ?? item.dissid ?? item.tid ?? item.listId)
                 const id = `pl_${source}_${plId}`
                 const img = typeof item.img === 'string' && item.img
@@ -2453,11 +2468,17 @@ class SubsonicHandler {
                     : 'logo'
                 // 记录封面，便于客户端以 pl_ id 请求 getCoverArt 时直接命中
                 sharedPlaylistCoverCache.set(id, img)
-                let songCount = 0
-                try {
-                    const detail: any = await sl.getListDetail(plId, 1)
-                    songCount = (detail?.list || []).length
-                } catch { /* 计数失败不阻断列表 */ }
+                const cached = playlistSongCountCache.get(id)
+                const songCount = cached && (Date.now() - cached.ts) < PLAYLIST_SONGCOUNT_TTL ? cached.count : 0
+                // 冷缓存：后台补拉真实条数，不阻塞当前响应，下一次列表即生效
+                if (!cached) {
+                    void (async () => {
+                        try {
+                            const detail: any = await sl.getListDetail(plId, 1)
+                            playlistSongCountCache.set(id, { count: detail?.total ?? (detail?.list || []).length, ts: Date.now() })
+                        } catch { /* 失败不阻断 */ }
+                    })()
+                }
                 return {
                     id,
                     name: `歌单·${item.name || item.dissname || '未知歌单'}`,
@@ -2470,7 +2491,7 @@ class SubsonicHandler {
                     changed: new Date().toISOString(),
                     coverArt: img,
                 }
-            }))
+            })
         } catch (err) {
             subsonicLog.error('[Subsonic] getSharedPlaylists error:', err)
             return []
@@ -2495,6 +2516,8 @@ class SubsonicHandler {
                 musics = await this.filterDislikedSongs(username, musics)
             }
             const coverArt = (musics[0] as any)?.img || detail?.info?.img || 'logo'
+            // 详情已算出真实条数，写入缓存供列表接口直接读取（即时返回）
+            playlistSongCountCache.set(id, { count: musics.length, ts: Date.now() })
             const playlistMeta = {
                 id,
                 // SDK 的歌单名在 info.name（旧接口在顶层 name），都要兼容
