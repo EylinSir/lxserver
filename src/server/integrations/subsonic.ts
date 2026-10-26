@@ -19,6 +19,11 @@ import { proxyCoverImage } from '@/server/media/coverProxy'
 import { subsonicLog } from '@/utils/log4js'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
 import { listRadioStations, getRadioStation, addRadioStation, updateRadioStation, removeRadioStation } from '@/server/music/radioStations'
+import { getLocalTracks, findLocalTrack, localMusic, localSong, localAlbums, localArtists, localFile, localCover, localLyrics, serveLocalTrack, isLocalSong, isLocalEntity, getLocalScanStatus, readLocalState, editLocalState, mergeLocalPlaylist } from '@/server/music/subsonicLocal'
+import { getCustomMusicDir } from '@/server/music/customMusicManager'
+import { checkLyricCache } from '@/server/music/fileCache'
+import { parseLyrics } from '@/utils/lrcTool'
+import type { LocalTrack } from '@/server/music/subsonicLocal'
 
 // 音乐源歌单 → 电台 列表缓存（避免每次 getInternetRadioStations 都枚举全部音源实拉）
 let playlistRadioCache: { ts: number; stations: any[] } | null = null
@@ -138,10 +143,9 @@ async function probeFfmpeg(): Promise<boolean> {
     try {
         await new Promise<void>((resolve) => {
             const p = spawn('ffmpeg', ['-version'])
-            p.on('error', () => resolve())
-            p.on('close', () => resolve())
+            p.on('error', () => { ffmpegAvailable = false; resolve() })
+            p.on('close', code => { ffmpegAvailable = code === 0; resolve() })
         })
-        ffmpegAvailable = true
     } catch {
         ffmpegAvailable = false
     }
@@ -752,6 +756,7 @@ export async function syncDislikeToRating(username: string, id: string, rating: 
  *  - XML (默认)：数据函数返回 {attrs, children} 嵌套结构，toXml 负责渲染
  */
 class SubsonicHandler {
+    private localMutationLocks = new Map<string, Promise<unknown>>()
     private readonly VERSION = '1.16.1'
     private readonly SERVER_VERSION = '1.0.0'
 
@@ -858,7 +863,7 @@ class SubsonicHandler {
     }
 
     private cacheOnlineSong(music: LX.Music.MusicInfo) {
-        if (!music || !music.id) return
+        if (!music || !music.id || isLocalSong(music.id)) return
         this.loadOnlineSongCache()
         if (this.onlineSongCache.size > 5000) {
             const firstKey = this.onlineSongCache.keys().next().value
@@ -1141,6 +1146,7 @@ class SubsonicHandler {
         }
 
         try {
+            if (await this.handleLocalRequest(req, res, username, params, format, method)) return
             switch (method) {
                 case 'ping':
                     return this.sendResponse(res, {}, format)
@@ -1334,6 +1340,309 @@ class SubsonicHandler {
     // 帮助函数
     // ─────────────────────────────────────────────
 
+    private sendLocalResponse(res: http.ServerResponse, data: any, format: string) {
+        const node = (value: any): any => {
+            if (Array.isArray(value)) return value.map(node)
+            const attrs: any = {}, children: any = {}
+            for (const [key, item] of Object.entries(value)) {
+                if (item === undefined || item === null) continue
+                if (typeof item === 'object') children[key] = node(item)
+                else attrs[key] = item
+            }
+            return { attrs, ...(Object.keys(children).length ? { children } : {}) }
+        }
+        this.sendResponse(res, format === 'json' ? data : Object.fromEntries(Object.entries(data).map(([k, v]) => [k, node(v)])), format)
+    }
+
+    /** Local-only data lives outside LX snapshots and cannot be erased by online sync. */
+    private async getSubsonicListData(username: string) {
+        this.loadOnlineSongCache()
+        const raw = await getUserSpace(username).listManage.getListData()
+        const state = readLocalState(username)
+        const tracks = await getLocalTracks(username)
+        const all = new Map<string, LX.Music.MusicInfo>()
+        for (const m of [...raw.loveList, ...raw.defaultList, ...raw.userList.flatMap(l => l.list || [])]) all.set(m.id, m)
+        for (const t of tracks) all.set(t.id, localMusic(t))
+        const merge = (id: string, songs: LX.Music.MusicInfo[]) => mergeLocalPlaylist(songs.map(m => m.id), state.playlists[id])
+            .map(id => all.get(id) || this.onlineSongCache.get(id)).filter((m): m is LX.Music.MusicInfo => !!m)
+        const localLove = tracks.filter(t => state.starred[t.id]).map(localMusic)
+        const userList = raw.userList.map(l => ({ ...l, list: merge(l.id, l.list || []) }))
+        for (const [id, list] of Object.entries(state.playlists)) {
+            if (!list.standalone && raw.userList.some(l => l.id === id)) continue
+            if (id === 'love' || id === 'default') continue
+            userList.push({ id, name: list.name, list: merge(id, []), locationUpdateTime: Date.parse(list.changed) } as any)
+        }
+        return { ...raw, userList, defaultList: merge('default', raw.defaultList), loveList: [...raw.loveList, ...localLove] }
+    }
+
+    private async handleLocalRequest(req: http.IncomingMessage, res: http.ServerResponse, user: string, p: URLSearchParams, format: string, method: string, locked = false): Promise<boolean> {
+        if (!locked && ['star', 'unstar', 'createPlaylist', 'updatePlaylist', 'deletePlaylist'].includes(method)) {
+            const prev = this.localMutationLocks.get(user) || Promise.resolve()
+            const next = prev.catch(() => {}).then(() => this.handleLocalRequest(req, res, user, p, format, method, true))
+            this.localMutationLocks.set(user, next)
+            try { return await next } finally { if (this.localMutationLocks.get(user) === next) this.localMutationLocks.delete(user) }
+        }
+        const send = (data: any) => { this.sendLocalResponse(res, data, format); return true }
+        const error = (message: string, code = 70) => { this.sendError(res, code, message, format); return true }
+        const rawId = p.get('id') || ''
+        const id = method === 'getCoverArt' ? rawId.replace(/^(al-|ar-|tr-|sg-|mg-)/, '') : rawId
+        if (['createPlaylist', 'updatePlaylist', 'deletePlaylist'].includes(method) && ['local-library', 'custom-library'].includes(p.get('playlistId') || id)) {
+            return error('本地歌曲为自动汇总的只读歌单，请通过本地文件管理修改曲库', 0)
+        }
+        const folder = p.get('musicFolderId') || ''
+        const localScope = folder === 'local' || folder === 'nas'
+        const page = (rows: any[], count = 'size', offset = 'offset') => {
+            const size = Math.max(0, Math.min(500, Number(p.get(count) ?? 100) || 0))
+            const start = Math.max(0, Number(p.get(offset) || 0) || 0)
+            return rows.slice(start, start + size)
+        }
+        if (method === 'startScan') {
+            void getLocalTracks(user, true).catch(err => subsonicLog.error('[Subsonic] Local scan failed:', err))
+            return send({ scanStatus: getLocalScanStatus(user) })
+        }
+        if (method === 'getScanStatus') return send({ scanStatus: getLocalScanStatus(user) })
+        if (method === 'getLyrics' && !id && p.get('title')) {
+            const matches = (await getLocalTracks(user)).filter(t => t.title === p.get('title') && (!p.get('artist') || t.artist === p.get('artist')))
+            if (matches.length === 1) {
+                const copy = new URLSearchParams(p); copy.set('id', matches[0].id)
+                return this.handleLocalRequest(req, res, user, copy, format, method)
+            }
+        }
+        if (['star', 'unstar'].includes(method)) {
+            const keys = ['id', 'albumId', 'artistId']
+            const ids = keys.flatMap(k => this.getListParams(p, k)).filter(isLocalEntity)
+            if (ids.length) {
+                const tracks = await getLocalTracks(user)
+                const valid = new Set([...tracks.map(t => t.id), ...tracks.map(t => t.albumId), ...tracks.map(t => t.artistId)])
+                if (ids.some(id => !valid.has(id))) return error('Local entity not found')
+                await editLocalState(user, state => {
+                    for (const id of ids) {
+                        if (method === 'star') state.starred[id] = new Date().toISOString()
+                        else delete state.starred[id]
+                    }
+                })
+                for (const key of keys) {
+                    const rest = this.getListParams(p, key).filter(id => !isLocalEntity(id))
+                    p.delete(key); for (const value of rest) p.append(key, value)
+                }
+                if (!keys.some(k => p.has(k))) return send({})
+            }
+        }
+        if (['createPlaylist', 'updatePlaylist', 'deletePlaylist'].includes(method)) {
+            const playlistId = p.get('playlistId') || id
+            const state = readLocalState(user)
+            const requested = [...this.getListParams(p, 'songId'), ...this.getListParams(p, 'songIdToAdd')]
+            const overlay = state.playlists[playlistId]
+            if (overlay || requested.some(isLocalSong)) {
+                if (/^(lb_|pl_)/.test(playlistId)) return error('Shared playlists are read-only', 0)
+                if (method === 'deletePlaylist') {
+                    if (['love', 'default'].includes(playlistId)) return error('Built-in playlists cannot be deleted', 0)
+                    if (!overlay?.standalone) {
+                        const manager = getUserSpace(user).listManage
+                        await manager.listDataManage.userListsRemove([playlistId])
+                        await manager.createSnapshot()
+                    }
+                    await editLocalState(user, state => { delete state.playlists[playlistId] })
+                    return send({})
+                }
+                const data = await this.getSubsonicListData(user)
+                const list = data.userList.find(l => l.id === playlistId)
+                const existingSongs = playlistId === 'love' ? data.loveList : playlistId === 'default' ? data.defaultList : list?.list
+                if (method === 'updatePlaylist' && !existingSongs) return error('Playlist not found')
+                // Keep built-in favorites as favorites; local star/unstar provides its write path.
+                if (playlistId === 'love') return error('Use star/unstar to edit local favorites', 0)
+                const requestedName = p.get('name')?.trim()
+                if ((method === 'createPlaylist' && !playlistId && !requestedName) || (p.has('name') && !requestedName)) return error('Playlist name cannot be empty', 10)
+                const additions = await Promise.all(requested.map(id => this.findMusicById(user, id)))
+                if (additions.some(m => !m)) return error('Song not found')
+                for (const m of additions) if (m && !isLocalSong(m.music.id)) this.cacheOnlineSong(m.music)
+                const newId = playlistId || `lpl_${crypto.randomUUID()}`
+                const removeIndexes = this.getListParams(p, 'songIndexToRemove').map(Number)
+                let songs = existingSongs || []
+                if (global.lx.config['subsonic.hideDisliked']) songs = await this.filterDislikedSongs(user, songs)
+                if (removeIndexes.some(i => !Number.isInteger(i) || i < 0 || i >= songs.length)) return error('Invalid songIndexToRemove', 0)
+                const removed = new Set([...removeIndexes.map(i => songs[i].id), ...this.getListParams(p, 'songIdToRemove')])
+                const ids = (method === 'createPlaylist' ? [] : (existingSongs || []).map(m => m.id)).filter(id => !removed.has(id))
+                // A storage switch or an unavailable NAS must not erase hidden references during an edit.
+                if (method !== 'createPlaylist') {
+                    for (const id of overlay?.ids || []) if (isLocalSong(id) && !removed.has(id) && !ids.includes(id)) ids.push(id)
+                }
+                const added = requested.filter(id => !ids.includes(id))
+                const at = p.has('songIndexToAdd') ? Number(p.get('songIndexToAdd')) : ids.length
+                if (!Number.isInteger(at) || at < 0 || at > ids.length) return error('Invalid songIndexToAdd', 0)
+                ids.splice(at, 0, ...new Set(added))
+                const now = new Date().toISOString()
+                const hasOnline = ids.some(id => !isLocalSong(id))
+                let standalone = overlay?.standalone ?? !existingSongs
+                if (standalone && hasOnline) {
+                    const manager = getUserSpace(user).listManage
+                    await manager.listDataManage.userListCreate({ id: newId, name: requestedName || overlay?.name || '混合歌单', position: -1, locationUpdateTime: Date.now() })
+                    const online = await this.resolveMusicIds(user, ids.filter(id => !isLocalSong(id)))
+                    if (online?.length) await manager.listDataManage.listMusicAdd(newId, online, 'bottom')
+                    await manager.createSnapshot()
+                    standalone = false
+                }
+                // Native online edits still use normal LX storage; local entries stay in the overlay.
+                if (existingSongs && !overlay?.standalone) {
+                    const manager = getUserSpace(user).listManage
+                    const onlineRemoved = [...removed].filter(id => !isLocalSong(id))
+                    if (onlineRemoved.length) await manager.listDataManage.listMusicRemove(newId, onlineRemoved)
+                    const onlineAdded = additions.filter(m => m && !isLocalSong(m.music.id)).map(m => m!.music)
+                    if (onlineAdded.length) await manager.listDataManage.listMusicAdd(newId, onlineAdded, 'bottom')
+                    const order = ids.filter(id => !isLocalSong(id))
+                    if (order.length) await manager.listDataManage.listMusicUpdatePosition(newId, 0, order)
+                    if (requestedName && list) await manager.listDataManage.userListsUpdate([{ id: newId, name: requestedName, locationUpdateTime: Date.now() } as any])
+                    await manager.createSnapshot()
+                }
+                await editLocalState(user, state => {
+                    state.playlists[newId] = { name: requestedName || list?.name || overlay?.name || '默认列表', ids,
+                        created: overlay?.created || now, changed: now, standalone }
+                })
+                if (method === 'createPlaylist') { await this.handleGetPlaylist(res, user, new URLSearchParams({ id: newId }), format); return true }
+                return send({})
+            }
+        }
+        if (isLocalSong(id) && ['stream', 'download', 'getCoverArt', 'getLyrics', 'getLyricsBySongId', 'getSong'].includes(method)) {
+            const track = await findLocalTrack(user, id)
+            if (!track || !localFile(track)) return error('Local song not found in selected storage')
+            if (method === 'getSong') return send({ song: { ...localSong(track, user), userRating: readSubsonicMeta(user).ratings[id] || 0 } })
+            if (method === 'getCoverArt') {
+                const cover = localCover(track)
+                if (cover) { res.setHeader('Content-Type', cover.mime); res.end(cover.data) }
+                else { res.writeHead(404); res.end() }
+                return true
+            }
+            if (method === 'getLyrics' || method === 'getLyricsBySongId') {
+                const lyricData = await this.resolveLocalLyrics(user, track)
+                const lyrics = this.buildMergedLrc(lyricData.lyric || '', lyricData.tlyric || '')
+                if (method === 'getLyrics') {
+                    this.sendResponse(res, format === 'json' ? { lyrics: { artist: track.artist, title: track.title, value: lyrics } }
+                        : { lyrics: { attrs: { artist: track.artist, title: track.title }, children: lyrics } }, format)
+                    return true
+                }
+                const versions = [['und', lyricData.lyric], ['zh', lyricData.tlyric], ['und', lyricData.rlyric]]
+                    .filter(([, text]) => !!text).map(([lang, text]) => {
+                        const line = this.parseLrc(text!)
+                        return { lang, synced: line.some(l => l.start !== undefined), displayArtist: track.artist, displayTitle: track.title, line }
+                    })
+                if (format === 'json') return send({ lyricsList: { structuredLyrics: versions } })
+                this.sendResponse(res, { lyricsList: { children: { structuredLyrics: versions.map(({ line, ...attrs }) => ({ attrs, children: { line: line.map(l => ({ attrs: l.start === undefined ? {} : { start: l.start }, children: l.value })) } })) } } }, format)
+                return true
+            }
+            const max = Math.max(0, Number(p.get('maxBitRate') || p.get('maxBitrate')) || 0)
+            const offset = Math.max(0, Number(p.get('timeOffset')) || 0)
+            if (global.lx.config['subsonic.transcode.enabled'] && (this.shouldTranscodeFormat(p, track.filename) || (max > 0 && track.bitRate > max) || offset > 0)) {
+                if (!await probeFfmpeg()) return error('ffmpeg is unavailable', 0)
+                if (method === 'download') res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(track.title + '.' + (this.getRequestedAudioFormat(p) || 'mp3'))}`)
+                await this.transcodeStream(req, res, localFile(track)!, max || 320, format, offset, this.getRequestedAudioFormat(p) || 'mp3')
+            } else serveLocalTrack(req, res, track, method === 'download')
+            return true
+        }
+        if (id.startsWith('lalb_') && ['getAlbum', 'getMusicDirectory', 'getAlbumInfo', 'getAlbumInfo2', 'getCoverArt'].includes(method)) {
+            const tracks = (await getLocalTracks(user)).filter(t => t.albumId === id).sort((a, b) => a.discNumber - b.discNumber || a.track - b.track || a.title.localeCompare(b.title))
+            if (!tracks.length) return error('Local album not found')
+            if (method === 'getCoverArt') { const copy = new URLSearchParams(p); copy.set('id', tracks[0].id); return this.handleLocalRequest(req, res, user, copy, format, method) }
+            if (method.startsWith('getAlbumInfo')) return send({ albumInfo: { notes: 'NAS 本地专辑' } })
+            const album = localAlbums(tracks)[0]
+            const songs = tracks.map(t => localSong(t, user))
+            return method === 'getAlbum' ? send({ album: { ...album, song: songs } }) : send({ directory: { ...album, child: songs } })
+        }
+        if (id.startsWith('lart_')) {
+            const tracks = (await getLocalTracks(user)).filter(t => t.artistId === id)
+            if (!tracks.length) return error('Local artist not found')
+            if (method === 'getArtist') return send({ artist: { ...localArtists(tracks)[0], album: localAlbums(tracks) } })
+            if (method === 'getMusicDirectory') return send({ directory: { id, name: tracks[0].albumArtist, child: localAlbums(tracks) } })
+            if (method === 'getArtistInfo' || method === 'getArtistInfo2') return send({ [method === 'getArtistInfo2' ? 'artistInfo2' : 'artistInfo']: { biography: 'NAS 本地音乐艺术家' } })
+            if (method === 'getCoverArt') { const copy = new URLSearchParams(p); copy.set('id', tracks[0].id); return this.handleLocalRequest(req, res, user, copy, format, method) }
+        }
+        if ((localScope && ['getAlbumList', 'getAlbumList2', 'getArtists', 'getArtistList', 'getIndexes', 'getRandomSongs', 'getSongsByGenre', 'getSongsByGenre2', 'getGenres'].includes(method)) || (method === 'getMusicDirectory' && ['local', 'nas'].includes(id))) {
+            let tracks = await getLocalTracks(user)
+            if (p.get('genre')) tracks = tracks.filter(t => t.genre === p.get('genre'))
+            if (method === 'getMusicDirectory') return send({ directory: { id, name: 'NAS 本地音乐', child: localAlbums(tracks) } })
+            if (method.startsWith('getAlbumList')) {
+                let albums = localAlbums(tracks)
+                const type = p.get('type') || 'newest'
+                if (type === 'recent' || type === 'frequent') {
+                    const history = readScrobbles(user).filter(h => tracks.some(t => t.id === h.id))
+                    const played = await this.buildPlayedAlbums(user, history, type, 500)
+                    return send({ [method === 'getAlbumList2' ? 'albumList2' : 'albumList']: { album: page(played) } })
+                }
+                if (type === 'byYear') {
+                    const from = Number(p.get('fromYear') || 0), to = Number(p.get('toYear') || 9999)
+                    albums = albums.filter(a => a.year >= Math.min(from, to) && a.year <= Math.max(from, to))
+                    albums.sort((a, b) => from <= to ? a.year - b.year : b.year - a.year)
+                    return send({ [method === 'getAlbumList2' ? 'albumList2' : 'albumList']: { album: page(albums) } })
+                }
+                if (type === 'alphabeticalByName') albums.sort((a, b) => a.name.localeCompare(b.name))
+                else if (type === 'alphabeticalByArtist') albums.sort((a, b) => a.artist.localeCompare(b.artist))
+                else if (type === 'random') albums.sort(() => Math.random() - 0.5)
+                else if (type === 'starred') albums = albums.filter(a => readLocalState(user).starred[a.id])
+                else albums.sort((a, b) => b.created.localeCompare(a.created))
+                return send({ [method === 'getAlbumList2' ? 'albumList2' : 'albumList']: { album: page(albums) } })
+            }
+            if (['getArtists', 'getArtistList', 'getIndexes'].includes(method)) {
+                const groups = new Map<string, any[]>()
+                for (const artist of localArtists(tracks).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))) {
+                    const key = getArtistIndexKey(artist.name)
+                    groups.set(key, [...(groups.get(key) || []), artist])
+                }
+                return send({ [method === 'getIndexes' ? 'indexes' : 'artists']: { ignoredArticles: '', index: [...groups].map(([name, artist]) => ({ name, artist })) } })
+            }
+            if (method === 'getGenres') {
+                const genres = [...new Set(tracks.map(t => t.genre).filter(Boolean))].map(value => ({ value, songCount: tracks.filter(t => t.genre === value).length, albumCount: new Set(tracks.filter(t => t.genre === value).map(t => t.albumId)).size }))
+                if (format === 'json') return send({ genres: { genre: genres } })
+                this.sendResponse(res, { genres: { children: { genre: genres.map(g => ({ attrs: { songCount: g.songCount, albumCount: g.albumCount }, children: g.value })) } } }, format)
+                return true
+            }
+            if (method === 'getRandomSongs') tracks = tracks.slice().sort(() => Math.random() - 0.5)
+            return send({ [method === 'getRandomSongs' ? 'randomSongs' : 'songsByGenre']: { song: page(tracks, method === 'getRandomSongs' ? 'size' : 'count').map(t => localSong(t, user)) } })
+        }
+        return false
+    }
+
+    private localLyricCache = new Map<string, { at: number, data: any }>()
+    private localLyricPending = new Map<string, Promise<any>>()
+
+    private async resolveLocalLyrics(user: string, track: LocalTrack): Promise<any> {
+        const local = localLyrics(track)
+        if (local.trim()) return parseLyrics(local)
+        const match = /^(wy|tx|kw|kg|mg|bd)_(.+)$/.exec(track.platformId || '')
+        const songInfo: any = { id: track.platformId || track.id, source: match?.[1] || 'local', songmid: match?.[2] || '', name: track.title, singer: track.artist }
+        // Reuse the website's indexed lyric lookup, including name/artist fallback.
+        try {
+            const cached = checkLyricCache(songInfo, user)
+            if (cached.exists && (cached.content?.lyric || cached.content?.lrc)) return { ...cached.content, lyric: cached.content.lyric || cached.content.lrc }
+        } catch { /* Missing cache must not prevent an online fallback. */ }
+        if (!match || !musicSdk[match[1]]?.getLyric) return { lyric: '' }
+        const key = JSON.stringify([user, track.id, track.mtime, track.platformId])
+        const cached = this.localLyricCache.get(key)
+        if (cached && Date.now() - cached.at < 5 * 60_000) return cached.data
+        const existing = this.localLyricPending.get(key)
+        if (existing) return existing
+        const task = (async () => {
+            try {
+                const found = await withTimeout(this.resolveSongMeta(user, track.platformId!), 6000).catch(() => null)
+                const m: any = found?.music || songInfo
+                const request = musicSdk[match[1]].getLyric({ ...m.meta, ...m, ...songInfo,
+                    hash: m.hash || m.meta?.hash || '', interval: m.interval || String(track.duration),
+                    copyrightId: m.copyrightId || m.meta?.copyrightId || '', albumId: m.albumId || m.meta?.albumId || '',
+                })
+                const result = await withTimeout(Promise.resolve(request.promise || request), 8000)
+                const data = { ...result, lyric: result?.lyric || result?.lrc || '' }
+                if (data.lyric) {
+                    if (this.localLyricCache.size >= 500) this.localLyricCache.delete(this.localLyricCache.keys().next().value!)
+                    this.localLyricCache.set(key, { at: Date.now(), data })
+                }
+                return data
+            } catch (err) {
+                subsonicLog.warn('[Subsonic] Local lyric fallback failed:', briefErrorText(err))
+                return { lyric: '' }
+            }
+        })()
+        this.localLyricPending.set(key, task)
+        try { return await task } finally { this.localLyricPending.delete(key) }
+    }
+
     private async getLibraryData(username: string, type: 'artists' | 'albums'): Promise<any[]> {
         const userDir = path.join(global.lx.userPath, getUserDirname(username))
         const libPath = path.join(userDir, 'library', `${type}.json`)
@@ -1401,6 +1710,7 @@ class SubsonicHandler {
      */
     private musicToSongFlat(music: LX.Music.MusicInfo, parentId: string, artistIdOverride?: string, username?: string) {
         const meta = (music as any).meta || {}
+        if (meta.localTrack && username) return { ...localSong(meta.localTrack, username), parent: parentId, userRating: this.userRatingsCache.get(username)?.[music.id] || 0 }
 
         const id = music.id
         const singer = music.singer || 'Unknown Artist'
@@ -1458,7 +1768,9 @@ class SubsonicHandler {
             track: (music as any).track || 0,
             year: (music as any).year || 0,
             genre: genreMatch,
-            coverArt: (picUrl && typeof picUrl === 'string' && picUrl.startsWith('http')) ? picUrl : albumId,
+            // Return an artwork ID, not an upstream URL. Clients then fetch via
+            // authenticated getCoverArt instead of bypassing the image proxy.
+            coverArt: id,
             duration: this.parseDuration(music.interval),
             ...this.getBestQualityMeta(music),
             ...(starred ? { starred } : {}),
@@ -1498,20 +1810,36 @@ class SubsonicHandler {
             return false
         }
 
+        const withSize = (quality: { bitRate: number, suffix: string, contentType: string }, key?: string) => {
+            const detail = Array.isArray(qualitys)
+                ? qualitys.find((item: any) => item?.type === key || item?.name === key)
+                : key ? qualitys?.[key] : undefined
+            const known = [detail?.size, detail?.fileSize, (music as any).size, meta.size, meta.fileSize]
+                .map(value => Number(value)).find(value => Number.isSafeInteger(value) && value > 0)
+            const seconds = this.parseDuration(music.interval)
+            // Musiver skips playlist artwork when the entry has size=0 (verified
+            // with the same playlist/song and size alone changed). Upstream APIs
+            // often omit byte counts; use a bitrate estimate for metadata only.
+            // Streaming Content-Length and Range still come from the actual file.
+            const estimate = Number.isFinite(seconds) && seconds > 0
+                ? Math.max(1, Math.round(seconds * quality.bitRate * 1000 / 8)) : 0
+            return { ...quality, size: known ?? estimate }
+        }
+
         // 尝试按优先级匹配最佳音质
         for (const q of ['master', 'atmos_plus', 'atmos', 'hires', 'flac24bit', 'flac', '320k', '192k', '128k']) {
             if (hasQuality(q)) {
-                return { ...qMap[q], size: 0 }
+                return withSize(qMap[q], q)
             }
         }
 
         // 若是在线全网检索歌曲，没抓到 types 信息的兜底返回 320k
         if (music.id && music.id.includes('_')) {
-            return { bitRate: 320, size: 0, suffix: 'mp3', contentType: 'audio/mpeg' }
+            return withSize({ bitRate: 320, suffix: 'mp3', contentType: 'audio/mpeg' })
         }
 
         // 兜底返回 128k
-        return { bitRate: 128, size: 0, suffix: 'mp3', contentType: 'audio/mpeg' }
+        return withSize({ bitRate: 128, suffix: 'mp3', contentType: 'audio/mpeg' })
     }
 
     /**
@@ -1523,11 +1851,15 @@ class SubsonicHandler {
 
     /** 查找某个用户下所有列表中的某首歌 */
     private async findMusicById(username: string, id: string): Promise<{ music: LX.Music.MusicInfo, listId: string } | null> {
+        if (isLocalSong(id)) {
+            const track = await findLocalTrack(username, id)
+            return track ? { music: localMusic(track), listId: track.albumId } : null
+        }
         // [修复] 读取前确保磁盘上的 onlineSongCache 已加载（之前只在 cacheOnlineSong 写入时触发，
         // 导致重启后首次读取发生在任何写入之前，落盘数据永远读不进来 -> 重启即丢）
         this.loadOnlineSongCache()
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
 
         let music = listData.loveList.find((m: any) => m.id === id)
         if (music) return { music, listId: 'love' }
@@ -1614,7 +1946,7 @@ class SubsonicHandler {
     private handleGetMusicFolders(res: http.ServerResponse, format: string) {
         const folders = [
             { id: '1', name: 'LX Music（按服务器设置）' },
-            { id: 'local', name: '本地曲库' },
+            { id: 'local', name: 'NAS 本地音乐（存储目录＋自定义目录）' },
             { id: 'all', name: '全部在线平台' },
             { id: 'wy', name: '网易云音乐' },
             { id: 'tx', name: 'QQ 音乐' },
@@ -1632,9 +1964,38 @@ class SubsonicHandler {
         }, format)
     }
 
+    private async getLocalLibraryPlaylist(username: string, customOnly = false) {
+        const customDir = getCustomMusicDir(username)
+        const id = customOnly ? 'custom-library' : 'local-library'
+        const tracks = (await getLocalTracks(username)).filter(t => {
+            const isCustom = !!customDir && path.resolve(t.root) === path.resolve(customDir)
+            return customOnly ? isCustom : !isCustom
+        }).sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN') || a.id.localeCompare(b.id))
+        return {
+            meta: {
+                id, name: `${customOnly ? '自定义目录' : '本地歌曲'}(${username})`, owner: username, public: false,
+                comment: customOnly ? '当前账号已启用自定义目录中的歌曲（只读）' : '当前账号所选存储目录中的本地歌曲（只读）',
+                songCount: tracks.length, duration: Math.floor(tracks.reduce((n, t) => n + t.duration, 0)),
+                coverArt: tracks[0]?.id || 'logo',
+                created: new Date(tracks.length ? tracks.reduce((n, t) => Math.min(n, t.mtime), Infinity) : Date.now()).toISOString(),
+                changed: new Date(tracks.reduce((n, t) => Math.max(n, t.mtime), 0)).toISOString(),
+                readonly: true,
+            },
+            songs: tracks.map(t => this.musicToSongFlat(localMusic(t), id, undefined, username)),
+        }
+    }
+
+    private playlistCoverId(id: string, songs: LX.Music.MusicInfo[], list?: any): string {
+        const hasOwnCover = [list?.Album, list?.picUrl, list?.img, list?.cover, list?.coverUrl]
+            .some(value => typeof value === 'string' && /^(https?:)?\/\//i.test(value.trim()))
+        return hasOwnCover || (list?.source && list?.sourceListId)
+            ? `playlist-cover_${Buffer.from(id).toString('base64url')}`
+            : songs[0]?.id || 'logo'
+    }
+
     private async handleGetPlaylists(res: http.ServerResponse, username: string, format: string) {
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
         // subsonicLog.debug(`[Subsonic] handleGetPlaylists for ${username}: default=${listData.defaultList.length}, love=${listData.loveList.length}, userLists=${listData.userList.length}`)
 
         const buildPlaylist = (id: string, name: string, musics: any[], created?: string, coverArt?: string) => ({
@@ -1647,10 +2008,16 @@ class SubsonicHandler {
             duration: musics.reduce((sum: number, m: any) => sum + this.parseDuration(m.interval), 0),
             created: created || new Date().toISOString(),
             changed: created || new Date().toISOString(),
-            coverArt: coverArt || id,
+            coverArt: this.playlistCoverId(id, musics, listData.userList.find(l => l.id === id)),
         })
 
         const playlists: any[] = []
+        if (global.lx.config['subsonic.localPlaylist'] !== false) {
+            playlists.push((await this.getLocalLibraryPlaylist(username)).meta)
+            if (global.lx.config['subsonic.customPlaylist'] !== false && getCustomMusicDir(username)) {
+                playlists.push((await this.getLocalLibraryPlaylist(username, true)).meta)
+            }
+        }
 
         if (listData.defaultList.length > 0) {
             const musics = listData.defaultList
@@ -1711,6 +2078,13 @@ class SubsonicHandler {
     private async handleGetPlaylist(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
         const id = params.get('id')
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+        if (id === 'local-library' || id === 'custom-library') {
+            if (global.lx.config['subsonic.localPlaylist'] === false) return this.sendError(res, 70, 'Local playlist is disabled', format)
+            const customOnly = id === 'custom-library'
+            if (customOnly && (global.lx.config['subsonic.customPlaylist'] === false || !getCustomMusicDir(username))) return this.sendError(res, 70, 'Custom playlist is disabled', format)
+            const playlist = await this.getLocalLibraryPlaylist(username, customOnly)
+            return this.sendLocalResponse(res, { playlist: { ...playlist.meta, entry: playlist.songs } }, format)
+        }
 
         // [新增] 排行榜(榜单)虚拟只读播放列表
         if (id.startsWith('lb_')) {
@@ -1722,7 +2096,7 @@ class SubsonicHandler {
         }
 
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
 
         let musics: LX.Music.MusicInfo[] = []
         let listName = 'Unknown'
@@ -1760,24 +2134,13 @@ class SubsonicHandler {
             duration: musics.reduce((sum: number, m: any) => sum + this.parseDuration(m.interval), 0),
             created: new Date().toISOString(),
             changed: new Date().toISOString(),
-            coverArt,
+            coverArt: this.playlistCoverId(id, musics, listData.userList.find(l => l.id === id)),
         }
 
-        if (format === 'json') {
-            return this.sendResponse(res, {
-                playlist: {
-                    ...playlistMeta,
-                    entry: musics.map((m: LX.Music.MusicInfo) => this.musicToSongFlat(m, id, undefined, username)),
-                },
-            }, format)
-        }
-
-        return this.sendResponse(res, {
+        return this.sendLocalResponse(res, {
             playlist: {
-                attrs: playlistMeta,
-                children: {
-                    entry: musics.map((m: LX.Music.MusicInfo) => this.musicToSongXml(m, id, undefined, username)),
-                },
+                ...playlistMeta,
+                entry: musics.map((m: LX.Music.MusicInfo) => this.musicToSongFlat(m, id, undefined, username)),
             },
         }, format)
     }
@@ -2226,7 +2589,7 @@ class SubsonicHandler {
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
 
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
 
         let musics: LX.Music.MusicInfo[] = []
         let listName = 'Unknown'
@@ -2539,10 +2902,11 @@ class SubsonicHandler {
     private async handleGetMusicDirectory(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
         const id = params.get('id')
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
 
         if (!id || id === '1' || id === 'root') {
             const dirs = [
+                { id: 'local', parent: 'root', title: 'NAS 本地音乐', isDir: true },
                 { id: 'love', parent: 'root', title: '我的收藏', isDir: true, coverArt: (listData.loveList[0] as any)?.meta?.picUrl || (listData.loveList[0] as any)?.img || 'logo' },
                 { id: 'default', parent: 'root', title: '默认列表', isDir: true, coverArt: (listData.defaultList[0] as any)?.meta?.picUrl || (listData.defaultList[0] as any)?.img || 'logo' },
                 { id: 'radios', parent: 'root', title: '官方电台', isDir: true },
@@ -2963,7 +3327,7 @@ class SubsonicHandler {
      */
     private async buildArtistDirectory(username: string) {
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
         const libArtists = await this.getLibraryData(username, 'artists')
         const libAlbums = await this.getLibraryData(username, 'albums')
         const meta = await this.getUserSubsonicMeta(username)
@@ -3044,6 +3408,7 @@ class SubsonicHandler {
 
         // 2b. 从本地曲目反推歌手
         for (const m of allSongs) {
+            if (isLocalSong(m.id)) continue
             const singer = m.singer || ''
             const primary = (singer.split('、')[0] || '').trim()
             if (!primary || primary === 'Unknown Artist') continue
@@ -3113,7 +3478,7 @@ class SubsonicHandler {
         // [修改] 歌手列表 = 收藏歌手 + 本地曲目反推出的歌手，albumCount / songCount 取真实值
         const entries = await this.buildArtistDirectory(username)
 
-        const artists = entries
+        const artists: any[] = entries
             .filter(a => a.name && a.name !== 'Unknown Artist')
             .map(a => ({
                 id: a.id,
@@ -3126,6 +3491,9 @@ class SubsonicHandler {
                 ...(a.starred ? { starred: new Date().toISOString() } : {}),
             }))
             .sort((x, y) => x.name.localeCompare(y.name, 'zh-Hans-CN'))
+
+        artists.push(...localArtists(await getLocalTracks(username)))
+        artists.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
 
         // 按索引分组：中文按拼音首字母归入 A-Z，
         // 避免中文歌手全部挤在 “#” 里导致客户端字母索引失效
@@ -3944,6 +4312,7 @@ class SubsonicHandler {
         let cleanQuery = rawQuery
 
         const lowerQuery = rawQuery.toLowerCase()
+        const nasOnly = ['local', 'nas'].includes(params.get('source') || params.get('musicFolderId') || '') || lowerQuery.startsWith('local:') || lowerQuery.startsWith('local：')
         if (lowerQuery.startsWith('local:') || lowerQuery.startsWith('local：')) {
             searchMode = 'local_only'
             cleanQuery = rawQuery.slice(6).trim()
@@ -3972,7 +4341,7 @@ class SubsonicHandler {
                 cleanQuery = rawQuery.slice(colonIdx + 1).trim()
             } else {
                 const requestedSource = (params.get('source') || params.get('musicFolderId') || '').trim().toLowerCase()
-                if (requestedSource === 'local') {
+                if (requestedSource === 'local' || requestedSource === 'nas') {
                     searchMode = 'local_only'
                 } else if (requestedSource === 'all') {
                     searchMode = 'force_online'
@@ -3995,7 +4364,7 @@ class SubsonicHandler {
 
         // 1. 汇总所有本地歌曲 (去重)
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
 
         const allSongsMap = new Map<string, { music: LX.Music.MusicInfo, listId: string }>()
         const collectSongs = (list: LX.Music.MusicInfo[], listId: string) => {
@@ -4038,12 +4407,16 @@ class SubsonicHandler {
                 }
             }
         }
+        for (const track of await getLocalTracks(username)) {
+            allSongsMap.set(track.id, { music: localMusic(track), listId: track.albumId })
+        }
+        if (nasOnly) for (const id of allSongsMap.keys()) if (!isLocalSong(id)) allSongsMap.delete(id)
         const allLocalSongs = Array.from(allSongsMap.values())
 
         // 2. 汇总所有歌手 (去重)
         const allArtistsMap = new Map<string, any>()
         const libArtists = await this.getLibraryData(username, 'artists')
-        for (const a of libArtists) {
+        for (const a of nasOnly ? [] : libArtists) {
             const id = `art_${a.source || 'wy'}_${a.id}`
             allArtistsMap.set(id, {
                 id,
@@ -4054,6 +4427,7 @@ class SubsonicHandler {
             })
         }
         for (const { music } of allLocalSongs) {
+            if (isLocalSong(music.id)) continue
             const singer = music.singer || 'Unknown Artist'
             const primarySinger = (singer.split('、')[0] || 'Unknown Artist').trim()
             const source = music.source
@@ -4067,11 +4441,12 @@ class SubsonicHandler {
                 })
             }
         }
+        for (const a of localArtists(await getLocalTracks(username))) allArtistsMap.set(a.id, a)
         const allLocalArtists = Array.from(allArtistsMap.values())
 
         // 3. 汇总所有专辑 (去重)
         const allAlbumsMap = new Map<string, any>()
-        for (const alb of libAlbums) {
+        for (const alb of nasOnly ? [] : libAlbums) {
             const source = alb.source || 'wy'
             const primarySinger = (alb.artistName || '').split('、')[0] || 'LX Music'
             const artistId = alb.singerId ? `art_${source}_${alb.singerId}` : `artist_${primarySinger}`
@@ -4093,6 +4468,7 @@ class SubsonicHandler {
             })
         }
         for (const { music } of allLocalSongs) {
+            if (isLocalSong(music.id)) continue
             const meta = (music as any).meta || {}
             const albumName = meta.albumName || (music as any).albumName || (music as any).album?.name
             const rawAlbumId = (music as any).albumMid || (music as any).album?.mid || meta.albumId || (music as any).albumId || (music as any).album?.id
@@ -4125,6 +4501,7 @@ class SubsonicHandler {
                 }
             }
         }
+        for (const a of localAlbums(await getLocalTracks(username))) allAlbumsMap.set(a.id, a)
         const allLocalAlbums = Array.from(allAlbumsMap.values())
 
         // 4. 执行本地检索过滤
@@ -4221,7 +4598,7 @@ class SubsonicHandler {
             const order: string[] = []
             for (const it of matchedSongs as any[]) {
                 const m = it.music || it
-                const key = `${normalizeText(String(m.name || ''))}@${normalizeText(String((m.singer || '').split('、')[0] || ''))}`
+                const key = isLocalSong(m.id) ? m.id : `${normalizeText(String(m.name || ''))}@${normalizeText(String((m.singer || '').split('、')[0] || ''))}`
                 const rank = rankOf(String(m.source || ''))
                 const prev = picked.get(key)
                 if (!prev) {
@@ -4920,7 +5297,7 @@ class SubsonicHandler {
 
     private async handleGetStarred(res: http.ServerResponse, username: string, format: string, isV2 = true) {
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
         const meta = await this.getUserSubsonicMeta(username)
         const starredAlbumSet = new Set(meta.starredAlbums)
         const starredArtistSet = new Set(meta.starredArtists)
@@ -4980,6 +5357,11 @@ class SubsonicHandler {
                 }
             })
 
+        const localTracks = await getLocalTracks(username)
+        const localStars = readLocalState(username).starred
+        mappedAlbums.push(...localAlbums(localTracks).filter(a => localStars[a.id]))
+        mappedArtists.push(...localArtists(localTracks).filter(a => localStars[a.id]))
+
         // [dislike] 收藏列表同样过滤不喜欢的歌曲
         let filteredSongs = allSongs
         if (global.lx.config['subsonic.hideDisliked']) {
@@ -5017,7 +5399,7 @@ class SubsonicHandler {
         const size = Math.min(parseInt(params.get('size') || '10'), 100)
         const genreNameOrId = params.get('genre') || ''
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
 
 
         const isGenreQuery = params.has('genre')
@@ -5062,6 +5444,8 @@ class SubsonicHandler {
         addAll(listData.defaultList, 'default')
         for (const list of listData.userList) addAll((list.list || []) as LX.Music.MusicInfo[], list.id)
 
+        const seenLocal = new Set(all.map(e => e.music.id))
+        for (const t of await getLocalTracks(username)) if (!seenLocal.has(t.id)) all.push({ music: localMusic(t), listId: t.albumId })
         // Fisher-Yates 随机打乱，取前 size 条
         for (let i = all.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
@@ -5133,7 +5517,7 @@ class SubsonicHandler {
      */
     private async pickSimilarEntries(username: string, id: string | null, count: number): Promise<Array<{ music: LX.Music.MusicInfo, listId: string }>> {
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
 
         // 找到目标歌曲，优先从同一列表里挑相似（同歌手），找不到则随机
         const all: { music: LX.Music.MusicInfo, listId: string }[] = []
@@ -5487,9 +5871,12 @@ class SubsonicHandler {
         const mediaId = (params.get('mediaId') || '').trim()
         if (!mediaId) return this.sendError(res, 10, 'Required parameter is missing: mediaId', format)
         const mediaType = (params.get('mediaType') || 'song').trim() || 'song'
+        const localTrack = isLocalSong(mediaId) ? await findLocalTrack(username, mediaId) : undefined
+        if (isLocalSong(mediaId) && (!localTrack || !localFile(localTrack))) return this.sendError(res, 70, 'Local song not found', format)
 
         let ffmpegOk = false
         try { ffmpegOk = await probeFfmpeg() } catch { ffmpegOk = false }
+        if (localTrack && !global.lx.config['subsonic.transcode.enabled']) ffmpegOk = false
 
         const targetFormat = String(global.lx.config['subsonic.transcode.format'] || 'mp3').toLowerCase()
         const targetBitrate = 320 // kbps
@@ -5502,6 +5889,7 @@ class SubsonicHandler {
         })
 
         const sourceStream = { protocol: 'http', container: '', codec: '', audioChannels: 2, audioBitrate: 0, audioProfile: '', audioSamplerate: 0, audioBitdepth: 0 }
+        if (localTrack) Object.assign(sourceStream, { container: localTrack.suffix, audioBitrate: localTrack.bitRate * 1000, audioSamplerate: localTrack.samplingRate, audioBitdepth: localTrack.bitDepth })
         const transcodeStreamInfo = { protocol: 'http', container: targetFormat, codec: targetFormat, audioChannels: 2, audioBitrate: targetBitrate * 1000, audioProfile: '', audioSamplerate: 48000, audioBitdepth: 16 }
 
         subsonicLog.debug(`[Subsonic] getTranscodeDecision: ${mediaId} ffmpeg=${ffmpegOk} (user=${username})`)
@@ -5554,6 +5942,14 @@ class SubsonicHandler {
         const offset = Math.max(0, Math.floor(Number(params.get('offset') || 0)) || 0)
         const targetFormat = String(decision.format || 'mp3').toLowerCase()
         const bitrate = Math.max(32, Math.min(Number(decision.bitrate) || 320, 999))
+        if (isLocalSong(mediaId)) {
+            if (decision.id !== mediaId) return this.sendError(res, 10, 'Ticket media mismatch', format)
+            const track = await findLocalTrack(username, mediaId)
+            const file = track && localFile(track)
+            if (!file) return this.sendError(res, 70, 'Local song not found', format)
+            if (!global.lx.config['subsonic.transcode.enabled'] || !await probeFfmpeg()) return this.sendError(res, 0, 'Transcoding unavailable', format)
+            return this.transcodeStream(req, res, file, bitrate, format, offset, targetFormat)
+        }
 
         // 解析歌曲信息（本地列表 / 在线缓存 / 回源）
         let musicInfo: any = null
@@ -6126,7 +6522,7 @@ class SubsonicHandler {
         username: string,
         params: URLSearchParams,
         format: string,
-    ) {
+    ): Promise<any> {
         // [coverArtScaling] 客户端实际会带 size（实测 92/120 次请求带），此前被完全忽略
         const coverSize = Math.max(0, Math.min(parseInt(params.get('size') || '0') || 0, 1500))
             ; (res as any).__coverSize = coverSize
@@ -6140,6 +6536,37 @@ class SubsonicHandler {
         try {
             // 0. 剥离前缀 (al-, ar-, tr-, sg-, mg-) 并处理 URL
             id = id.replace(/^(al-|ar-|tr-|sg-|mg-)/, '')
+            // Stable playlist cover tokens work even when the client wraps IDs or
+            // requests artwork before opening the playlist detail.
+            if (!/^https?:/i.test(id) && !/^(local_|lalb_|lart_|lb_|pl_)/.test(id)) {
+                const playlistId = id.startsWith('playlist-cover_') ? Buffer.from(id.slice(15), 'base64url').toString('utf8') : id
+                const lists = await this.getSubsonicListData(username)
+                const list: any = lists.userList.find(l => l.id === playlistId)
+                const songs = playlistId === 'love' ? lists.loveList : playlistId === 'default' ? lists.defaultList : list?.list
+                if (songs) {
+                    const remote = (value: any): string => typeof value === 'string' && /^(https?:)?\/\//i.test(value.trim())
+                        ? (value.trim().startsWith('//') ? `https:${value.trim()}` : value.trim()) : ''
+                    let url = [list?.Album, list?.picUrl, list?.img, list?.cover, list?.coverUrl].map(remote).find(Boolean)
+                    if (!url && list?.source && list?.sourceListId) {
+                        try {
+                            const sdk = musicSdk[list.source]?.songList
+                            if (sdk?.getListDetail) {
+                                const detail: any = await withTimeout(sdk.getListDetail(list.sourceListId, 1), 6000)
+                                url = [detail?.info?.img, detail?.info?.pic, detail?.info?.cover, detail?.img].map(remote).find(Boolean)
+                            }
+                        } catch { /* A missing network cover falls back to the first song. */ }
+                    }
+                    if (url) return this.proxyCover(res, url)
+                    const first = songs[0]
+                    if (first && first.id !== id) {
+                        const copy = new URLSearchParams(params)
+                        copy.set('id', first.id)
+                        if (await this.handleLocalRequest(req, res, username, copy, format, 'getCoverArt')) return
+                        return this.handleGetCoverArt(req, res, username, copy, format)
+                    }
+                    res.writeHead(204); return res.end()
+                }
+            }
             if (id === 'logo') {
                 const logoPath = path.join(global.lx.staticPath, 'music/assets/logo.svg')
                 if (fs.existsSync(logoPath)) {
@@ -6665,7 +7092,8 @@ class SubsonicHandler {
      * 按首字母分组为 index，非 A-Z 归入 “#”（与多数服务端实现一致）。
      */
     private async handleGetIndexes(res: http.ServerResponse, username: string, format: string) {
-        const directory = await this.buildArtistDirectory(username)
+        const directory: any[] = await this.buildArtistDirectory(username)
+        directory.push(...localArtists(await getLocalTracks(username)).map(a => ({ ...a, albumKeys: { size: a.albumCount } })))
         // 与 getArtists 使用同一套索引分组（中文按拼音首字母），保持一致
         const buckets = new Map<string, any[]>()
         for (const a of directory) {
@@ -6725,7 +7153,7 @@ class SubsonicHandler {
             // [修复] albumId 退化成列表 id（love / 歌单 id）会产生 id=love 的脏专辑条目。
             // 这类歌、以及没有专辑信息的单曲，统一表示为「单曲专辑」alb_<source>_<songId>：
             // 既保证听过的歌都出现在列表里，点进去也至少能播这一首
-            if (!albumId || !albumId.startsWith('alb_')) {
+            if (!albumId || (!albumId.startsWith('alb_') && !albumId.startsWith('lalb_'))) {
                 const sid = String(song.id || '')
                 const idx = sid.indexOf('_')
                 const src = idx > 0 ? sid.slice(0, idx) : String(song.source || 'wy')
@@ -6905,7 +7333,7 @@ class SubsonicHandler {
 
         // 尝试通过歌手和标题反查歌曲 ID
         const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
+        const listData = await this.getSubsonicListData(username)
         const all: LX.Music.MusicInfo[] = [
             ...listData.loveList,
             ...listData.defaultList,
@@ -7115,10 +7543,12 @@ class SubsonicHandler {
         if (!lrc) return []
         const lines = lrc.split(/\r?\n/)
         const result: { value: string, start?: number }[] = []
-        const timeRegex = /\[(\d+):(\d+)\.(\d+)\]/g
+        const timeRegex = /\[(\d+):(\d+)(?:\.(\d{1,3}))?\]/g
+        const offset = Number(/\[offset:([+-]?\d+)\]/i.exec(lrc)?.[1] || 0)
 
         for (const line of lines) {
-            const text = line.replace(/\[\d+:\d+\.\d+\]/g, '').trim()
+            if (/^\s*\[(?:ar|ti|al|by|offset|re|ve|length|awlrc):/i.test(line)) continue
+            const text = line.replace(/\[\d+:\d+(?:\.\d{1,3})?\]/g, '').trim()
             if (!text && line.includes(']')) continue
 
             timeRegex.lastIndex = 0 // 重置正则索引
@@ -7127,9 +7557,9 @@ class SubsonicHandler {
                 for (const match of matches) {
                     const minutes = parseInt(match[1])
                     const seconds = parseInt(match[2])
-                    const msStr = match[3].padEnd(3, '0')
+                    const msStr = (match[3] || '0').padEnd(3, '0')
                     const ms = parseInt(msStr)
-                    const startTime = minutes * 60000 + seconds * 1000 + ms
+                    const startTime = Math.max(0, minutes * 60000 + seconds * 1000 + ms + offset)
                     result.push({ value: text, start: startTime })
                 }
             } else if (text) {

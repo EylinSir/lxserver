@@ -762,7 +762,7 @@ window.LocalMusicManager = {
             btn.classList.remove('hidden');
             const label = this.isViewingPublicSongs ? '公开歌曲 (已开启)' : '公开歌曲';
             btn.title = label;
-            const baseClass = 'text-[9px] md:text-[10px] font-bold px-1.5 md:px-2 py-0.5 rounded-lg transition-all inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap w-auto self-center h-fit';
+            const baseClass = 'text-[9px] md:text-[10px] font-bold px-1.5 md:px-2 py-0.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap w-auto self-center h-fit';
             if (this.isViewingPublicSongs) {
                 btn.className = `${baseClass} bg-emerald-500 text-white shadow-sm`;
                 btn.innerHTML = `<i class="fas fa-globe text-[10px]"></i><span class="hidden sm:inline md:hidden 2xl:inline">${label}</span>`;
@@ -792,10 +792,15 @@ window.LocalMusicManager = {
                 origSwitchTab(tabId);
             }
             if (tabId === 'localmusic') {
-                window.LocalMusicManager.syncLocationSelector();
-                window.LocalMusicManager.loadFilters();
-                window.LocalMusicManager.syncPublicSongsBtn();
-                window.LocalMusicManager.fetchData(true); // silent fetch
+                if (window.CustomDirManager && window.CustomDirManager.isActive) {
+                    window.CustomDirManager.loadFilters();
+                    window.CustomDirManager.fetchData(true);
+                } else {
+                    window.LocalMusicManager.syncLocationSelector();
+                    window.LocalMusicManager.loadFilters();
+                    window.LocalMusicManager.syncPublicSongsBtn();
+                    window.LocalMusicManager.fetchData(true); // silent fetch
+                }
             } else {
                 // Auto exit batch mode when leaving
                 if (window.LocalMusicManager.batchMode) {
@@ -987,6 +992,9 @@ window.LocalMusicManager = {
     },
 
     async fetchData(silent = false) {
+        if (this.isCustomDirMode || (window.CustomDirManager && window.CustomDirManager.isActive)) {
+            return;
+        }
         const requestId = this._listRequestId = (this._listRequestId || 0) + 1;
         const location = document.getElementById('lm-location-select')?.value || 'root';
         const isLoggedIn = typeof window.isUserLoggedIn === 'function' ? window.isUserLoggedIn() : false;
@@ -2495,7 +2503,7 @@ window.LocalMusicManager = {
 
             html += `
                 <div class="flex items-center p-3 md:p-4 t-bg-main border t-border-main rounded-2xl md:rounded-3xl hover:border-emerald-400 group transition-all shadow-sm">
-                    <div class="w-12 h-12 rounded-xl overflow-hidden mr-4 flex-shrink-0 bg-gray-100 border t-border-main">
+                    <div class="w-12 h-12 rounded-xl overflow-hidden mr-4 flex-shrink-0 bg-gray-100 dark:bg-gray-800 border t-border-main">
                         <img src="${item.img || '/music/assets/logo.svg'}" onerror="this.src='/music/assets/logo.svg'" loading="lazy" class="w-full h-full object-cover">
                     </div>
                     <div class="flex-1 min-w-0 mr-4">
@@ -2504,11 +2512,11 @@ window.LocalMusicManager = {
                     </div>
                     <div class="text-right mr-5 flex-shrink-0">
                         <div class="text-[10px] uppercase font-black t-text-muted opacity-30 tracking-widest mb-0.5">${item.source}</div>
-                        <div class="text-[11px] font-mono font-bold ${isMatch ? 'text-emerald-500 bg-emerald-50 px-1.5 py-0.5 rounded-lg' : 't-text-main'}">${item.interval || '--:--'}</div>
+                        <div class="text-[11px] font-mono font-bold ${isMatch ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/15 px-1.5 py-0.5 rounded-lg' : 't-text-main'}">${item.interval || '--:--'}</div>
                     </div>
                     <div class="flex items-center gap-2 flex-shrink-0">
                         <button onclick="window.LocalMusicManager.addManualResultToPlaylist(${originalIdx})"
-                            class="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-50 text-emerald-500 hover:bg-emerald-100 border border-emerald-100 transition-all active:scale-95" title="添加到歌单">
+                            class="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-50 dark:bg-emerald-500/15 text-emerald-500 hover:bg-emerald-100 dark:hover:bg-emerald-500/25 border border-emerald-100 dark:border-emerald-500/30 transition-all active:scale-95" title="添加到歌单">
                             <i class="fas fa-plus text-xs"></i>
                         </button>
                         <button onclick="window.LocalMusicManager.linkItem(${originalIdx})"

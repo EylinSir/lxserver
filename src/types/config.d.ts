@@ -347,6 +347,8 @@ declare namespace LX {
     /**
      * 是否在 Subsonic 中公开在线排行榜(只读虚拟播放列表) (默认 false)
      */
+    'subsonic.localPlaylist'?: boolean
+    'subsonic.customPlaylist'?: boolean
     'subsonic.publicLeaderboards'?: boolean
 
     /**

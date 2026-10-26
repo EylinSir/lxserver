@@ -1309,6 +1309,7 @@ async function checkAndUpdateCustomDirUI() {
             } else {
                 userEnableCustomDir = !!vData.enableCustomMusicDir;
                 window.userAllowOperateCustomDir = !!vData.allowOperateCustomMusicDir;
+                window.userAllowWriteCustomDir = !!vData.allowWriteCustomMusicDir;
                 window.userEnableAutoDownload = !!vData.enableAutoDownload;
             }
         } catch (e) {
@@ -1458,19 +1459,6 @@ window.handleHeaderLogout = handleHeaderLogout;
 
         // 更新自定义目录开关显示状态
         await checkAndUpdateCustomDirUI();
-
-        const customDirSwitch = document.getElementById('user-custom-dir-switch');
-
-        if (customDirSwitch) {
-            customDirSwitch.addEventListener('change', (e) => {
-                const isChecked = e.target.checked;
-                if (window.CustomDirManager && typeof window.CustomDirManager.setActive === 'function') {
-                    window.CustomDirManager.setActive(isChecked);
-                } else if (window.LocalMusicManager && typeof window.LocalMusicManager.toggleCustomDirMode === 'function') {
-                    window.LocalMusicManager.toggleCustomDirMode(isChecked);
-                }
-            });
-        }
 
         // [新增] 公开受限用户自动尝试从服务器拉取配置 (_open)
         if (config['user.enablePublicRestriction'] && !localStorage.getItem('lx_sync_user')) {
@@ -1827,10 +1815,24 @@ function changeQualityPreference(quality) {
 
 // Tab Switching
 function switchTab(tabId) {
-    // Favorites is a sidebar group toggle, not a main content view.
+    // Favorites entry opens the default favorite list (love / default) or guidance view
     if (tabId === 'favorites') {
-        handleFavoritesClick();
-        return;
+        exitListSecondaryModes();
+        const favList = document.getElementById('favorites-children');
+        if (favList && (favList.style.height === '0px' || favList.style.height === '')) {
+            toggleFavorites();
+        }
+        if (currentListData) {
+            const targetListId = (Array.isArray(currentListData.loveList) && currentListData.loveList.length > 0)
+                ? 'love'
+                : (Array.isArray(currentListData.defaultList) ? 'default' : 'love');
+            handleListClick(targetListId);
+            return;
+        } else {
+            window._pendingDefaultFavoriteEntry = true;
+        }
+    } else {
+        delete window._pendingDefaultFavoriteEntry;
     }
 
     document.querySelectorAll('[id^="view-"]').forEach(el => {
@@ -1947,7 +1949,8 @@ function switchTab(tabId) {
     }
 
     if (tabId === 'localmusic') {
-        document.getElementById('page-title').innerText = "本地音乐";
+        const isCustomActive = !!(window.CustomDirManager && window.CustomDirManager.isActive);
+        document.getElementById('page-title').innerText = isCustomActive ? "自定义目录" : "本地音乐";
     }
 
     // Collapse Favorites if leaving
@@ -1958,6 +1961,8 @@ function switchTab(tabId) {
             favList.style.height = '0px';
             if (arrow) arrow.style.transform = 'rotate(-90deg)';
         }
+    } else {
+        document.getElementById('page-title').innerText = '我的收藏';
     }
 
     // Title update (handled above for search, others here)
@@ -2158,9 +2163,9 @@ function scrollToCurrentSongInQueue(flash = true) {
 
         if (flash) {
             // 闪烁高亮提醒
-            activeItem.classList.add('ring-2', 'ring-emerald-500', 'ring-inset', 'ring-opacity-50');
+            activeItem.classList.add('ring-2', 'ring-emerald-500/50', 'ring-inset');
             setTimeout(() => {
-                activeItem.classList.remove('ring-2', 'ring-emerald-500', 'ring-inset', 'ring-opacity-50');
+                activeItem.classList.remove('ring-2', 'ring-emerald-500/50', 'ring-inset');
             }, 1000);
         }
     } else if (flash) {
@@ -3778,19 +3783,19 @@ function renderArtistSongsUI(list, page) {
 
                     <!-- Actions -->
                     <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors" title="播放" onclick="event.stopPropagation(); playFromView(${index})">
-                            <i class="fas fa-play w-3.5 h-3.5 flex items-center justify-center"></i>
+                        <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" title="播放" onclick="event.stopPropagation(); playFromView(${index})">
+                            <i class="fas fa-play w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
-                        <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors" title="下载" onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                            <i class="fas fa-download w-3.5 h-3.5 flex items-center justify-center"></i>
+                        <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-lg text-blue-600 dark:text-blue-400 transition-colors inline-flex items-center justify-center" title="下载" onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+                            <i class="fas fa-download w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
-                        <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors" title="添加到歌单" onclick="event.stopPropagation(); openPlaylistAddModalForSong(${index})">
-                            <i class="fas fa-plus w-3.5 h-3.5 flex items-center justify-center"></i>
+                        <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-500 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" title="添加到歌单" onclick="event.stopPropagation(); openPlaylistAddModalForSong(${index})">
+                            <i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
-                        <button class="p-0.5 sm:p-1.5 hover:bg-red-50 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors"
+                        <button class="p-0.5 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors inline-flex items-center justify-center"
                                 title="${(isDisliked) ? '取消不喜欢' : '不喜欢'}"
                                 onclick="event.stopPropagation(); toggleDislikeSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                            <i class="fas fa-thumbs-down w-3.5 h-3.5 flex items-center justify-center"></i>
+                            <i class="fas fa-thumbs-down w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
                     </div>
                 </div>
@@ -5133,29 +5138,29 @@ function renderResults(list) {
 
             <!-- Actions -->
             <div class="song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                <button class="p-1 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors" 
+                <button class="p-1 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" 
                         title="播放" 
                         onclick="event.stopPropagation(); playFromView(${actualIndexInOriginal})">
-                    <i class="fas fa-play w-3.5 h-3.5 flex items-center justify-center"></i>
+                    <i class="fas fa-play w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                 </button>
-                <button class="p-1 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors" 
+                <button class="p-1 sm:p-1.5 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-lg text-blue-600 dark:text-blue-400 transition-colors inline-flex items-center justify-center" 
                         title="下载" 
                         onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                    <i class="fas fa-download w-3.5 h-3.5 flex items-center justify-center"></i>
+                    <i class="fas fa-download w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                 </button>
-                <button class="add-to-playlist-btn p-1 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors"
+                <button class="add-to-playlist-btn p-1 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-500 dark:text-emerald-400 transition-colors inline-flex items-center justify-center"
                         title="添加到歌单">
-                    <i class="fas fa-plus w-3.5 h-3.5 flex items-center justify-center"></i>
+                    <i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                 </button>
-                <button class="p-1 sm:p-1.5 hover:bg-red-50 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors"
+                <button class="p-1 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors inline-flex items-center justify-center"
                         title="${(isDisliked) ? '取消不喜欢' : '不喜欢'}"
                         onclick="event.stopPropagation(); toggleDislikeSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                    <i class="fas fa-thumbs-down w-3.5 h-3.5 flex items-center justify-center"></i>
+                    <i class="fas fa-thumbs-down w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                 </button>
                 ${currentSearchScope !== 'network' && window.currentViewingListId !== 'dislike_songs' ? `
-                <button class="delete-song-btn p-1 sm:p-1.5 hover:bg-red-50 rounded-lg text-red-600 transition-colors"
+                <button class="delete-song-btn p-1 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg text-red-600 dark:text-red-400 transition-colors inline-flex items-center justify-center"
                         title="删除">
-                    <i class="fas fa-trash w-3.5 h-3.5 flex items-center justify-center"></i>
+                    <i class="fas fa-trash w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                 </button>
                 ` : ''}
             </div>
@@ -6670,7 +6675,7 @@ async function showServerDirectories() {
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
                 <!-- Header -->
-                <div class="px-5 py-4 border-b border-emerald-100/50 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
+                <div class="px-5 py-4 border-b border-emerald-100/50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
                     <div class="flex items-center gap-2">
                         <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
                             <i class="fas fa-folder-open text-base"></i>
@@ -8216,8 +8221,11 @@ async function restorePlaybackState() {
         // 5. 延迟加载播放源（静默模式）但不强制切换 Tab 破坏默认入口设置
         setTimeout(() => {
             if (audio.isRemote) return;
-            if (state.scope === 'network') {
-                renderResults(currentPlaylist);
+            if (state.scope === 'network' && currentSearchScope === 'network') {
+                const searchView = document.getElementById('view-search');
+                if (searchView && !searchView.classList.contains('hidden')) {
+                    renderResults(currentPlaylist);
+                }
             } else if (state.scope === 'local_list' || state.scope === 'local_all') {
                 window._pendingResumeListId = state.listId || 'default';
             }
@@ -9279,7 +9287,7 @@ const SETTINGS_UI_MAP = {
     hotSearchLimit: {
         id: 'hot-search-limit-input',
         type: 'value',
-        action: () => document.getElementById('search-results-header')?.classList.contains('hidden') && showInitialSearchState()
+        action: () => currentSearchScope === 'network' && document.getElementById('search-results-header')?.classList.contains('hidden') && showInitialSearchState()
     },
     itemsPerPage: { id: 'items-per-page-select', type: 'value' },
     enableClientModeSync: { id: 'setting-client-mode-sync', type: 'checkbox' }
@@ -12175,13 +12183,13 @@ function switchSyncMode(mode) {
     const formRemote = document.getElementById('sync-form-remote');
 
     if (mode === 'local') {
-        btnLocal.className = "px-4 py-2 rounded-lg text-sm font-medium bg-emerald-100 text-emerald-700 ring-2 ring-emerald-500 transition-all";
-        btnRemote.className = "px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 t-text-muted hover:bg-gray-200 transition-all";
+        btnLocal.className = "px-4 py-2 rounded-lg text-sm font-medium bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 ring-2 ring-emerald-500 transition-all";
+        btnRemote.className = "px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-800 t-text-muted hover:bg-gray-200 dark:hover:bg-gray-700 transition-all";
         formLocal.classList.remove('hidden');
         formRemote.classList.add('hidden');
     } else {
-        btnLocal.className = "px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 t-text-muted hover:bg-gray-200 transition-all";
-        btnRemote.className = "px-4 py-2 rounded-lg text-sm font-medium bg-blue-100 text-blue-700 ring-2 ring-blue-500 transition-all";
+        btnLocal.className = "px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-800 t-text-muted hover:bg-gray-200 dark:hover:bg-gray-700 transition-all";
+        btnRemote.className = "px-4 py-2 rounded-lg text-sm font-medium bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 ring-2 ring-blue-500 transition-all";
         formLocal.classList.add('hidden');
         formRemote.classList.remove('hidden');
         // Reset Remote Flow
@@ -13310,17 +13318,25 @@ function renderMyLists(data) {
     initFavoriteSidebarSortable(container);
     refreshFavoritesChildrenHeight();
 
-    // [Resume] 处理本地列表的自动恢复跳转
+    // [Resume] 处理本地列表的自动恢复跳转或默认入口自动打开
     if (window._pendingResumeListId) {
         const listId = window._pendingResumeListId;
         delete window._pendingResumeListId;
+        delete window._pendingDefaultFavoriteEntry;
         console.log('[Resume] 正在同步本地播放列表上下文:', listId);
         // 调用 handleListClick 以加载真实的列表数据并应用高亮
         handleListClick(listId);
+    } else if (window._pendingDefaultFavoriteEntry) {
+        delete window._pendingDefaultFavoriteEntry;
+        const targetListId = (Array.isArray(data.loveList) && data.loveList.length > 0)
+            ? 'love'
+            : (Array.isArray(data.defaultList) ? 'default' : 'love');
+        handleListClick(targetListId);
     }
 }
 
 function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
+    delete window._pendingDefaultFavoriteEntry;
     if (!skipAutoUpdate) window.PlayerNavigation?.record({ tab: 'search', listId });
     window.SearchRequests?.cancel();
     exitListSecondaryModes();
@@ -14267,12 +14283,12 @@ function switchCustomSourceMode(mode) {
 
     // 更新按钮样式
     document.getElementById('btn-source-file').className = mode === 'file'
-        ? 'px-4 py-2 text-sm font-medium bg-emerald-100 text-emerald-700 rounded-lg'
-        : 'px-4 py-2 text-sm font-medium bg-gray-100 t-text-muted rounded-lg hover:bg-gray-200';
+        ? 'px-4 py-2 text-sm font-medium bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg'
+        : 'px-4 py-2 text-sm font-medium bg-gray-100 dark:bg-gray-800 t-text-muted rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700';
 
     document.getElementById('btn-source-url').className = mode === 'url'
-        ? 'px-4 py-2 text-sm font-medium bg-emerald-100 text-emerald-700 rounded-lg'
-        : 'px-4 py-2 text-sm font-medium bg-gray-100 t-text-muted rounded-lg hover:bg-gray-200';
+        ? 'px-4 py-2 text-sm font-medium bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg'
+        : 'px-4 py-2 text-sm font-medium bg-gray-100 dark:bg-gray-800 t-text-muted rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700';
 
     // 切换显示
     document.getElementById('custom-source-file').classList.toggle('hidden', mode !== 'file');
@@ -14628,12 +14644,12 @@ function updateSourceScopeUI() {
     // Tag Content Logic
     let tagHtml = '';
     if (isPublic) {
-        tagHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-500 whitespace-nowrap inline-block">公开</span>`;
+        tagHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 dark:bg-blue-500/20 text-blue-500 dark:text-blue-400 whitespace-nowrap inline-block">公开</span>`;
     } else {
         // User logged in
-        let userTag = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-600 whitespace-nowrap inline-block">${username}</span>`;
+        let userTag = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 whitespace-nowrap inline-block">${username}</span>`;
         if (showPublic) {
-            userTag += `<span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-500 whitespace-nowrap inline-block">公开</span>`
+            userTag += `<span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 dark:bg-blue-500/20 text-blue-500 dark:text-blue-400 whitespace-nowrap inline-block">公开</span>`
         }
         tagHtml = userTag;
     }
@@ -14642,8 +14658,8 @@ function updateSourceScopeUI() {
 
     if (modalTag) {
         modalTag.innerHTML = isPublic
-            ? `<div class="flex items-center gap-2 text-xs text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 w-fit mb-2"><i class="fas fa-globe"></i> 上传到: 公开</div>`
-            : `<div class="flex items-center gap-2 text-xs text-purple-600 bg-purple-50 px-3 py-1.5 rounded-lg border border-purple-100 w-fit mb-2"><i class="fas fa-user-circle"></i> 上传到: ${username}</div>`;
+            ? `<div class="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/15 px-3 py-1.5 rounded-lg border border-blue-100 dark:border-blue-500/30 w-fit mb-2"><i class="fas fa-globe"></i> 上传到: 公开</div>`
+            : `<div class="flex items-center gap-2 text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-500/15 px-3 py-1.5 rounded-lg border border-purple-100 dark:border-purple-500/30 w-fit mb-2"><i class="fas fa-user-circle"></i> 上传到: ${username}</div>`;
     }
 }
 
@@ -14694,12 +14710,12 @@ async function renderCustomSources() {
         if (shouldShowHidden) {
             container.innerHTML = `
                 <div class="flex flex-col items-center justify-center p-8 t-text-muted">
-                    <div class="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center mb-4">
+                    <div class="w-16 h-16 bg-emerald-50 dark:bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-4">
                         <i class="fas fa-lock text-3xl text-emerald-500/50"></i>
                     </div>
                     <p class="text-base font-bold t-text-main mb-2">列表内容已隐藏</p>
                     <p class="text-xs text-center max-w-[240px] leading-relaxed">当前系统已开启公开访问限制，请登录管理员账号后再管理或查看自定义源列表。</p>
-                    <button onclick="handleAdminLogin()" class="mt-6 px-6 py-2.5 bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-all active:scale-95">前往登录</button>
+                    <button onclick="handleAdminLogin()" class="mt-6 px-6 py-2.5 bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-all active:scale-95">前往登录</button>
                 </div>
             `;
             return;
@@ -15538,9 +15554,9 @@ function renderPlaylistAddGrid() {
 
         // Active/Inactive styles (Highlight only in single-song mode)
         if (!isBatch && isIncluded) {
-            className += "bg-red-500 text-white shadow-md scale-[1.02] ring-2 ring-red-200";
+            className += "bg-red-500 text-white shadow-md scale-[1.02] ring-2 ring-red-200 dark:ring-red-500/40";
         } else {
-            className += "bg-emerald-50 text-emerald-500 hover:bg-emerald-100 hover:shadow";
+            className += "bg-emerald-50 dark:bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/25 hover:shadow";
         }
 
         btn.className = className;
@@ -15943,7 +15959,7 @@ async function handleTogglePlaylist(listId, btnElement) {
 
 function updateGridItemVisuals(btn, isIncluded) {
     if (isIncluded) {
-        btn.className = "relative h-14 rounded-lg text-sm font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm overflow-hidden bg-red-500 text-white shadow-md scale-[1.02] ring-2 ring-red-200";
+        btn.className = "relative h-14 rounded-lg text-sm font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm overflow-hidden bg-red-500 text-white shadow-md scale-[1.02] ring-2 ring-red-200 dark:ring-red-500/40";
         // Update icon if needed, though innerHTML replacement is easiest
         const textSpan = btn.querySelector('span'); // Assuming first span is text
         const text = textSpan ? textSpan.innerText : btn.innerText;
@@ -15952,7 +15968,7 @@ function updateGridItemVisuals(btn, isIncluded) {
             <i class="fas fa-check text-xs ml-1 opacity-80"></i>
         `;
     } else {
-        btn.className = "relative h-14 rounded-lg text-sm font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm overflow-hidden bg-emerald-50 text-emerald-500 hover:bg-emerald-100 hover:shadow";
+        btn.className = "relative h-14 rounded-lg text-sm font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm overflow-hidden bg-emerald-50 dark:bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/25 hover:shadow";
         const textSpan = btn.querySelector('span');
         const text = textSpan ? textSpan.innerText : btn.innerText;
         btn.innerHTML = `<span class="truncate max-w-[80%]">${text}</span>`;
@@ -16394,7 +16410,7 @@ function showInput(title, message, options = {}) {
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
                 <!-- Header -->
-                <div class="px-5 py-4 border-b border-emerald-100/50 flex justify-between items-center bg-emerald-50/50">
+                <div class="px-5 py-4 border-b border-emerald-100/50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
                     <h3 class="text-sm font-bold t-text-main">${title}</h3>
                     <button id="modal-close-x" class="t-text-muted hover:text-emerald-500 transition-colors">
                         <i class="fas fa-times text-lg"></i>
@@ -16403,7 +16419,7 @@ function showInput(title, message, options = {}) {
                 <!-- Body -->
                 <div class="p-6">
                     <div class="flex items-start gap-4 mb-4">
-                        <div class="w-10 h-10 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0">
+                        <div class="w-10 h-10 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
                             <i class="fas fa-edit text-lg"></i>
                         </div>
                         <div class="flex-1">
@@ -16466,7 +16482,7 @@ function showSelect(title, message, options = {}) {
         danger = false
     } = options;
 
-    const btnColor = danger ? 'bg-red-500 hover:bg-red-600 shadow-red-100' : `${confirmColor} hover:opacity-90 shadow-emerald-100`;
+    const btnColor = danger ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' : `${confirmColor} hover:opacity-90 shadow-emerald-500/20`;
 
     return new Promise((resolve) => {
         const modal = document.createElement('div');
@@ -16476,7 +16492,7 @@ function showSelect(title, message, options = {}) {
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
                 <!-- Header -->
-                <div class="px-5 py-4 border-b border-emerald-100/50 flex justify-between items-center bg-emerald-50/50">
+                <div class="px-5 py-4 border-b border-emerald-100/50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
                     <h3 class="text-sm font-bold t-text-main">${title}</h3>
                     <button id="modal-close-x" class="t-text-muted hover:text-emerald-500 transition-colors">
                         <i class="fas fa-times text-lg"></i>
@@ -16485,7 +16501,7 @@ function showSelect(title, message, options = {}) {
                 <!-- Body -->
                 <div class="p-6">
                     <div class="flex items-start gap-4">
-                        <div class="w-10 h-10 rounded-full ${danger ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500'} flex items-center justify-center shrink-0">
+                        <div class="w-10 h-10 rounded-full ${danger ? 'bg-red-50 dark:bg-red-500/10 text-red-500' : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-500'} flex items-center justify-center shrink-0">
                             <i class="fas ${danger ? 'fa-exclamation-triangle' : 'fa-question-circle'} text-lg"></i>
                         </div>
                         <div class="flex-1">
@@ -16551,7 +16567,7 @@ function showOptions(title, message, options = []) {
         modal.innerHTML = `
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
-                <div class="px-5 py-4 border-b border-emerald-100/50 flex justify-between items-center bg-emerald-50/50">
+                <div class="px-5 py-4 border-b border-emerald-100/50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
                     <h3 class="text-sm font-bold t-text-main">${title}</h3>
                     <button id="opt-close-x" class="t-text-muted hover:text-emerald-500 transition-colors">
                         <i class="fas fa-times text-lg"></i>
@@ -17029,9 +17045,11 @@ function showLoading(message = '正在处理...') {
     overlay.innerHTML = `
         <div class="absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-300"></div>
         <div class="t-bg-panel rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4 relative z-[210] border t-border-main animate-slide-up">
-            <div class="relative">
-                <div class="w-12 h-12 rounded-full border-4 border-emerald-100 border-t-emerald-500 animate-spin"></div>
-                <i class="fas fa-music text-emerald-500 absolute inset-0 flex items-center justify-center text-xs"></i>
+            <div class="relative w-12 h-12 flex items-center justify-center">
+                <div class="w-12 h-12 rounded-full border-4 border-emerald-100 dark:border-emerald-900/40 border-t-emerald-500 dark:border-t-emerald-500 animate-spin"></div>
+                <span class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <i class="fas fa-music text-emerald-500 text-xs"></i>
+                </span>
             </div>
             <p class="text-sm font-bold t-text-main animate-pulse">${message}</p>
         </div>
@@ -17270,9 +17288,13 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('[Init] 启动后台初始化任务...');
         restorePlaybackState();
 
-        // [新增] 延迟显示热搜，避免启动请求堆积
-        if (typeof showInitialSearchState === 'function') {
-            showInitialSearchState();
+        // [新增] 延迟显示热搜，避免启动请求堆积（仅在当前处于网络搜索视图时触发，防止覆盖默认入口列表）
+        if (typeof showInitialSearchState === 'function' && currentSearchScope === 'network') {
+            const searchView = document.getElementById('view-search');
+            const searchInput = document.getElementById('search-input');
+            if (searchView && !searchView.classList.contains('hidden') && (!searchInput || !searchInput.value.trim())) {
+                showInitialSearchState();
+            }
         }
 
         // 监听源切换，自动刷新热搜
@@ -17280,8 +17302,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (searchSourceSelect) {
             searchSourceSelect.addEventListener('change', () => {
                 const searchInput = document.getElementById('search-input');
-                // 仅当搜索框为空（即处于显示热搜状态）时刷新
-                if (!searchInput || !searchInput.value.trim()) {
+                // 仅当处于网络搜索模式且搜索框为空（即处于显示热搜状态）时刷新
+                if (currentSearchScope === 'network' && (!searchInput || !searchInput.value.trim())) {
                     showInitialSearchState();
                 }
             });

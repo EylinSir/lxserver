@@ -93,10 +93,10 @@ function updateAppearanceUI(activeMode) {
         const mode = btn.getAttribute('data-appearance');
         if (mode === activeMode) {
             btn.classList.add('ring-emerald-500', 'border-emerald-500', 'text-emerald-600');
-            btn.classList.remove('t-border-main', 't-text-muted');
+            btn.classList.remove('ring-transparent', 't-border-main', 't-text-muted');
         } else {
             btn.classList.remove('ring-emerald-500', 'border-emerald-500', 'text-emerald-600');
-            btn.classList.add('t-border-main', 't-text-muted');
+            btn.classList.add('ring-transparent', 't-border-main', 't-text-muted');
         }
     });
 }

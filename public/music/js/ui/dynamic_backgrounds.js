@@ -346,9 +346,38 @@
             fillOptions(picker);
             const fx = create(scene);
 
+            const host = picker.closest('.background-picker');
+            let syncUI = () => {};
+            if (host && !host.querySelector('.cs-trigger')) {
+                picker.hidden = true;
+                const trigger = document.createElement('button');
+                trigger.type = 'button';
+                trigger.className = 'cs-trigger';
+                const menu = document.createElement('ul');
+                menu.className = 'cs-dropdown';
+                menu.innerHTML = EFFECTS.map(e =>
+                    `<li class="cs-option" data-value="${e.value}"><span>${e.label}</span><i class="fas fa-check"></i></li>`
+                ).join('');
+                host.append(trigger, menu);
+
+                syncUI = (mode) => {
+                    const cur = EFFECTS.find(e => e.value === mode) || EFFECTS[0];
+                    trigger.innerHTML = `<span class="cs-trigger-text">${cur.label}</span><i class="fas fa-chevron-down cs-trigger-icon"></i>`;
+                    trigger.classList.toggle('highlight', mode !== 'none');
+                    menu.querySelectorAll('.cs-option').forEach(li => li.classList.toggle('selected', li.dataset.value === mode));
+                };
+                trigger.onclick = (e) => { e.stopPropagation(); host.classList.toggle('open'); };
+                menu.onclick = (e) => {
+                    const li = e.target.closest('.cs-option');
+                    if (li) { host.classList.remove('open'); select(li.dataset.value, true); }
+                };
+                document.addEventListener('click', (e) => { if (!host.contains(e.target)) host.classList.remove('open'); });
+            }
+
             function select(value, save = false) {
                 const mode = VALID.has(value) ? value : 'aurora';
                 picker.value = mode;
+                syncUI(mode);
                 // 网格遮罩 / 鼠标光晕仅在极光模式显示 (见 dynamic-backgrounds.css)
                 document.documentElement.dataset.loginBackground = mode;
                 if (save) {

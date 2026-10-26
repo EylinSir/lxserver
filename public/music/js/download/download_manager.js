@@ -1506,7 +1506,7 @@ class DownloadManager {
             if (displayName) qualityLabel = displayName;
         }
 
-        let statusBg = 'bg-gray-100 t-text-muted';
+        let statusBg = 'bg-gray-100 dark:bg-gray-800 t-text-muted';
         let statusText = '等待中';
         let actionBtnHTML = '';
         let progressWidth = task.progress || 0;
@@ -1514,7 +1514,7 @@ class DownloadManager {
         let isServerTask = task.isServer || false;
 
         if (task.status === 'downloading') {
-            statusBg = isServerTask ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600';
+            statusBg = isServerTask ? 'bg-orange-100 dark:bg-orange-500/15 text-orange-600 dark:text-orange-400' : 'bg-blue-100 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400';
             // 云端任务：若 totalBytes=0 且 progress=0，说明还没轮询到进度，显示 indeterminate 而非 "云端 0%"
             const hasRealProgress = isServerTask && (task.totalBytes > 0 || task.progress > 0);
             statusText = isServerTask
@@ -1524,40 +1524,40 @@ class DownloadManager {
 
             if (!isServerTask && !task.nativeDownloadDispatched) {
                 actionBtnHTML = `
-                    <button onclick="window.SystemDownloadManager.pauseTask('${task.id}')" class="w-8 h-8 rounded-full border border-yellow-200 text-yellow-500 hover:bg-yellow-50 flex items-center justify-center transition-colors shadow-sm" title="暂停">
+                    <button onclick="window.SystemDownloadManager.pauseTask('${task.id}')" class="w-8 h-8 rounded-full border border-yellow-200 dark:border-yellow-500/30 text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-500/15 flex items-center justify-center transition-colors shadow-sm" title="暂停">
                         <i class="fas fa-pause text-xs"></i>
                     </button>
                 `;
             }
         } else if (task.status === 'tagging') {
-            statusBg = 'bg-orange-100 text-orange-600';
+            statusBg = 'bg-orange-100 dark:bg-orange-500/15 text-orange-600 dark:text-orange-400';
             statusText = isServerTask ? '写入标签' : '处理中';
             progressWidth = 100;
         } else if (task.status === 'paused') {
-            statusBg = 'bg-yellow-100 text-yellow-600';
+            statusBg = 'bg-yellow-100 dark:bg-yellow-500/15 text-yellow-600 dark:text-yellow-400';
             statusText = '已暂停';
             actionBtnHTML = `
-                <button onclick="window.SystemDownloadManager.resumeTask('${task.id}')" class="w-8 h-8 rounded-full border border-emerald-200 text-emerald-500 hover:bg-emerald-50 flex items-center justify-center transition-colors shadow-sm" title="继续">
+                <button onclick="window.SystemDownloadManager.resumeTask('${task.id}')" class="w-8 h-8 rounded-full border border-emerald-200 dark:border-emerald-500/30 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 flex items-center justify-center transition-colors shadow-sm" title="继续">
                     <i class="fas fa-play text-xs"></i>
                 </button>
             `;
         } else if (task.status === 'error') {
-            statusBg = 'bg-red-100 text-red-600';
+            statusBg = 'bg-red-100 dark:bg-red-500/15 text-red-600 dark:text-red-400';
             statusText = task.retryCount > 0 && task.retryCount < task.maxRetries ? `重试 (${task.retryCount})` : '失败';
             actionBtnHTML = `
-                <button onclick="window.SystemDownloadManager.resumeTask('${task.id}')" class="w-8 h-8 rounded-full border border-red-200 text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors shadow-sm" title="重试">
+                <button onclick="window.SystemDownloadManager.resumeTask('${task.id}')" class="w-8 h-8 rounded-full border border-red-200 dark:border-red-500/30 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/15 flex items-center justify-center transition-colors shadow-sm" title="重试">
                     <i class="fas fa-redo text-xs"></i>
                 </button>
             `;
         } else if (task.status === 'finished' || task.status === 'exists') {
-            statusBg = 'bg-emerald-100 text-emerald-600';
+            statusBg = 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400';
             statusText = task.status === 'exists' ? '已存在' : (isServerTask ? '已存云端' : '已完成');
             progressWidth = 100;
         } else if (task.status === 'waiting') {
             statusText = isServerTask ? '云端排队' : '等待中';
             if (!isServerTask) {
                 actionBtnHTML = `
-                    <button onclick="window.SystemDownloadManager.pauseTask('${task.id}')" class="w-8 h-8 rounded-full border border-yellow-200 text-yellow-500 hover:bg-yellow-50 flex items-center justify-center transition-colors shadow-sm" title="暂停">
+                    <button onclick="window.SystemDownloadManager.pauseTask('${task.id}')" class="w-8 h-8 rounded-full border border-yellow-200 dark:border-yellow-500/30 text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-500/15 flex items-center justify-center transition-colors shadow-sm" title="暂停">
                         <i class="fas fa-pause text-xs"></i>
                     </button>
                 `;
@@ -1567,23 +1567,23 @@ class DownloadManager {
         // Always show delete button mostly
         if (task.status !== 'downloading' || isServerTask) {
             actionBtnHTML += `
-                <button onclick="window.SystemDownloadManager.deleteTask('${task.id}')" class="w-8 h-8 rounded-full border border-red-100 text-red-400 hover:bg-red-50 hover:text-red-500 flex items-center justify-center transition-colors ml-1 shadow-sm" title="移除任务">
+                <button onclick="window.SystemDownloadManager.deleteTask('${task.id}')" class="w-8 h-8 rounded-full border border-red-100 dark:border-red-500/30 text-red-400 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-500 flex items-center justify-center transition-colors ml-1 shadow-sm" title="移除任务">
                     <i class="fas fa-trash-alt text-xs"></i>
                 </button>
             `;
         } else {
             actionBtnHTML += `
-                <button onclick="window.SystemDownloadManager.deleteTask('${task.id}')" class="w-8 h-8 rounded-full border border-red-100 text-red-400 hover:bg-red-50 hover:text-red-500 flex items-center justify-center transition-colors ml-1 shadow-sm" title="取消下载">
+                <button onclick="window.SystemDownloadManager.deleteTask('${task.id}')" class="w-8 h-8 rounded-full border border-red-100 dark:border-red-500/30 text-red-400 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-500 flex items-center justify-center transition-colors ml-1 shadow-sm" title="取消下载">
                     <i class="fas fa-times text-xs"></i>
                 </button>
             `;
         }
 
         return `
-            <div id="dl-task-${task.id}" class="relative p-3 rounded-xl t-bg-panel hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-colors border border-transparent hover:t-border-main group flex gap-3 overflow-hidden shadow-sm mb-2">
+            <div id="dl-task-${task.id}" data-status="${task.status}" data-native="${task.nativeDownloadDispatched ? '1' : '0'}" data-quality="${this.escapeHtml(qualityLabel)}" class="relative p-3 rounded-xl t-bg-panel hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-colors border border-transparent hover:t-border-main group flex gap-3 overflow-hidden shadow-sm mb-2">
                 <!-- Progress Bar Background -->
                 ${task.status !== 'waiting' && task.status !== 'error' ? `
-                <div class="absolute bottom-0 left-0 h-1.5 ${isServerTask ? 'bg-orange-400' : 'bg-emerald-400'} transition-all duration-300 opacity-60" style="width: ${progressWidth}%"></div>
+                <div data-role="progress-bar" class="absolute bottom-0 left-0 h-1.5 ${isServerTask ? 'bg-orange-400' : 'bg-emerald-400'} transition-all duration-300 opacity-60" style="width: ${progressWidth}%"></div>
                 ` : ''}
 
                 <!-- Cover -->
@@ -1605,12 +1605,12 @@ class DownloadManager {
                     
                     <div class="flex items-center justify-between mt-1">
                         <div class="text-[10px] t-text-muted truncate flex gap-2 items-center">
-                            <span class="text-emerald-600 font-medium px-1 bg-emerald-50 rounded">${this.escapeHtml(qualityLabel)}</span>
+                            <span data-role="quality-label" class="text-emerald-600 dark:text-emerald-400 font-medium px-1 bg-emerald-50 dark:bg-emerald-500/15 rounded">${this.escapeHtml(qualityLabel)}</span>
                             <span class="truncate opacity-60">${this.escapeHtml(task.song.singer)}</span>
                         </div>
                         
                         <div class="flex items-center gap-1.5 font-bold">
-                            ${speedText ? `<span class="text-[10px] font-mono text-emerald-500">${speedText}</span>` : ''}
+                            <span data-role="speed-text" class="text-[10px] font-mono text-emerald-500 ${speedText ? '' : 'hidden'}">${speedText}</span>
                             
                             <!-- LRC Status Tag -->
                             ${isServerTask && task.status === 'finished' ? `
@@ -1626,7 +1626,7 @@ class DownloadManager {
                                 `}
                             ` : ''}
 
-                            <span class="text-[10px] px-1.5 py-0.5 rounded ${statusBg} truncate max-w-[100px]">
+                            <span data-role="status-badge" class="text-[10px] px-1.5 py-0.5 rounded ${statusBg} truncate max-w-[100px]">
                                 ${task.errorMsg ? `<span title="${this.escapeHtml(task.errorMsg)}">${this.escapeHtml(task.errorMsg)}</span>` : statusText}
                             </span>
                         </div>
@@ -1635,7 +1635,7 @@ class DownloadManager {
 
                 <!-- Actions -->
                 <div class="flex items-center pl-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all sm:translate-x-2 group-hover:translate-x-0">
-                    <button onclick="window.SystemDownloadManager.addTaskToPlaylist('${task.id}')" class="w-8 h-8 rounded-full border border-emerald-100 text-emerald-500 hover:bg-emerald-50 flex items-center justify-center transition-colors mr-1 shadow-sm" title="添加到歌单">
+                    <button onclick="window.SystemDownloadManager.addTaskToPlaylist('${task.id}')" class="w-8 h-8 rounded-full border border-emerald-100 dark:border-emerald-500/30 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 flex items-center justify-center transition-colors mr-1 shadow-sm" title="添加到歌单">
                         <i class="fas fa-plus text-xs"></i>
                     </button>
                     ${actionBtnHTML}
@@ -1706,7 +1706,59 @@ class DownloadManager {
             return;
         }
 
-        // Quick efficient replacement
+        // 若任务正处于 downloading / tagging 状态且状态未发生跳变，直接原地更新进度条、速度与状态文字，避免整行 replaceChild 导致操作按钮闪烁
+        const prevStatus = taskEl.getAttribute('data-status');
+        const prevNative = taskEl.getAttribute('data-native') === '1';
+        const isActiveSameState = (task.status === 'downloading' || task.status === 'tagging')
+            && prevStatus === task.status
+            && prevNative === !!task.nativeDownloadDispatched
+            && !task.errorMsg;
+
+        if (isActiveSameState) {
+            const isServerTask = task.isServer || false;
+            const progressWidth = task.status === 'tagging' ? 100 : (task.progress || 0);
+            const progressBar = taskEl.querySelector('[data-role="progress-bar"]');
+            if (progressBar) {
+                progressBar.style.width = `${progressWidth}%`;
+            }
+
+            const speedEl = taskEl.querySelector('[data-role="speed-text"]');
+            if (speedEl) {
+                if (task.status === 'downloading') {
+                    speedEl.textContent = `${this.formatSize(Math.max(0, task.speed || 0))}/s`;
+                    speedEl.classList.remove('hidden');
+                } else {
+                    speedEl.textContent = '';
+                    speedEl.classList.add('hidden');
+                }
+            }
+
+            const statusBadge = taskEl.querySelector('[data-role="status-badge"]');
+            if (statusBadge) {
+                if (task.status === 'tagging') {
+                    statusBadge.textContent = isServerTask ? '写入标签' : '处理中';
+                } else {
+                    const hasRealProgress = isServerTask && (task.totalBytes > 0 || task.progress > 0);
+                    statusBadge.textContent = isServerTask
+                        ? (hasRealProgress ? `云端 ${progressWidth}%` : '云端下载中')
+                        : (task.nativeDownloadDispatched ? `浏览器 ${progressWidth}%` : `${progressWidth}%`);
+                }
+            }
+
+            let qualityLabel = task.quality || window.settings?.preferredQuality || '优先最高';
+            if (window.QualityManager) {
+                const displayName = window.QualityManager.getQualityDisplayName(qualityLabel);
+                if (displayName) qualityLabel = displayName;
+            }
+            const qualityEl = taskEl.querySelector('[data-role="quality-label"]');
+            if (qualityEl && qualityEl.textContent !== qualityLabel) {
+                qualityEl.textContent = qualityLabel;
+                taskEl.setAttribute('data-quality', qualityLabel);
+            }
+            return;
+        }
+
+        // Quick efficient replacement when status transitions
         const div = document.createElement('div');
         div.innerHTML = this.renderTaskHtml(task);
         const newEl = div.firstElementChild;

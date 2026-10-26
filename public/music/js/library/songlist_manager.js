@@ -765,25 +765,25 @@ window.SongListManager = (function () {
                 </div>
                 <!-- Actions -->
                 <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors"
+                    <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center"
                             title="播放"
                             onclick="event.stopPropagation(); window.SongListManager.playSong(${index})">
-                        <i class="fas fa-play w-3.5 h-3.5 flex items-center justify-center"></i>
+                        <i class="fas fa-play w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                     </button>
-                    <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors"
+                    <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-lg text-blue-600 dark:text-blue-400 transition-colors inline-flex items-center justify-center"
                             title="下载"
                             onclick="event.stopPropagation(); downloadSong(${JSON.stringify(song).replace(/"/g, '&quot;')})">
-                        <i class="fas fa-download w-3.5 h-3.5 flex items-center justify-center"></i>
+                        <i class="fas fa-download w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                     </button>
-                    <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors"
+                    <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-500 transition-colors inline-flex items-center justify-center"
                             title="添加到歌单"
                             onclick="event.stopPropagation(); window.SongListManager.addSongToPlaylist(${index})">
-                        <i class="fas fa-plus w-3.5 h-3.5 flex items-center justify-center"></i>
+                        <i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                     </button>
-                    <button class="p-0.5 sm:p-1.5 hover:bg-red-50 rounded-lg ${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? 'text-red-500' : 'text-gray-400'} transition-colors"
+                    <button class="p-0.5 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg ${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? 'text-red-500' : 'text-gray-400'} transition-colors inline-flex items-center justify-center"
                             title="${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? '取消不喜欢' : '不喜欢'}"
                             onclick="event.stopPropagation(); window.SongListManager.dislikeSong(${index})">
-                        <i class="fas fa-thumbs-down w-3.5 h-3.5 flex items-center justify-center"></i>
+                        <i class="fas fa-thumbs-down w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                     </button>
                 </div>
             </div>

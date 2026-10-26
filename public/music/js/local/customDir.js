@@ -247,6 +247,11 @@ window.CustomDirManager = {
         if (pageTitleEl) {
             pageTitleEl.textContent = this.isActive ? '自定义目录' : '本地音乐';
         }
+        const headerPageTitleEl = document.getElementById('page-title');
+        const localViewEl = document.getElementById('view-localmusic');
+        if (headerPageTitleEl && localViewEl && !localViewEl.classList.contains('hidden')) {
+            headerPageTitleEl.textContent = this.isActive ? '自定义目录' : '本地音乐';
+        }
 
         // 2. 隐藏/显示位置选框（根目录/数据目录）
         const locationSelect = document.getElementById('lm-location-select');

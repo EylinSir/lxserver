@@ -522,7 +522,7 @@
 
       // 重置所有歌单卡片的高亮与实时进度
       document.querySelectorAll('.sd-playlist-card').forEach(card => {
-        card.classList.remove('ring-1.5', 'ring-emerald-500', 'border-emerald-500', 'bg-emerald-50/60', 'dark:bg-emerald-950/30', 'shadow-md')
+        card.classList.remove('ring-[1.5px]', 'ring-emerald-500', 'border-emerald-500', 'bg-emerald-50/60', 'dark:bg-emerald-950/30', 'shadow-md')
         const liveBox = card.querySelector('.sd-playlist-live-box')
         if (liveBox) liveBox.classList.add('hidden')
       })
@@ -580,7 +580,7 @@
 
       if (plId === progress.currentListId) {
         // 当前正在同步的歌单
-        card.classList.add('ring-1.5', 'ring-emerald-500', 'border-emerald-500', 'bg-emerald-50/60', 'dark:bg-emerald-950/30', 'shadow-md')
+        card.classList.add('ring-[1.5px]', 'ring-emerald-500', 'border-emerald-500', 'bg-emerald-50/60', 'dark:bg-emerald-950/30', 'shadow-md')
         if (statusTagContainer) {
           statusTagContainer.innerHTML = `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 animate-pulse"><i class="fas fa-spinner fa-spin text-[8px]"></i>同步中</span>`
         }
@@ -600,7 +600,7 @@
         }
       } else {
         // 非当前正在同步的歌单
-        card.classList.remove('ring-1.5', 'ring-emerald-500', 'border-emerald-500', 'bg-emerald-50/60', 'dark:bg-emerald-950/30', 'shadow-md')
+        card.classList.remove('ring-[1.5px]', 'ring-emerald-500', 'border-emerald-500', 'bg-emerald-50/60', 'dark:bg-emerald-950/30', 'shadow-md')
         if (liveBox) liveBox.classList.add('hidden')
         if (statusTagContainer && isCardEnabled) {
           statusTagContainer.innerHTML = `<span class="inline-flex items-center justify-center gap-1 h-[18px] leading-none px-1.5 rounded-md text-[9px] font-semibold bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30"><i class="far fa-clock text-[8px]"></i>等待同步</span>`

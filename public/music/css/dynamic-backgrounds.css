@@ -3,54 +3,28 @@
    动态背景引擎样式（登录页 + 播放页共用）+ 登录页动效选择器
    ============================================================ */
 
-/* ── 登录页动效选择器（与播放器设置页 lm-select 风格一致） ── */
+/* ── 登录页动效选择器（与播放器设置页 CustomSelectManager 风格一致） ── */
 .background-picker {
     position: fixed;
     top: 24px;
     right: 24px;
-    z-index: 30;
+    z-index: 50;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 6px 6px 14px;
+    padding: 5px 6px 5px 14px;
     border: 1px solid #ffffff26;
     border-radius: 9999px;
     background: #121826bf;
     color: #e2e8f0;
     backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     box-shadow: 0 8px 24px -4px #00000080, inset 0 1px 0 #ffffff26;
     font-size: 12px;
     font-weight: 600;
 }
 
 .background-picker > i { color: #10b981; font-size: 12px; }
-
-.bg-picker-select {
-    appearance: none;
-    min-width: 128px;
-    padding: 6px 30px 6px 12px;
-    border: 1.5px solid #10b981;
-    border-radius: 9999px;
-    background-color: #10b981;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23ffffff'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 12px center;
-    color: #fff;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1.6;
-    cursor: pointer;
-    outline: none;
-    box-shadow: 0 2px 8px #10b98166;
-    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.bg-picker-select:hover { background-color: #059669; border-color: #059669; }
-
-.bg-picker-select:focus-visible { box-shadow: 0 0 0 3px #10b98140; }
-
-.bg-picker-select option { background: #1f2937; color: #e5e7eb; font-weight: 500; }
 
 .theme-light .background-picker {
     background: #ffffffd9;
@@ -59,7 +33,76 @@
     box-shadow: 0 8px 20px -4px #10b98126, inset 0 1px 0 #fff;
 }
 
-.theme-light .bg-picker-select option { background: #fff; color: #334155; }
+.background-picker .cs-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 124px;
+    padding: 5px 12px;
+    border-radius: 9999px;
+    border: 1.5px solid #ffffff1f;
+    background: #1f2937d9;
+    color: #d1d5db;
+    font: inherit;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.theme-light .background-picker .cs-trigger { background: #fff; border-color: #e2e8f0; color: #475569; }
+.background-picker .cs-trigger:hover { border-color: #34d399; color: #10b981; }
+.background-picker .cs-trigger.highlight { background: #10b981; border-color: #10b981; color: #fff; font-weight: 700; box-shadow: 0 2px 8px #10b98155; }
+.background-picker .cs-trigger.highlight:hover { background: #059669; border-color: #059669; color: #fff; }
+.background-picker.open .cs-trigger { border-color: #10b981; box-shadow: 0 0 0 3px #10b98140; }
+.background-picker .cs-trigger-icon { font-size: 9px; margin-left: 8px; transition: transform 0.2s ease; }
+.background-picker.open .cs-trigger-icon { transform: rotate(180deg); }
+
+.background-picker .cs-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 140px;
+    max-height: 280px;
+    margin: 0;
+    padding: 5px;
+    list-style: none;
+    background: #1f2937eb;
+    border: 1.5px solid #374151;
+    border-radius: 12px;
+    box-shadow: 0 15px 35px -5px #00000073;
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+    pointer-events: none;
+    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.15);
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.background-picker .cs-dropdown::-webkit-scrollbar { display: none; }
+
+.theme-light .background-picker .cs-dropdown { background: #fffffffa; border-color: #e5e7eb; box-shadow: 0 15px 35px -5px #00000026; }
+.background-picker.open .cs-dropdown { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+
+.background-picker .cs-option {
+    padding: 8px 12px;
+    font-size: 11.5px;
+    font-weight: 500;
+    border-radius: 8px;
+    color: #d1d5db;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.theme-light .background-picker .cs-option { color: #4b5563; }
+.background-picker .cs-option:hover { background: #10b98124; color: #10b981; padding-left: 14px; }
+.background-picker .cs-option.selected { background: #10b981; color: #fff !important; font-weight: 700; }
+.background-picker .cs-option i { font-size: 9px; opacity: 0; }
+.background-picker .cs-option.selected i { opacity: 1; }
 
 /* ── 登录页宿主 ── */
 #login-scene { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
@@ -228,7 +271,7 @@ html:not([data-login-background="aurora"]) #cursor-glow { display: none; }
 @media (max-width: 600px) {
     .background-picker { top: 16px; right: 12px; padding: 4px 4px 4px 10px; gap: 6px; }
     .background-picker > span { display: none; }
-    .bg-picker-select { min-width: 110px; }
+    .background-picker .cs-trigger { min-width: 110px; }
     body:has(#login-scene) .theme-toggle-btn { top: 16px; left: 12px; }
     .dbg-blob { filter: blur(45px); }
 }

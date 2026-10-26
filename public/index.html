@@ -1509,6 +1509,27 @@
                                     </div>
                                 </div>
                                 </div>
+                                <div class="config-section-title">本地歌曲歌单</div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">返回本地歌曲歌单 <button type="button" class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)" data-help="在歌单列表首位返回“本地歌曲(用户名)”只读歌单，汇总该账号当前存储目录中的歌曲。自定义目录歌曲由下方开关单独控制。客户端自行排序时以客户端设置为准。">?</button></span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.localPlaylist" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div id="subsonic-custom-playlist-options" class="config-subpanel" style="display: none;">
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info">
+                                            <span class="config-toggle-label">返回自定义目录歌曲 <button type="button" class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)" data-help="单独返回“自定义目录(用户名)”只读歌单，放在本地歌曲歌单之后。仅收录该账号已启用的自定义音乐目录。关闭后不返回此歌单。">?</button></span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" name="subsonic.customPlaylist" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                        </label>
+                                    </div>
+                                </div>
                                 <div class="config-section-title">排行榜与共享歌单</div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">

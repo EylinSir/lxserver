@@ -237,6 +237,7 @@
         },
     };
     document.addEventListener('click', event => {
+        if (event.target.closest('#custom-dir-switch-container')) return;
         const link = event.target.closest('a[id^="tab-"]');
         if (link?.getAttribute('href') === '#') event.preventDefault();
     }, true);

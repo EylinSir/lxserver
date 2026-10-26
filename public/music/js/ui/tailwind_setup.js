@@ -9,6 +9,9 @@ tailwind.config = {
     theme: {
         extend: {
             screens: {
+                // Keep every breakpoint in px: Tailwind v4 sorts mixed units separately,
+                // which otherwise puts the default 40rem sm rules after desktop rules.
+                'sm': '640px',
                 // Shift all breakpoints up to accommodate iPad Pro Portrait (1024px) as mobile
                 'md': '1025px', // Desktop boundary
                 'lg': '1280px',

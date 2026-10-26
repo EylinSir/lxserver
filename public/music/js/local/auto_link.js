@@ -61,7 +61,7 @@ window.AutoLinkPanel = (() => {
 
           <!-- Dialog Box -->
           <section role="dialog" aria-modal="true" aria-labelledby="al-title"
-            class="relative t-bg-panel border t-border-main rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] md:h-[86vh] md:max-h-[780px] flex flex-col overflow-hidden backdrop-blur-xl bg-opacity-95">
+            class="relative t-bg-panel/95 border t-border-main rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] md:h-[86vh] md:max-h-[780px] flex flex-col overflow-hidden backdrop-blur-xl">
 
             <!-- Modal Header -->
             <header class="px-5 py-3.5 border-b t-border-main flex items-center justify-between shrink-0 bg-gray-50/50 dark:bg-white/[0.02]">

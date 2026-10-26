@@ -1,9 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { lookup } from 'node:dns/promises'
+import { lookup, Resolver } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import http from 'node:http'
 import https from 'node:https'
+
+// 当本机系统 DNS 受残留代理/Fake-IP 污染返回 127.x / 198.18.x 等受限地址时，使用公共 DNS 兜底解析真实公网 IP
+const fallbackResolver = new Resolver({ timeout: 3000, tries: 1 })
+fallbackResolver.setServers(['223.5.5.5', '119.29.29.29'])
 
 export const normalizeSourceOwner = (name?: string): string => {
   if (!name || ['open', '_open', 'default'].includes(name)) return 'open'
@@ -57,13 +61,41 @@ export const resolvePublicUrl = async (input: string) => {
   const url = new URL(input)
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Invalid upstream URL')
   const hostname = url.hostname.replace(/^\[|\]$/g, '')
-  const addresses = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await lookup(hostname, { all: true })
-  if (!addresses.length || addresses.some(item => !isPublicAddress(item.address))) {
-    throw Object.assign(new Error('Private upstream addresses are not allowed'), {
-      code: 'ERR_PRIVATE_UPSTREAM', hostname, addresses: addresses.map(item => item.address),
-    })
+
+  // 1. 若直接指定 IP，严格校验是否为公网地址
+  if (isIP(hostname)) {
+    if (!isPublicAddress(hostname)) {
+      throw Object.assign(new Error('Private upstream addresses are not allowed'), {
+        code: 'ERR_PRIVATE_UPSTREAM', hostname, addresses: [hostname],
+      })
+    }
+    return { url, address: hostname, family: isIP(hostname) }
   }
-  return { url, address: addresses[0].address, family: addresses[0].family }
+
+  // 2. 优先走系统 DNS，只要包含有效公网 IP 即放行（避免双栈/多记录中混入非公网地址导致整体误杀）
+  const sysAddresses = await lookup(hostname, { all: true }).catch(() => [])
+  const publicAddresses = sysAddresses.filter(item => isPublicAddress(item.address))
+  if (publicAddresses.length > 0) {
+    return { url, address: publicAddresses[0].address, family: publicAddresses[0].family }
+  }
+
+  // 3. 若系统 DNS 返回受限地址（如本机撤回代理残留的 127.155.x.x 或 Fake-IP 198.18.x.x），对非内网后缀域名使用公共 DNS 二次兜底解析
+  if (!/^(?:localhost|.*\.local|.*\.lan|.*\.internal|.*\.home|.*\.corp)$/i.test(hostname) && hostname.includes('.')) {
+    const ipv4List = await fallbackResolver.resolve4(hostname).catch(() => [])
+    const validIpv4 = ipv4List.find(ip => isPublicAddress(ip))
+    if (validIpv4) {
+      return { url, address: validIpv4, family: 4 }
+    }
+    const ipv6List = await fallbackResolver.resolve6(hostname).catch(() => [])
+    const validIpv6 = ipv6List.find(ip => isPublicAddress(ip))
+    if (validIpv6) {
+      return { url, address: validIpv6, family: 6 }
+    }
+  }
+
+  throw Object.assign(new Error('Private upstream addresses are not allowed'), {
+    code: 'ERR_PRIVATE_UPSTREAM', hostname, addresses: sysAddresses.map(item => item.address),
+  })
 }
 
 // Artwork embedded by the download proxy must obey the same network boundary as audio.

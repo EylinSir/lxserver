@@ -1252,7 +1252,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       pathname.startsWith('/music/fonts/') ||
       pathname.startsWith('/music/img/') ||
       pathname === '/music/manifest.json' ||
-      pathname === '/music/sw.js'
+      pathname === '/music/sw.js' ||
+      pathname === '/music/about.md'
     )
 
     if (isPlayerRequest || isLegacyPlayerAsset) {
@@ -2359,6 +2360,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const valid = !!username
         let enableCustomMusicDir = false
         let allowOperateCustomMusicDir = false
+        let allowWriteCustomMusicDir = false
         let enableAutoDownload = false
         if (username) {
           const user = global.lx.config.users.find(u => u.name === username)
@@ -2367,13 +2369,14 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           if (user && globalSwitch) {
             enableCustomMusicDir = !!user.enableCustomMusicDir
             allowOperateCustomMusicDir = !!user.allowOperateCustomMusicDir
+            allowWriteCustomMusicDir = !!user.allowWriteCustomMusicDir
           }
           if (user) {
             enableAutoDownload = !!user.enableAutoDownload
           }
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ valid, username: username || null, enableCustomMusicDir, allowOperateCustomMusicDir, enableAutoDownload }))
+        res.end(JSON.stringify({ valid, username: username || null, enableCustomMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir, enableAutoDownload }))
         return
       }
 
@@ -7206,6 +7209,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'] ?? true,
             'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'] ?? 'fallback',
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
+            'subsonic.localPlaylist': global.lx.config['subsonic.localPlaylist'] ?? true,
+            'subsonic.customPlaylist': global.lx.config['subsonic.customPlaylist'] ?? true,
             'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'] ?? false,
             'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'] ?? 'tx',
             'subsonic.sharedListMode': global.lx.config['subsonic.sharedListMode'] ?? 'leaderboard',
@@ -7423,6 +7428,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.onlineSearch'] !== undefined) global.lx.config['subsonic.onlineSearch'] = newConfig['subsonic.onlineSearch']
               if (newConfig['subsonic.onlineSearchMode'] !== undefined) global.lx.config['subsonic.onlineSearchMode'] = newConfig['subsonic.onlineSearchMode']
               if (newConfig['subsonic.onlineSearchSources'] !== undefined) global.lx.config['subsonic.onlineSearchSources'] = newConfig['subsonic.onlineSearchSources']
+              if (typeof newConfig['subsonic.localPlaylist'] === 'boolean') global.lx.config['subsonic.localPlaylist'] = newConfig['subsonic.localPlaylist']
+              if (typeof newConfig['subsonic.customPlaylist'] === 'boolean') global.lx.config['subsonic.customPlaylist'] = newConfig['subsonic.customPlaylist']
               if (newConfig['subsonic.publicLeaderboards'] !== undefined) global.lx.config['subsonic.publicLeaderboards'] = newConfig['subsonic.publicLeaderboards']
               if (newConfig['subsonic.leaderboardSource'] !== undefined) {
                 const s = String(newConfig['subsonic.leaderboardSource']).trim().toLowerCase()
@@ -7541,6 +7548,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'],
                 'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'],
                 'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'],
+                'subsonic.localPlaylist': global.lx.config['subsonic.localPlaylist'],
+                'subsonic.customPlaylist': global.lx.config['subsonic.customPlaylist'],
                 'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'],
                 'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'],
                 'subsonic.sharedListMode': global.lx.config['subsonic.sharedListMode'],

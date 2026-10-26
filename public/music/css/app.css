@@ -24,20 +24,26 @@
     overscroll-behavior: contain;
 }
 
+/* Hide scrollbars while keeping wheel and swipe scrolling available. */
+#main-sidebar > nav,
+#search-results,
+.custom-scrollbar,
+.cs-dropdown {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+#main-sidebar > nav::-webkit-scrollbar,
+#search-results::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar,
+.cs-dropdown::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
 /* iOS zooms focused controls whose computed font size is below 16px. */
 @media (max-width: 1024px) {
-    /* Hide mobile scrollbars while keeping swipe and wheel scrolling available. */
-    #main-sidebar > nav,
-    #search-results {
-        scrollbar-width: none;
-    }
-
-    #main-sidebar > nav::-webkit-scrollbar,
-    #search-results::-webkit-scrollbar {
-        display: none;
-        width: 0;
-        height: 0;
-    }
 
     /* Leave a usable song list below artist and album headers on short screens. */
     #artist-detail-header:not(.artist-hero-collapsed),
@@ -50,12 +56,14 @@
     #play-mode-menu {
         left: 0;
         transform: none;
+        translate: none;
     }
 
     #playback-rate-menu {
         left: auto;
         right: 0;
         transform: none;
+        translate: none;
     }
 
     input:not([type="range"], [type="checkbox"], [type="radio"]),
@@ -84,28 +92,21 @@
 
 }
 
-/* Custom scrollbar */
+/* Hide global scrollbars while keeping scrolling available */
+* {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-
-::-webkit-scrollbar-track {
-    background: #f1f1f1;
-}
-
-::-webkit-scrollbar-thumb {
-    background: #c1c1c1;
-    border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: #a8a8a8;
+    display: none;
+    width: 0;
+    height: 0;
 }
 
 /* Glassmorphism utilities */
 .glass {
-    background: rgba(255, 255, 255, 0.7);
+    background: var(--bg-glass, rgba(255, 255, 255, 0.7));
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.18);
@@ -115,6 +116,13 @@
     background-color: var(--c-50);
     color: var(--c-600);
     border-right: 3px solid var(--c-600);
+}
+
+:root[data-appearance="dark"] .active-tab,
+.dark .active-tab {
+    background-color: color-mix(in srgb, var(--c-500) 15%, transparent);
+    color: var(--c-400);
+    border-right-color: var(--c-500);
 }
 
 .active-sub-item {
@@ -655,7 +663,7 @@
 }
 
 aside {
-    transition: transform 0.3s ease-in-out;
+    transition: transform 0.3s ease-in-out, translate 0.3s ease-in-out;
 }
 
 @keyframes marquee {
@@ -714,20 +722,20 @@ aside {
 /* Sleep Timer Styles */
 .timer-preset-btn {
     padding: 0.75rem 1rem;
-    background-color: #f9fafb;
-    color: #4b5563;
+    background-color: var(--bg-main, #f9fafb);
+    color: var(--text-muted, #4b5563);
     font-weight: 700;
     border-radius: 1rem;
     transition: all 0.2s;
-    border: 1px solid transparent;
+    border: 1px solid var(--border-main, transparent);
     font-size: 0.875rem;
     text-align: center;
 }
 
 .timer-preset-btn:hover {
-    background-color: #ecfdf5;
-    color: #059669;
-    border-color: #d1fae5;
+    background-color: color-mix(in srgb, var(--c-500) 12%, var(--bg-panel));
+    color: var(--c-500);
+    border-color: color-mix(in srgb, var(--c-500) 30%, transparent);
     transform: translateY(-1px);
 }
 
@@ -822,21 +830,15 @@ aside {
     }
 }
 
+.custom-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
-    width: 5px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.1);
-    border-radius: 10px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(16, 185, 129, 0.3);
+    display: none;
+    width: 0;
+    height: 0;
 }
 
 /* Detail Title multi-line support */
@@ -859,23 +861,23 @@ aside {
 .lc-layout-btn,
 .lc-color-btn,
 .lc-lines-btn {
-    color: #6b7280;
-    border-color: #e5e7eb;
-    background: #f9fafb;
+    color: var(--text-muted, #6b7280);
+    border-color: var(--border-dim, #e5e7eb);
+    background: var(--bg-main, #f9fafb);
 }
 
 .lc-layout-btn:hover,
 .lc-color-btn:hover,
 .lc-lines-btn:hover {
-    border-color: var(--c-300);
-    color: var(--c-600);
-    background: var(--c-50);
+    border-color: var(--c-400);
+    color: var(--c-500);
+    background: color-mix(in srgb, var(--c-500) 10%, var(--bg-panel));
 }
 
 .lc-btn-active {
     border-color: var(--c-500) !important;
-    color: var(--c-600) !important;
-    background: var(--c-50) !important;
+    color: var(--c-500) !important;
+    background: color-mix(in srgb, var(--c-500) 12%, var(--bg-panel)) !important;
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-500) 15%, transparent);
 }
 
@@ -910,8 +912,8 @@ aside {
 
 /* Silky Animation for Player Detail */
 #view-player-detail {
-    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s ease-out !important;
-    will-change: transform, opacity;
+    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), translate 0.6s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s ease-out !important;
+    will-change: transform, translate, opacity;
 }
 
 #view-player-detail.translate-y-\[100\%\] #player-detail-container {
@@ -920,13 +922,13 @@ aside {
 }
 
 #player-detail-container {
-    transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.6s ease-out;
-    will-change: transform, opacity;
+    transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1), translate 0.8s cubic-bezier(0.16, 1, 0.3, 1), scale 0.8s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.6s ease-out;
+    will-change: transform, translate, opacity;
 }
 
 #player-footer {
-    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1) !important;
-    will-change: transform;
+    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), translate 0.6s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    will-change: transform, translate;
 }
 
 /* Reserve the meter's own row on phones instead of painting over song actions. */
@@ -1596,7 +1598,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     }
 }
 
-/* 侧边窄长半透明圆角折叠按钮 (展开时常驻在侧边栏右边缘) */
+/* 侧边窄长圆角折叠按钮 (展开时常驻在侧边栏右边缘) */
 .sidebar-collapse-pill {
     position: absolute;
     right: -10px;
@@ -1606,16 +1608,14 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     width: 20px;
     height: 76px;
     border-radius: 9999px;
-    background: var(--bg-glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: var(--bg-panel);
     border: 1px solid var(--border-dim);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
     color: var(--text-muted);
     transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
     outline: none;
     user-select: none;
-    opacity: 0.75;
+    opacity: 1;
 }
 
 .sidebar-collapse-pill:hover {
@@ -1641,9 +1641,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     width: 16px;
     height: 76px;
     border-radius: 0 10px 10px 0;
-    background: var(--bg-glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: var(--bg-panel);
     border: 1px solid var(--border-dim);
     border-left: none;
     box-shadow: 3px 4px 14px rgba(0, 0, 0, 0.08);
@@ -1651,7 +1649,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
     outline: none;
     user-select: none;
-    opacity: 0.75;
+    opacity: 1;
 }
 
 .sidebar-expand-pill:hover {
