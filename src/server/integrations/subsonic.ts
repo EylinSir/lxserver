@@ -2307,9 +2307,10 @@ class SubsonicHandler {
                 const bangid = String(board.bangid)
                 const id = `lb_${source}_${bangid}`
                 const cached = playlistSongCountCache.get(id)
-                const songCount = cached && (Date.now() - cached.ts) < PLAYLIST_SONGCOUNT_TTL ? cached.count : 0
-                // 冷缓存：后台补拉真实条数，不阻塞当前响应，下一次列表即生效
-                if (!cached) {
+                const fresh = !!cached && (Date.now() - cached.ts) < PLAYLIST_SONGCOUNT_TTL
+                const songCount = fresh ? cached!.count : 0
+                // 缓存缺失或过期：后台补拉真实条数，不阻塞当前响应，下一次列表即生效
+                if (!fresh) {
                     void (async () => {
                         try {
                             const data: any = await lb.getList(bangid, 1)
@@ -2400,8 +2401,10 @@ class SubsonicHandler {
             }
 
             const coverArt = (musics[0] as any)?.img || 'logo'
-            // 详情已算出真实条数，写入缓存供列表接口直接读取（即时返回）
-            playlistSongCountCache.set(id, { count: musics.length, ts: Date.now() })
+            // 详情已算出真实条数，写入缓存供列表接口直接读取（即时返回）。
+            // 缓存始终保存「未过滤的上游总数」(data.total)，避免 hideDisliked 按用户过滤后的计数写入共享缓存；
+            // 详情响应本身仍返回该用户可见的 musics.length。
+            playlistSongCountCache.set(id, { count: (data as any)?.total ?? musics.length, ts: Date.now() })
 
             const playlistMeta = {
                 id,
@@ -2469,9 +2472,10 @@ class SubsonicHandler {
                 // 记录封面，便于客户端以 pl_ id 请求 getCoverArt 时直接命中
                 sharedPlaylistCoverCache.set(id, img)
                 const cached = playlistSongCountCache.get(id)
-                const songCount = cached && (Date.now() - cached.ts) < PLAYLIST_SONGCOUNT_TTL ? cached.count : 0
-                // 冷缓存：后台补拉真实条数，不阻塞当前响应，下一次列表即生效
-                if (!cached) {
+                const fresh = !!cached && (Date.now() - cached.ts) < PLAYLIST_SONGCOUNT_TTL
+                const songCount = fresh ? cached!.count : 0
+                // 缓存缺失或过期：后台补拉真实条数，不阻塞当前响应，下一次列表即生效
+                if (!fresh) {
                     void (async () => {
                         try {
                             const detail: any = await sl.getListDetail(plId, 1)
@@ -2516,8 +2520,10 @@ class SubsonicHandler {
                 musics = await this.filterDislikedSongs(username, musics)
             }
             const coverArt = (musics[0] as any)?.img || detail?.info?.img || 'logo'
-            // 详情已算出真实条数，写入缓存供列表接口直接读取（即时返回）
-            playlistSongCountCache.set(id, { count: musics.length, ts: Date.now() })
+            // 详情已算出真实条数，写入缓存供列表接口直接读取（即时返回）。
+            // 缓存始终保存「未过滤的上游总数」(detail.total)，避免 hideDisliked 按用户过滤后的计数写入共享缓存；
+            // 详情响应本身仍返回该用户可见的 musics.length。
+            playlistSongCountCache.set(id, { count: (detail as any)?.total ?? musics.length, ts: Date.now() })
             const playlistMeta = {
                 id,
                 // SDK 的歌单名在 info.name（旧接口在顶层 name），都要兼容
@@ -5863,16 +5869,18 @@ class SubsonicHandler {
                                     if (cfg['subsonic.enableDebug']) {
                                         subsonicLog.debug(`[Subsonic] candidate URL unreachable (probe invalid): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
                                     }
-                                    // 明确失效（401/404）：重试一次，仍失败则放弃该候选
-                                    if (attempt < maxAttempts) {
+                                    // 明确失效（401/404）：仅在预算充足时退避重试一次，避免越过 resolveDeadline 还空等
+                                    if (attempt < maxAttempts && Date.now() + 200 < resolveDeadline) {
                                         await new Promise((res) => setTimeout(res, 200))
                                         continue resolveCandidate
                                     }
                                 }
                             }
                         } catch (err: any) {
-                            // 取链异常：重试一次，仍失败则收集死源并放弃该候选
-                            if (attempt < maxAttempts) {
+                            // 取链异常：仅在仍有预算且非「全部音源已耗尽」时退避重试一次，
+                            // 否则（err.allSourcesExhausted 时下游所有源都已死，重试只会增加 ~200ms 等待与一次无效调用）直接放弃该候选
+                            const exhausted = !!(err && (err.allSourcesExhausted || (err.message && /allSourcesExhausted/i.test(err.message))))
+                            if (attempt < maxAttempts && Date.now() + 200 < resolveDeadline && !exhausted) {
                                 await new Promise((res) => setTimeout(res, 200))
                                 continue resolveCandidate
                             }
@@ -6029,7 +6037,7 @@ class SubsonicHandler {
         } catch (e: any) {
             return this.sendError(res, 0, 'Could not resolve music URL: ' + briefErrorText(e), format, 502)
         }
-        if (!result?.url) return this.sendError(res, 0, 'Could not resolve music URL', format)
+        if (!result?.url) return this.sendError(res, 0, 'Could not resolve music URL', format, 502)
 
         subsonicLog.debug(`[Subsonic] getTranscodeStream: ${mediaId} -> ${targetFormat}@${bitrate}k offset=${offset}s (user=${username})`)
         await this.transcodeStream(req, res, result.url, bitrate, format, offset, targetFormat)
@@ -6125,7 +6133,7 @@ class SubsonicHandler {
                     failReason = '上游取歌接口未返回歌曲（QQ 电台接口可能已失效）'
                     subsonicLog.warn(`[Subsonic] Radio ${id} returned empty song list`)
                 }
-                return this.sendError(res, 0, 'Could not resolve radio track' + (failReason ? `: ${failReason}` : ''), format)
+                return this.sendError(res, 0, 'Could not resolve radio track' + (failReason ? `: ${failReason}` : ''), format, 502)
             }
 
             // [新增] 用户自建电台(radio_usr_*)：直接 302 重定向到用户配置的 streamUrl
@@ -6181,7 +6189,7 @@ class SubsonicHandler {
                 } catch (err) {
                     subsonicLog.error(`[Subsonic] radio_pl_ ${id} error: ${(err as any)?.message || err}`)
                 }
-                return this.sendError(res, 0, 'Could not resolve playlist radio track', format)
+                return this.sendError(res, 0, 'Could not resolve playlist radio track', format, 502)
             }
 
             // 下载(download)请求：在所有返回路径(缓存命中/回源/转码)统一附加附件头，
