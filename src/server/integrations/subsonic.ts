@@ -1033,7 +1033,8 @@ class SubsonicHandler {
         return str
     }
 
-    private sendError(res: http.ServerResponse, code: number, message: string, format: string) {
+    private sendError(res: http.ServerResponse, code: number, message: string, format: string, httpStatus = 200) {
+        res.statusCode = httpStatus
         if (format === 'json') {
             res.setHeader('Content-Type', 'application/json; charset=utf-8')
             res.end(JSON.stringify({
@@ -2294,16 +2295,23 @@ class SubsonicHandler {
             if (!lb || typeof lb.getBoards !== 'function') return []
             const result = await lb.getBoards()
             const list = Array.isArray(result?.list) ? result.list : []
-            return list.map((board: any) => {
+            // [修复] 列表 songCount 需等于真实条目数（此前恒为 0，导致客户端计数/变更检测失配）。
+            // 逐榜单取一次列表以拿到真实条数；任一失败则回退 0，不影响列表本身返回。
+            return await Promise.all(list.map(async (board: any) => {
                 const bangid = String(board.bangid)
                 const id = `lb_${source}_${bangid}`
+                let songCount = 0
+                try {
+                    const data: any = await lb.getList(bangid, 1)
+                    songCount = (data?.list || []).length
+                } catch { /* 计数失败不阻断列表 */ }
                 return {
                     id,
                     name: `榜单·${board.name}`,
                     comment: '排行榜(只读)',
                     owner,
                     public: true,
-                    songCount: 0,
+                    songCount,
                     duration: 0,
                     created: new Date().toISOString(),
                     changed: new Date().toISOString(),
@@ -2311,7 +2319,7 @@ class SubsonicHandler {
                     // 由 getCoverArt 按需拉取该榜单首歌封面并代理返回；不再统一用 'logo'（SVG 部分客户端不渲染）
                     coverArt: id,
                 }
-            })
+            }))
         } catch (err) {
             subsonicLog.error('[Subsonic] getLeaderboardPlaylists error:', err)
             return []
@@ -2436,7 +2444,8 @@ class SubsonicHandler {
             if (!sl || typeof sl.getList !== 'function') return []
             const res: any = await sl.getList(sort, '', 1)
             const list: any[] = res?.list || []
-            return list.map((item: any) => {
+            // [修复] 列表 songCount 需等于真实条目数（此前恒为 0）。逐歌单取一次详情以拿到真实条数；失败回退 0。
+            return await Promise.all(list.map(async (item: any) => {
                 const plId = String(item.id ?? item.dissid ?? item.tid ?? item.listId)
                 const id = `pl_${source}_${plId}`
                 const img = typeof item.img === 'string' && item.img
@@ -2444,19 +2453,24 @@ class SubsonicHandler {
                     : 'logo'
                 // 记录封面，便于客户端以 pl_ id 请求 getCoverArt 时直接命中
                 sharedPlaylistCoverCache.set(id, img)
+                let songCount = 0
+                try {
+                    const detail: any = await sl.getListDetail(plId, 1)
+                    songCount = (detail?.list || []).length
+                } catch { /* 计数失败不阻断列表 */ }
                 return {
                     id,
                     name: `歌单·${item.name || item.dissname || '未知歌单'}`,
                     comment: '歌单(只读)',
                     owner,
                     public: true,
-                    songCount: 0,
+                    songCount,
                     duration: 0,
                     created: new Date().toISOString(),
                     changed: new Date().toISOString(),
                     coverArt: img,
                 }
-            })
+            }))
         } catch (err) {
             subsonicLog.error('[Subsonic] getSharedPlaylists error:', err)
             return []
@@ -5785,51 +5799,70 @@ class SubsonicHandler {
                     if (fallbackResult && Date.now() >= resolveDeadline) {
                         break sourceLoop
                     }
-                    try {
-                        const r = await callUserApiGetMusicUrl(
-                            trySource as any, cand.music as any, q, username,
-                            undefined, autoSwitchCustom,
-                            excludeApiSources.length ? excludeApiSources : undefined,
-                        )
-                        if (r?.url) {
-                            const remainingBudget = Math.max(600, resolveDeadline - Date.now())
-                            const probeTimeout = Math.min(2500, remainingBudget)
+                    // [修复] 退避重试：上游取链/探测偶发失败（限流/401/404）时重试一次，缓解取链成功率抖动
+                    let attempt = 0
+                    const maxAttempts = 2
+                    resolveCandidate:
+                    while (attempt < maxAttempts) {
+                        attempt++
+                        try {
+                            const r = await callUserApiGetMusicUrl(
+                                trySource as any, cand.music as any, q, username,
+                                undefined, autoSwitchCustom,
+                                excludeApiSources.length ? excludeApiSources : undefined,
+                            )
+                            if (r?.url) {
+                                const remainingBudget = Math.max(600, resolveDeadline - Date.now())
+                                const probeTimeout = Math.min(2500, remainingBudget)
 
-                            // 探测音频 URL 是否真实可读，避免返回 401 签名错误或 404 文件不存在的虚假链接
-                            const probeResult = await probeAudioUrl(r.url, probeTimeout)
-                            const selected = trySource === source
-                                ? (q !== requestedQuality ? `quality:${source}/${q}` : undefined)
-                                : `source:${source}->${trySource}/${q}`
+                                // 探测音频 URL 是否真实可读，避免返回 401 签名错误或 404 文件不存在的虚假链接
+                                const probeResult = await probeAudioUrl(r.url, probeTimeout)
+                                const selected = trySource === source
+                                    ? (q !== requestedQuality ? `quality:${source}/${q}` : undefined)
+                                    : `source:${source}->${trySource}/${q}`
 
-                            if (probeResult === 'ok') {
-                                return { url: r.url, quality: r.type || q, selected }
-                            } else if (probeResult === 'timeout') {
-                                // 区分探测超时与明确失效（401/404）：超时保留为候选回退，避免上游延迟导致整首歌误报错误
-                                if (!fallbackResult) {
-                                    fallbackResult = { url: r.url, quality: r.type || q, selected }
+                                if (probeResult === 'ok') {
+                                    return { url: r.url, quality: r.type || q, selected }
+                                } else if (probeResult === 'timeout') {
+                                    // 区分探测超时与明确失效（401/404）：超时保留为候选回退，避免上游延迟导致整首歌误报错误
+                                    if (!fallbackResult) {
+                                        fallbackResult = { url: r.url, quality: r.type || q, selected }
+                                    }
+                                    if (cfg['subsonic.enableDebug']) {
+                                        subsonicLog.debug(`[Subsonic] candidate URL probe timeout (saved as fallback): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
+                                    }
+                                    // 若时间预算已耗尽，不再继续串行探测其他源，直接返回该 fallback
+                                    if (Date.now() >= resolveDeadline) {
+                                        break sourceLoop
+                                    }
+                                    break resolveCandidate
+                                } else {
+                                    if (cfg['subsonic.enableDebug']) {
+                                        subsonicLog.debug(`[Subsonic] candidate URL unreachable (probe invalid): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
+                                    }
+                                    // 明确失效（401/404）：重试一次，仍失败则放弃该候选
+                                    if (attempt < maxAttempts) {
+                                        await new Promise((res) => setTimeout(res, 200))
+                                        continue resolveCandidate
+                                    }
                                 }
-                                if (cfg['subsonic.enableDebug']) {
-                                    subsonicLog.debug(`[Subsonic] candidate URL probe timeout (saved as fallback): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
-                                }
-                                // 若时间预算已耗尽，不再继续串行探测其他源，直接返回该 fallback
-                                if (Date.now() >= resolveDeadline) {
-                                    break sourceLoop
-                                }
-                            } else {
-                                if (cfg['subsonic.enableDebug']) {
-                                    subsonicLog.debug(`[Subsonic] candidate URL unreachable (probe invalid): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
+                            }
+                        } catch (err: any) {
+                            // 取链异常：重试一次，仍失败则收集死源并放弃该候选
+                            if (attempt < maxAttempts) {
+                                await new Promise((res) => setTimeout(res, 200))
+                                continue resolveCandidate
+                            }
+                            // 收集本次失败过的自定义源，避免后续音质/平台重复试死源
+                            const atts = err?.attempts
+                            if (Array.isArray(atts)) {
+                                for (const a of atts) {
+                                    if (a?.sourceId && !excludeApiSources.includes(a.sourceId)) excludeApiSources.push(a.sourceId)
+                                    if (a?.name && !excludeApiSources.includes(a.name)) excludeApiSources.push(a.name)
                                 }
                             }
                         }
-                    } catch (err: any) {
-                        // 收集本次失败过的自定义源，避免后续音质/平台重复试死源
-                        const atts = err?.attempts
-                        if (Array.isArray(atts)) {
-                            for (const a of atts) {
-                                if (a?.sourceId && !excludeApiSources.includes(a.sourceId)) excludeApiSources.push(a.sourceId)
-                                if (a?.name && !excludeApiSources.includes(a.name)) excludeApiSources.push(a.name)
-                            }
-                        }
+                        break resolveCandidate
                     }
                 }
             }
@@ -5971,7 +6004,7 @@ class SubsonicHandler {
         try {
             result = await this.resolveStreamUrl(source, songmid, mediaId, musicInfo, 'flac', 0, username)
         } catch (e: any) {
-            return this.sendError(res, 0, 'Could not resolve music URL: ' + briefErrorText(e), format)
+            return this.sendError(res, 0, 'Could not resolve music URL: ' + briefErrorText(e), format, 502)
         }
         if (!result?.url) return this.sendError(res, 0, 'Could not resolve music URL', format)
 
@@ -6351,10 +6384,10 @@ class SubsonicHandler {
                 }
                 safeRedirect(res, result.url)
             } else {
-                return this.sendError(res, 0, 'Could not resolve music URL', format)
+                return this.sendError(res, 0, 'Could not resolve music URL', format, 502)
             }
         } catch (err: any) {
-            return this.sendError(res, 0, err.message || 'Stream error', format)
+            return this.sendError(res, 0, err.message || 'Stream error', format, 502)
         }
     }
 
