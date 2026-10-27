@@ -678,6 +678,11 @@ window.CustomDirManager = {
             current = current.filter(item => {
                 const itemSubPath = (item.subPath || '').trim();
                 for (const selDir of this.selectedDirPaths) {
+                    // “/”代表仅根目录，不能包含其下的子目录。
+                    if (selDir === '/') {
+                        if (!itemSubPath) return true;
+                        continue;
+                    }
                     if (itemSubPath === selDir || itemSubPath.startsWith(selDir + '/')) {
                         return true;
                     }
@@ -1524,11 +1529,11 @@ window.CustomDirManager = {
         } else {
             const sortedDirs = Array.from(this.selectedDirPaths).sort();
             const tagsHtml = sortedDirs.map(d => {
-                const safeD = this.escapeHtml(d);
+                const safeD = this.escapeHtml(d === '/' ? '根目录' : d);
                 return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold border border-emerald-500/30 whitespace-nowrap"><i class="far fa-folder text-[8px] opacity-70"></i>${safeD}</span>`;
             }).join('');
             textEl.innerHTML = `<div class="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5 max-w-full">${tagsHtml}</div>`;
-            textEl.title = sortedDirs.join(', ');
+            textEl.title = sortedDirs.map(d => d === '/' ? '根目录' : d).join(', ');
             if (btnEl) btnEl.classList.remove('active'); // 移除整体全绿背景，让内部每个tag清晰独立
         }
     },
@@ -1724,6 +1729,12 @@ window.CustomDirManager = {
             <i class="fas fa-layer-group cd-node-icon" style="color:var(--c-500)"></i>
             <span class="cd-node-name">全部歌曲</span>
             <span class="cd-node-count">${items.length}</span>
+        </div>`;
+        html += `<div class="cd-node${!isAll && pathSet.has('/') ? ' selected' : ''}" data-cd-node="/" title="仅显示根目录直属歌曲">
+            <span class="cd-node-caret"></span>
+            <i class="fas fa-folder cd-node-icon"></i>
+            <span class="cd-node-name">根目录</span>
+            <span class="cd-node-count">${items.filter(it => !(it.subPath || '').trim()).length}</span>
         </div>`;
         if (!treeData.length) {
             html += '<div style="padding:1.2rem .5rem;text-align:center;font-size:11px;color:var(--text-muted)"><i class="fas fa-folder-open" style="font-size:20px;opacity:.4;display:block;margin-bottom:6px"></i>暂无子目录（所有歌曲均在根路径）</div>';
