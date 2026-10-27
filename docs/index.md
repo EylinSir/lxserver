@@ -54,11 +54,19 @@ features:
 <div class="status-badge-container">
   <div class="status-badge-title">开源项目生态与实时状态</div>
   <div class="status-badges">
-    <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
     <img src="https://img.shields.io/github/package-json/v/XCQ0607/lxserver?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/node-%3E%3D20-green?style=flat-square" alt="Node Version">
+    <img src="https://img.shields.io/badge/node-%3E%3D22-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <a href="https://github.com/XCQ0607/lxserver/stargazers"><img src="https://img.shields.io/github/stars/XCQ0607/lxserver?style=flat-square&color=ffe16b" alt="GitHub stars"></a>
     <a href="https://github.com/XCQ0607/lxserver/commits/main"><img src="https://img.shields.io/github/last-commit/XCQ0607/lxserver?style=flat-square&color=blueviolet" alt="Last Commit"></a>
   </div>
 </div>
+
+## 按需求查阅
+
+- [部署与各种启动方式](./guide/getting-started.md)
+- [账号、客户端与管理后台](./guide/sync-server.md)
+- [播放器、本地音乐、自动匹配与投屏](./guide/web-player.md)
+- [配置文件与环境变量](./guide/configuration.md)
+- [升级、备份恢复与排障](./guide/operations.md)
+- [API 参考](./api/reference.md)与[路由索引](./api/routes.md)

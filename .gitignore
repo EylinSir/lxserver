@@ -94,3 +94,5 @@ dist-electron/
 /.playwright-cli/
 
 /output/playwright/
+
+/docs/.vitepress

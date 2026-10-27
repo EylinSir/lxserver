@@ -54,11 +54,19 @@ features:
 <div class="status-badge-container">
   <div class="status-badge-title">Open Source Ecosystem & Live Status</div>
   <div class="status-badges">
-    <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
     <img src="https://img.shields.io/github/package-json/v/XCQ0607/lxserver?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/node-%3E%3D20-green?style=flat-square" alt="Node Version">
+    <img src="https://img.shields.io/badge/node-%3E%3D22-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <a href="https://github.com/XCQ0607/lxserver/stargazers"><img src="https://img.shields.io/github/stars/XCQ0607/lxserver?style=flat-square&color=ffe16b" alt="GitHub stars"></a>
     <a href="https://github.com/XCQ0607/lxserver/commits/main"><img src="https://img.shields.io/github/last-commit/XCQ0607/lxserver?style=flat-square&color=blueviolet" alt="Last Commit"></a>
   </div>
 </div>
+
+## Explore the documentation
+
+- [Deployment and startup modes](./guide/getting-started.md)
+- [Accounts, clients and console](./guide/sync-server.md)
+- [Player, local music, matching and casting](./guide/web-player.md)
+- [Configuration and environment variables](./guide/configuration.md)
+- [Updates, backups and troubleshooting](./guide/operations.md)
+- [API reference](./api/reference.md) and [route index](./api/routes.md)
