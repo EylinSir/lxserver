@@ -104,10 +104,10 @@ const LEADERBOARD_COVER_TTL = 30 * 60 * 1000
 // 共享歌单(各音源歌单)封面缓存：getList 返回的歌单项含 img，列表阶段直接记录，getCoverArt 命中即用
 const sharedPlaylistCoverCache = new Map<string, string>()
 
-// 歌单歌曲数缓存：列表接口直接读取（即时返回，避免逐歌单拉全量列表导致响应过长）；
-// 真实条数由详情接口 / 后台刷新填充，TTL 内有效。
-const playlistSongCountCache = new Map<string, { count: number; ts: number }>()
-const PLAYLIST_SONGCOUNT_TTL = 10 * 60 * 1000
+// 缓存完整原始歌单；用户过滤在读取后执行，避免跨用户污染。
+const playlistDetailCache = new Map<string, { data: any; ts: number }>()
+const playlistDetailInflight = new Map<string, Promise<any>>()
+const PLAYLIST_DETAIL_TTL = 10 * 60 * 1000
 
 /** 给 Promise 加超时（超时即 reject 并清理定时器），避免单个音源挂住整个搜索请求 */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -2057,7 +2057,7 @@ class SubsonicHandler {
             const mode = global.lx.config['subsonic.sharedListMode'] || 'leaderboard'
             if (mode === 'leaderboard' || mode === 'both') {
                 try {
-                    const lbPlaylists = await this.getLeaderboardPlaylists()
+                    const lbPlaylists = await this.getLeaderboardPlaylists(username)
                     playlists.push(...lbPlaylists)
                 } catch (err) {
                     subsonicLog.error('[Subsonic] 添加排行榜歌单失败:', err)
@@ -2065,7 +2065,7 @@ class SubsonicHandler {
             }
             if (mode === 'playlist' || mode === 'both') {
                 try {
-                    const plPlaylists = await this.getSharedPlaylists()
+                    const plPlaylists = await this.getSharedPlaylists(username)
                     playlists.push(...plPlaylists)
                 } catch (err) {
                     subsonicLog.error('[Subsonic] 添加共享歌单失败:', err)
@@ -2290,7 +2290,55 @@ class SubsonicHandler {
         return global.lx.config['subsonic.leaderboardSource'] || 'tx'
     }
 
-    private async getLeaderboardPlaylists(): Promise<any[]> {
+    // 无完整缓存时使用 SDK 列表总数；上游未提供时暂为 0，打开详情后补齐。
+    private async getPlaylistSongCount(id: string, source: string, username: string, total?: unknown): Promise<number> {
+        const cached = playlistDetailCache.get(id)
+        if (cached && Date.now() - cached.ts < PLAYLIST_DETAIL_TTL) {
+            const musics = cached.data.list.map((song: any) => this.normalizeLeaderboardSong({ ...song, meta: { ...song.meta } }, source))
+            return global.lx.config['subsonic.hideDisliked']
+                ? (await this.filterDislikedSongs(username, musics)).length : musics.length
+        }
+        const count = typeof total === 'number' || typeof total === 'string' ? Number(total) : NaN
+        return Number.isSafeInteger(count) && count >= 0 ? count : 0
+    }
+
+    /** 按需读取全部分页，并发详情共享请求；列表不再逐歌单发起后台查询。 */
+    private async loadCompletePlaylist(id: string, fetchPage: (page: number) => Promise<any>): Promise<any> {
+        const cached = playlistDetailCache.get(id)
+        if (cached && Date.now() - cached.ts < PLAYLIST_DETAIL_TTL) return cached.data
+        const existing = playlistDetailInflight.get(id)
+        if (existing) return existing
+        const task = (async () => {
+            const first = await fetchPage(1)
+            if (!Array.isArray(first?.list)) throw new Error('Invalid playlist response')
+            const list = [...first.list]
+            const total = Number(first.total)
+            const limit = Number(first.limit)
+            const pageCount = Number.isFinite(total) && Number.isFinite(limit) && limit > 0 ? Math.ceil(total / limit) : 1
+            if (pageCount > 1000) throw new Error('Playlist pagination exceeds limit')
+            const signatureOf = (songs: any[]) => JSON.stringify(songs.map((song) => song.songmid ?? song.songId ?? song.id))
+            const signatures = new Set([signatureOf(first.list)])
+            for (let page = 2; page <= pageCount && list.length < total; page++) {
+                const data = await fetchPage(page)
+                if (!Array.isArray(data?.list) || !data.list.length) throw new Error('Incomplete playlist page')
+                const signature = signatureOf(data.list)
+                if (signatures.has(signature)) throw new Error('Playlist source repeated a page')
+                signatures.add(signature)
+                list.push(...data.list)
+            }
+            const data = { ...first, list }
+            for (const [key, value] of playlistDetailCache) {
+                if (Date.now() - value.ts >= PLAYLIST_DETAIL_TTL) playlistDetailCache.delete(key)
+            }
+            while (playlistDetailCache.size >= 50) playlistDetailCache.delete(playlistDetailCache.keys().next().value!)
+            playlistDetailCache.set(id, { data, ts: Date.now() })
+            return data
+        })()
+        playlistDetailInflight.set(id, task)
+        try { return await task } finally { playlistDetailInflight.delete(id) }
+    }
+
+    private async getLeaderboardPlaylists(username: string): Promise<any[]> {
         const source = this.getLeaderboardSource()
         // 系统级 owner：不属于任何具体用户，使其在音流「我的歌单」(owner==我) 过滤中被排除，
         // 但保留在「全部歌单」中；public:true 确保跨用户可见。
@@ -2300,24 +2348,10 @@ class SubsonicHandler {
             if (!lb || typeof lb.getBoards !== 'function') return []
             const result = await lb.getBoards()
             const list = Array.isArray(result?.list) ? result.list : []
-            // [修复] 列表 songCount 需等于真实条目数（此前恒为 0，导致客户端计数/变更检测失配）。
-            // 采用缓存：列表直接读缓存即时返回（避免逐榜单拉全量列表导致响应过长）；
-            // 真实条数由详情接口 / 后台刷新填充，TTL 内有效。
-            return list.map((board: any) => {
+            return await Promise.all(list.map(async (board: any) => {
                 const bangid = String(board.bangid)
                 const id = `lb_${source}_${bangid}`
-                const cached = playlistSongCountCache.get(id)
-                const fresh = !!cached && (Date.now() - cached.ts) < PLAYLIST_SONGCOUNT_TTL
-                const songCount = fresh ? cached!.count : 0
-                // 缓存缺失或过期：后台补拉真实条数，不阻塞当前响应，下一次列表即生效
-                if (!fresh) {
-                    void (async () => {
-                        try {
-                            const data: any = await lb.getList(bangid, 1)
-                            playlistSongCountCache.set(id, { count: data?.total ?? (data?.list || []).length, ts: Date.now() })
-                        } catch { /* 失败不阻断 */ }
-                    })()
-                }
+                const songCount = await this.getPlaylistSongCount(id, source, username, board.total)
                 return {
                     id,
                     name: `榜单·${board.name}`,
@@ -2332,7 +2366,7 @@ class SubsonicHandler {
                     // 由 getCoverArt 按需拉取该榜单首歌封面并代理返回；不再统一用 'logo'（SVG 部分客户端不渲染）
                     coverArt: id,
                 }
-            })
+            }))
         } catch (err) {
             subsonicLog.error('[Subsonic] getLeaderboardPlaylists error:', err)
             return []
@@ -2388,9 +2422,9 @@ class SubsonicHandler {
             const board = boards.find((b: any) => String(b.bangid) === bangid)
             const listName = board ? `榜单·${board.name}` : '排行榜'
 
-            const data = await lb.getList(bangid, 1)
+            const data = await this.loadCompletePlaylist(id, (page) => lb.getList(bangid, page))
             let musics: LX.Music.MusicInfo[] = (data?.list || []).map((s: any) => {
-                const m = this.normalizeLeaderboardSong(s, source)
+                const m = this.normalizeLeaderboardSong({ ...s, meta: { ...s.meta } }, source)
                 this.cacheOnlineSong(m)
                 return m
             })
@@ -2401,10 +2435,6 @@ class SubsonicHandler {
             }
 
             const coverArt = (musics[0] as any)?.img || 'logo'
-            // 详情已算出真实条数，写入缓存供列表接口直接读取（即时返回）。
-            // 缓存始终保存「未过滤的上游总数」(data.total)，避免 hideDisliked 按用户过滤后的计数写入共享缓存；
-            // 详情响应本身仍返回该用户可见的 musics.length。
-            playlistSongCountCache.set(id, { count: (data as any)?.total ?? musics.length, ts: Date.now() })
 
             const playlistMeta = {
                 id,
@@ -2452,7 +2482,7 @@ class SubsonicHandler {
     }
 
     /** 将指定平台的热门/最新歌单暴露为 Subsonic 只读虚拟播放列表（共享歌单「歌单」模式）。 */
-    private async getSharedPlaylists(): Promise<any[]> {
+    private async getSharedPlaylists(username: string): Promise<any[]> {
         const source = this.getLeaderboardSource() // 复用共享歌单平台选择
         const sort = global.lx.config['subsonic.sharedListSort'] === 'new' ? 'new' : 'hot'
         const owner = 'lxserver'
@@ -2461,9 +2491,7 @@ class SubsonicHandler {
             if (!sl || typeof sl.getList !== 'function') return []
             const res: any = await sl.getList(sort, '', 1)
             const list: any[] = res?.list || []
-            // [修复] 列表 songCount 需等于真实条目数（此前恒为 0）。采用缓存：列表直接读缓存即时返回，
-            // 真实条数由详情接口 / 后台刷新填充，TTL 内有效，避免逐歌单全量拉取导致响应过长。
-            return list.map((item: any) => {
+            return await Promise.all(list.map(async (item: any) => {
                 const plId = String(item.id ?? item.dissid ?? item.tid ?? item.listId)
                 const id = `pl_${source}_${plId}`
                 const img = typeof item.img === 'string' && item.img
@@ -2471,18 +2499,7 @@ class SubsonicHandler {
                     : 'logo'
                 // 记录封面，便于客户端以 pl_ id 请求 getCoverArt 时直接命中
                 sharedPlaylistCoverCache.set(id, img)
-                const cached = playlistSongCountCache.get(id)
-                const fresh = !!cached && (Date.now() - cached.ts) < PLAYLIST_SONGCOUNT_TTL
-                const songCount = fresh ? cached!.count : 0
-                // 缓存缺失或过期：后台补拉真实条数，不阻塞当前响应，下一次列表即生效
-                if (!fresh) {
-                    void (async () => {
-                        try {
-                            const detail: any = await sl.getListDetail(plId, 1)
-                            playlistSongCountCache.set(id, { count: detail?.total ?? (detail?.list || []).length, ts: Date.now() })
-                        } catch { /* 失败不阻断 */ }
-                    })()
-                }
+                const songCount = await this.getPlaylistSongCount(id, source, username, item.total)
                 return {
                     id,
                     name: `歌单·${item.name || item.dissname || '未知歌单'}`,
@@ -2495,7 +2512,7 @@ class SubsonicHandler {
                     changed: new Date().toISOString(),
                     coverArt: img,
                 }
-            })
+            }))
         } catch (err) {
             subsonicLog.error('[Subsonic] getSharedPlaylists error:', err)
             return []
@@ -2509,10 +2526,10 @@ class SubsonicHandler {
         try {
             const sl = (musicSdk as any)[source]?.songList
             if (!sl || typeof sl.getListDetail !== 'function') return this.sendError(res, 70, 'Playlist source not found', format)
-            const detail: any = await sl.getListDetail(plId, 1)
+            const detail: any = await this.loadCompletePlaylist(id, (page) => source === 'tx' ? sl.getListDetail(plId) : sl.getListDetail(plId, page))
             const list: any[] = detail?.list || []
             let musics: LX.Music.MusicInfo[] = list.map((s: any) => {
-                const m = this.normalizeLeaderboardSong(s, source)
+                const m = this.normalizeLeaderboardSong({ ...s, meta: { ...s.meta } }, source)
                 this.cacheOnlineSong(m)
                 return m
             })
@@ -2520,10 +2537,6 @@ class SubsonicHandler {
                 musics = await this.filterDislikedSongs(username, musics)
             }
             const coverArt = (musics[0] as any)?.img || detail?.info?.img || 'logo'
-            // 详情已算出真实条数，写入缓存供列表接口直接读取（即时返回）。
-            // 缓存始终保存「未过滤的上游总数」(detail.total)，避免 hideDisliked 按用户过滤后的计数写入共享缓存；
-            // 详情响应本身仍返回该用户可见的 musics.length。
-            playlistSongCountCache.set(id, { count: (detail as any)?.total ?? musics.length, ts: Date.now() })
             const playlistMeta = {
                 id,
                 // SDK 的歌单名在 info.name（旧接口在顶层 name），都要兼容
@@ -5828,7 +5841,7 @@ class SubsonicHandler {
                     if (fallbackResult && Date.now() >= resolveDeadline) {
                         break sourceLoop
                     }
-                    // [修复] 退避重试：上游取链/探测偶发失败（限流/401/404）时重试一次，缓解取链成功率抖动
+                    // 仅对明确失效的播放链接重新取链一次；取链异常由底层重试，探测超时保留回退。
                     let attempt = 0
                     const maxAttempts = 2
                     resolveCandidate:
@@ -5877,13 +5890,7 @@ class SubsonicHandler {
                                 }
                             }
                         } catch (err: any) {
-                            // 取链异常：仅在仍有预算且非「全部音源已耗尽」时退避重试一次，
-                            // 否则（err.allSourcesExhausted 时下游所有源都已死，重试只会增加 ~200ms 等待与一次无效调用）直接放弃该候选
-                            const exhausted = !!(err && (err.allSourcesExhausted || (err.message && /allSourcesExhausted/i.test(err.message))))
-                            if (attempt < maxAttempts && Date.now() + 200 < resolveDeadline && !exhausted) {
-                                await new Promise((res) => setTimeout(res, 200))
-                                continue resolveCandidate
-                            }
+                            // 底层已执行单源重试/多源轮询，异常不再重复整轮调用。
                             // 收集本次失败过的自定义源，避免后续音质/平台重复试死源
                             const atts = err?.attempts
                             if (Array.isArray(atts)) {
